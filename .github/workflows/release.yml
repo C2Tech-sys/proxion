@@ -16,6 +16,7 @@ jobs:
   image:
     name: Build and push container image
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write

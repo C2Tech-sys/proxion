@@ -8,7 +8,13 @@
 
 ARG NODE_VERSION=24-alpine
 
-FROM node:${NODE_VERSION} AS base
+# `--platform=$BUILDPLATFORM`: the dependency install and the TypeScript/Vite build run on
+# the builder's own architecture even when the target is another one (a multi-arch release
+# builds linux/amd64 and linux/arm64). Everything they produce is architecture-independent --
+# the server's production dependency tree contains no native modules -- and only the small
+# `runtime` stage below is assembled per target platform. Without this, the whole Node build
+# ran under QEMU emulation for arm64 and took hours.
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION} AS base
 # Pin pnpm to the version in package.json's "packageManager" field via corepack,
 # so the image always builds with the exact pnpm the workspace was authored against.
 RUN corepack enable
