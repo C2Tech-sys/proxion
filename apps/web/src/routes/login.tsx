@@ -53,6 +53,9 @@ function LoginPage() {
     <main className="flex min-h-svh items-center justify-center bg-background p-4">
       <form
         onSubmit={onSubmit}
+        method="post"
+        action="/login"
+        aria-label="Sign in"
         className="flex w-full max-w-sm flex-col gap-4 rounded-lg border border-border bg-card p-6"
       >
         <div>
@@ -69,7 +72,11 @@ function LoginPage() {
           </label>
           <Input
             id="username"
+            name="username"
+            type="text"
             autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="root@pam"
@@ -82,6 +89,7 @@ function LoginPage() {
           </label>
           <Input
             id="password"
+            name="password"
             type="password"
             autoComplete="current-password"
             value={password}
