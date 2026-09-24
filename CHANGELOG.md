@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A public, install-free GitHub Pages demo (https://c2tech-sys.github.io/proxion/): a new
+  `.github/workflows/pages.yml` builds the web app in fixture mode under a `/proxion/` base path
+  and deploys it on every push to `main`. The base path is now configurable end-to-end
+  (`VITE_BASE_PATH`, the router's `basepath`, `index.html`'s icon/manifest links, and the
+  console/shell pop-out hrefs), and a slim, dismissible "Demo -- sample data, nothing here is
+  real" banner shows under the top bar whenever the app is running against fixtures (never
+  against a real server). A short animated tour GIF (`docs/media/proxion-tour.gif`) now sits at
+  the top of the README, above a new "Try it in your browser" line.
+
 - A "Buy me a coffee" link in the user menu and a Support section in the README.
 
 - Re-arrange Summary tab panels: an "Arrange" toggle above the VM/CT Summary grid enters arrange

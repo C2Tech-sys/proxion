@@ -11,6 +11,11 @@ const pkg = JSON.parse(
 ) as { version: string };
 
 export default defineConfig({
+  // Serving base path. '/' for the normal app (local dev, the Docker image); the GitHub Pages
+  // demo workflow (.github/workflows/pages.yml) sets this to '/proxion/' at build time, since
+  // a project Pages site is served from a subpath, not the domain root. Consumed at runtime via
+  // `import.meta.env.BASE_URL` (see main.tsx's router `basepath` and the pop-out href helpers).
+  base: process.env.VITE_BASE_PATH || '/',
   // Keep Vite's dependency pre-bundle out of the (Dropbox-synced) repo tree: file locks there
   // have produced EBUSY on re-optimisation and '504 Outdated Optimize Dep' in the dev server.
   cacheDir: path.join(os.tmpdir(), 'proxion-vite-cache'),

@@ -57,6 +57,30 @@ CI runs `pnpm build`, `pnpm typecheck`, `pnpm exec eslint . --max-warnings 0`,
 `pnpm test`, and a Docker image build on every push and pull request -- run
 the same commands locally before opening a PR.
 
+## GitHub Pages demo
+
+`.github/workflows/pages.yml` builds `@proxion/web` in fixture mode
+(`VITE_USE_FIXTURES=1`, no backend) with `VITE_BASE_PATH` set to the repo's
+Pages base path and deploys it to https://c2tech-sys.github.io/proxion/ on
+every push to `main` (also runnable manually via `workflow_dispatch`). The
+built `index.html` is copied to `404.html` so GitHub Pages' static
+404 fallback hands deep links (e.g. `/proxion/vm/pve1/qemu/100`) back to the
+SPA, which then resolves the route client-side via the router's
+`basepath`.
+
+To reproduce the demo build locally:
+
+```bash
+VITE_BASE_PATH=/proxion/ VITE_USE_FIXTURES=1 pnpm --filter @proxion/web build
+pnpm --filter @proxion/web exec vite preview --base /proxion/
+```
+
+Icon/manifest links in `apps/web/index.html` use Vite's `%BASE_URL%`
+placeholder rather than a hard-coded leading slash so they resolve under
+that base too; `apps/web/public/site.webmanifest`'s own icon paths are
+plain relative paths for the same reason (a web app manifest resolves them
+against its own URL, so this works unchanged at the domain root too).
+
 ## Branch / PR flow
 
 1. Fork the repo (or branch directly if you have write access) and create a

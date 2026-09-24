@@ -189,4 +189,21 @@ describe('Terminal', () => {
     expect(await screen.findByText('Disconnected')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
   });
+
+  it('pop-out href is prefixed with BASE_URL for a node shell (no type/vmid)', async () => {
+    const { container } = render(<Terminal node="pve1" />);
+    await flush();
+    const popoutLink = container.querySelector('a[href*="shell/"]');
+    expect(popoutLink).toHaveAttribute('href', `${import.meta.env.BASE_URL}shell/pve1`);
+  });
+
+  it('pop-out href is prefixed with BASE_URL for a guest console (type + vmid set)', async () => {
+    const { container } = render(<Terminal node="pve1" type="lxc" vmid={200} />);
+    await flush();
+    const popoutLink = container.querySelector('a[href*="console/"]');
+    expect(popoutLink).toHaveAttribute(
+      'href',
+      `${import.meta.env.BASE_URL}console/pve1/lxc/200`,
+    );
+  });
 });

@@ -7,7 +7,10 @@ import { createQueryClient } from '@/api/queryClient';
 import { routeTree } from './routeTree.gen';
 import './index.css';
 
-const router = createRouter({ routeTree });
+// `basepath` mirrors vite.config.ts's `base` (import.meta.env.BASE_URL, e.g. '/' locally, or
+// '/proxion/' for the GitHub Pages demo build) so in-app navigation, history and the initial
+// route match all agree with where the app is actually served from.
+const router = createRouter({ routeTree, basepath: import.meta.env.BASE_URL });
 
 declare module '@tanstack/react-router' {
   interface Register {
