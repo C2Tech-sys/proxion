@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-24
+
+Launch polish: a public demo, a password-manager-friendly login form, and
+the fixes found in the first day of real use.
+
 ### Added
 
 - A public, install-free GitHub Pages demo (https://c2tech-sys.github.io/proxion/): a new
@@ -158,5 +163,6 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/C2Tech-sys/proxion/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/C2Tech-sys/proxion/releases/tag/v0.1.0

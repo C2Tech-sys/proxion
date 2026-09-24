@@ -317,22 +317,28 @@ describe('ConsoleThumbnailService: agent capture strategy', () => {
       res.end(agentPng());
     });
     const vncCapture = vi.fn<CaptureFn>().mockResolvedValue(frame());
-    // The window must comfortably exceed one fake-agent round trip (HTTP + PNG decode), or
-    // the "throttled" call can land outside it and go live.
-    const service = makeService(vncCapture, { throttleMs: 60_000, agentThrottleMs: 500 }, {
+    const service = makeService(vncCapture, { throttleMs: 60_000, agentThrottleMs: 5_000 }, {
       agents: new Map([['node1', fakeAgent.baseUrl]]),
       PROXION_AGENT_TOKEN: AGENT_TOKEN,
       PROXION_AGENT_TIMEOUT_MS: 2000,
     });
 
-    expect(await service.get(ctx(1, { type: 'qemu', refresh: true }))).toMatchObject({ source: 'live' });
-    expect(await service.get(ctx(1, { type: 'qemu', refresh: true }))).toMatchObject({ source: 'cache' });
-    expect(agentCalls).toBe(1);
+    // Freeze the clock (Date only -- real timers, so the fake agent's HTTP still works): the
+    // second call is then inside the window no matter how loaded the machine is, and the
+    // third is past it by decree rather than by sleeping.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
+    try {
+      expect(await service.get(ctx(1, { type: 'qemu', refresh: true }))).toMatchObject({ source: 'live' });
+      expect(await service.get(ctx(1, { type: 'qemu', refresh: true }))).toMatchObject({ source: 'cache' });
+      expect(agentCalls).toBe(1);
 
-    await new Promise((r) => setTimeout(r, 600));
-    expect(await service.get(ctx(1, { type: 'qemu', refresh: true }))).toMatchObject({ source: 'live' });
-    expect(agentCalls).toBe(2);
-    expect(vncCapture).not.toHaveBeenCalled();
+      vi.setSystemTime(Date.now() + 6_000);
+      expect(await service.get(ctx(1, { type: 'qemu', refresh: true }))).toMatchObject({ source: 'live' });
+      expect(agentCalls).toBe(2);
+      expect(vncCapture).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('always uses VNC for lxc, even when an agent is configured for the node', async () => {
