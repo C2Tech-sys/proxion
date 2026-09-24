@@ -8,10 +8,13 @@
 # though Let's Encrypt can still complete the DNS-01 challenge.
 services:
   proxion:
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-    image: proxion:local
+    # The published image, pinned to a version (set PROXION_IMAGE in .env; bump the tag to
+    # upgrade, then `./deploy.sh update`). To build from this checkout instead, comment
+    # `image` out, uncomment `build`, and use `./deploy.sh build`.
+    image: ${PROXION_IMAGE:-ghcr.io/c2tech-sys/proxion:0.1.0}
+    # build:
+    #   context: ../..
+    #   dockerfile: Dockerfile
     # Bound to loopback only -- reached exclusively through the caddy
     # service on the shared compose network, never published externally.
     ports:

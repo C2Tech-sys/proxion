@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # Runs ON the target host, from this directory (deploy/caddy-azure-dns/).
 #
-# Usage: ./deploy.sh <up|logs|down|status|update>
+# Usage: ./deploy.sh <up|logs|down|status|update|build>
 #
-#   up      Build both images, start the stack, wait for proxion to report
-#           healthy, print the site URL.
+#   up      Pull the proxion image, build the Caddy image, start the stack,
+#           wait for proxion to report healthy, print the site URL.
 #   logs    Follow logs for both services.
 #   down    Stop and remove the stack (named volumes -- cert data -- kept).
 #   status  Show container/service status.
-#   update  Rebuild the proxion image from the current tree and recreate
+#   update  Pull the proxion image named by PROXION_IMAGE (.env) and recreate
 #           just that service (Caddy is left running, no cert re-issuance).
+#           To upgrade, bump the tag in .env, then run this.
+#   build   For a checkout-built proxion instead of the published image
+#           (uncomment `build:` in docker-compose.yml first): build it from
+#           the current tree and recreate the service.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -68,6 +72,7 @@ wait_for_health() {
 
 cmd_up() {
   check_env_files
+  compose pull --ignore-buildable
   compose build
   compose up -d
   wait_for_health proxion
@@ -89,10 +94,18 @@ cmd_status() {
 
 cmd_update() {
   check_env_files
+  compose pull proxion
+  compose up -d --no-deps proxion
+  wait_for_health proxion
+  echo "proxion updated and recreated ($(compose images proxion --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | tail -n 1))."
+}
+
+cmd_build() {
+  check_env_files
   compose build proxion
   compose up -d --no-deps proxion
   wait_for_health proxion
-  echo "proxion updated and recreated."
+  echo "proxion built from the current tree and recreated."
 }
 
 case "${1:-}" in
@@ -101,8 +114,9 @@ case "${1:-}" in
   down) cmd_down ;;
   status) cmd_status ;;
   update) cmd_update ;;
+  build) cmd_build ;;
   *)
-    echo "Usage: $0 <up|logs|down|status|update>" >&2
+    echo "Usage: $0 <up|logs|down|status|update|build>" >&2
     exit 1
     ;;
 esac

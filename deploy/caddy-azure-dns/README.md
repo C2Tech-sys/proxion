@@ -141,11 +141,9 @@ doubt, that's the source of truth. Generate `SESSION_SECRET` with
 ./deploy.sh up
 ```
 
-This builds the `proxion` image from the repo's root `Dockerfile` and the
-custom `caddy` image (via `xcaddy`, with the Azure DNS module), starts both
-containers, waits for `proxion`'s healthcheck, and prints the site URL.
-First start takes longer than usual while Caddy performs the DNS-01
-challenge and obtains the certificate; watch progress with `./deploy.sh
+This pulls the published `proxion` image named by `PROXION_IMAGE` in `.env`
+(`ghcr.io/c2tech-sys/proxion:<version>`), builds the Caddy image with the
+Azure DNS plugin, and starts both. Caddy then runs the DNS-01 challenge and obtains the certificate; watch progress with `./deploy.sh
 logs`.
 
 Other commands:
@@ -154,7 +152,8 @@ Other commands:
 ./deploy.sh status   # container/service status
 ./deploy.sh logs     # follow both services' logs
 ./deploy.sh down     # stop and remove containers (cert data volume kept)
-./deploy.sh update   # rebuild proxion from the current tree and recreate it
+./deploy.sh update   # pull the PROXION_IMAGE tag from .env and recreate proxion
+./deploy.sh build    # (checkout-built variant) rebuild proxion from the tree instead
 ```
 
 To change one variable in `proxion.env` without typing a secret into a nested

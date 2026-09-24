@@ -25,6 +25,15 @@ No Proxmox host handy? Run the web app against static fixtures instead:
 VITE_USE_FIXTURES=1 pnpm --filter @proxion/web dev
 ```
 
+### Working from a Dropbox-synced folder
+
+If your checkout lives inside a Dropbox-synced folder, each workspace's
+`node_modules` is large, churns constantly, and should never be synced.
+After `pnpm install`, run `scripts/dropbox-ignore.ps1` (PowerShell) to mark
+every `node_modules` directory as Dropbox-ignored (via the
+`com.dropbox.ignored` alternate data stream), and re-run it whenever a new
+`node_modules` appears. A normal clone outside Dropbox needs none of this.
+
 ### Workspace layout
 
 - `apps/web` -- `@proxion/web`, the React UI (Vite, Tailwind v4, shadcn/ui, TanStack Router/Query).

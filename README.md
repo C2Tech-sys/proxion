@@ -151,18 +151,18 @@ its README for the install and security details.
 ```mermaid
 flowchart LR
     subgraph Browser
-        UI[Proxion web app<br/>React + Vite]
+        UI["Proxion web app<br/>React + Vite"]
     end
 
-    subgraph Server[Proxion server (Fastify)]
-        API[REST /api/*<br/>+ SSE /api/events]
-        WS[Websocket bridges<br/>/ws/vnc/*, /ws/term/*]
-        Poller[Cluster poller]
+    subgraph Server["Proxion server (Fastify)"]
+        API["REST /api/*<br/>+ SSE /api/events"]
+        WS["Websocket bridges<br/>/ws/vnc/*, /ws/term/*"]
+        Poller["Cluster poller"]
     end
 
-    subgraph PVE[Proxmox VE cluster]
-        PVEAPI[PVE REST API<br/>/api2/json]
-        PVEWS[PVE console websockets<br/>vncwebsocket]
+    subgraph PVE["Proxmox VE cluster"]
+        PVEAPI["PVE REST API<br/>/api2/json"]
+        PVEWS["PVE console websockets<br/>vncwebsocket"]
     end
 
     UI -- "JSON over HTTPS" --> API
@@ -276,13 +276,3 @@ Open Sans).
 
 Proxion is an independent, unofficial project and is not affiliated with
 or endorsed by Proxmox Server Solutions GmbH.
-
-## Dropbox note (internal dev environment)
-
-This repository, in this development environment, lives inside a
-Dropbox-synced folder. Each workspace's `node_modules` is large, churns
-constantly, and should never be synced by Dropbox. After `pnpm install`,
-run `scripts/dropbox-ignore.ps1` (PowerShell) to mark every `node_modules`
-directory as Dropbox-ignored (via the `com.dropbox.ignored` alternate data
-stream). Re-run it any time a new `node_modules` directory appears. This
-has no bearing on a normal clone outside Dropbox.
