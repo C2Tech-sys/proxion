@@ -33,7 +33,9 @@ export function VncConsole({ node, type, vmid, fill }: VncConsoleProps) {
   const [scaled, setScaled] = useState(true);
   const [attempt, setAttempt] = useState(0);
 
-  const popoutHref = `/console/${node}/${type}/${vmid}`;
+  // Prefixed with `import.meta.env.BASE_URL` so the pop-out window still resolves under the
+  // GitHub Pages demo's `/proxion/` base -- see vite.config.ts's `base`.
+  const popoutHref = `${import.meta.env.BASE_URL}console/${node}/${type}/${vmid}`;
   const heightClass = fill ? 'h-full' : CONSOLE_SURFACE_HEIGHT_CLASS;
 
   useEffect(() => {

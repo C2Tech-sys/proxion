@@ -24,9 +24,11 @@ export const THUMBNAIL_REFRESH_INTERVAL_MS = 60_000;
 export const THUMBNAIL_BUSY_RETRY_MS = 4_000;
 export const THUMBNAIL_BUSY_MAX_RETRIES = 8;
 
-/** The console pop-out route (also used by the Console tab's toolbar). */
+/** The console pop-out route (also used by the Console tab's toolbar). Prefixed with
+ *  `import.meta.env.BASE_URL` (always `/`-terminated) so the pop-out window's URL still
+ *  resolves under the GitHub Pages demo's `/proxion/` base -- see vite.config.ts's `base`. */
 export function consolePopoutHref(node: string, type: GuestType, vmid: number): string {
-  return `/console/${encodeURIComponent(node)}/${type}/${vmid}`;
+  return `${import.meta.env.BASE_URL}console/${encodeURIComponent(node)}/${type}/${vmid}`;
 }
 
 /** One pop-out window per guest: reusing the name focuses the window already open. */

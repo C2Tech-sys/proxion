@@ -133,4 +133,16 @@ describe('VncConsole', () => {
     unmount();
     expect(instance.disconnect).toHaveBeenCalledTimes(1);
   });
+
+  it('pop-out href is prefixed with BASE_URL, not a hard-coded leading slash', async () => {
+    const { container } = render(<VncConsole node="pve1" type="qemu" vmid={100} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const popoutLink = container.querySelector('a[href*="console/"]');
+    expect(popoutLink).toHaveAttribute(
+      'href',
+      `${import.meta.env.BASE_URL}console/pve1/qemu/100`,
+    );
+  });
 });

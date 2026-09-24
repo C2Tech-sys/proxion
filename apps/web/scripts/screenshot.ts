@@ -450,6 +450,17 @@ async function captureCases(
       viewport: { width: 1440, height: 900 },
       colorScheme: shot.theme,
     });
+    // These are README/docs screenshots of the real product, not the GitHub Pages demo -- the
+    // fixture-mode-only <DemoBanner/> would otherwise show up under the top bar here (fixture
+    // mode is exactly how this script builds the app). Pre-dismiss it the same way a returning
+    // visitor's browser would, before any page script runs.
+    await context.addInitScript(() => {
+      try {
+        localStorage.setItem('proxion.demoBanner.dismissed', '1');
+      } catch {
+        // ignore (shouldn't happen in a fresh Playwright context, but never fail the shot over it)
+      }
+    });
     const page = await context.newPage();
 
     await shot.run(page, base);

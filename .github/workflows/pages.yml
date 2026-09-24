@@ -1,0 +1,73 @@
+name: Pages
+
+# Builds apps/web in fixture mode (no Proxmox server, no backend) and deploys it to GitHub Pages
+# as a public, install-free demo -- see README.md's "Live demo" line and CONTRIBUTING.md.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time; a newer push supersedes an in-flight older one instead of
+# queuing behind it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build fixture-mode demo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Build @proxion/web (fixture mode, GitHub Pages base path)
+        working-directory: apps/web
+        env:
+          VITE_USE_FIXTURES: '1'
+          VITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+        run: pnpm build
+
+      # GitHub Pages has no server-side rewrite: an unknown path (a deep link like
+      # /proxion/vm/pve1/qemu/100, or a browser refresh on any in-app route) 404s unless the
+      # host falls back to index.html. Pages *does* serve a static 404.html for any 404, so a
+      # copy of the built index.html there hands the request back to the SPA, which then lets
+      # TanStack Router's own basepath-aware history match the real route client-side.
+      - name: SPA fallback (404.html = index.html)
+        run: cp apps/web/dist/index.html apps/web/dist/404.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: apps/web/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

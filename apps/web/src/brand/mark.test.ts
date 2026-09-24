@@ -66,7 +66,11 @@ describe('shipped icon set', () => {
     );
     expect(hrefs.length).toBeGreaterThanOrEqual(4);
     for (const href of hrefs) {
-      expect(fs.existsSync(path.join(WEB_ROOT, 'public', href.replace(/^\//, '')))).toBe(true);
+      // Prefixed with Vite's %BASE_URL% placeholder (see vite.config.ts's `base`, for the
+      // GitHub Pages demo) rather than a hard-coded leading slash -- strip it the same way Vite
+      // does before resolving against public/.
+      const relative = href.replace(/^%BASE_URL%/, '').replace(/^\//, '');
+      expect(fs.existsSync(path.join(WEB_ROOT, 'public', relative))).toBe(true);
     }
   });
 

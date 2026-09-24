@@ -5,7 +5,11 @@
   </picture>
 </p>
 
+<p align="center"><img src="docs/media/proxion-tour.gif" alt="Proxion tour" width="900"></p>
+
 # Proxion
+
+**Try it in your browser:** https://c2tech-sys.github.io/proxion/ (sample data, no install)
 
 Proxion is a modern, open-source web console for Proxmox VE that overlays
 the stock UI: daily-driver views for the things you look at all day,

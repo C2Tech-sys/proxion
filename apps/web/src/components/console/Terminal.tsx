@@ -52,8 +52,12 @@ export function Terminal({ node, type, vmid, fill }: TerminalProps) {
   const [reason, setReason] = useState<string | undefined>(undefined);
   const [attempt, setAttempt] = useState(0);
 
+  // Prefixed with `import.meta.env.BASE_URL` so the pop-out window still resolves under the
+  // GitHub Pages demo's `/proxion/` base -- see vite.config.ts's `base`.
   const popoutHref =
-    type && vmid !== undefined ? `/console/${node}/${type}/${vmid}` : `/shell/${node}`;
+    type && vmid !== undefined
+      ? `${import.meta.env.BASE_URL}console/${node}/${type}/${vmid}`
+      : `${import.meta.env.BASE_URL}shell/${node}`;
   const showFixtureEmptyState = USE_FIXTURES && !MOCK_WS_URL;
   const heightClass = fill ? 'h-full' : CONSOLE_SURFACE_HEIGHT_CLASS;
 
