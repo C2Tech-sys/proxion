@@ -1,0 +1,24 @@
+{
+  "data": {
+    "mem": 0,
+    "agent": 1,
+    "vmid": 116,
+    "shares": 1000,
+    "maxmem": 8589934592,
+    "uptime": 0,
+    "ha": {
+      "managed": 0
+    },
+    "cpus": 2,
+    "balloon_min": 8589934592,
+    "memhost": 0,
+    "qmpstatus": "stopped",
+    "netout": 0,
+    "status": "stopped",
+    "maxdisk": 64424509440,
+    "name": "vm-116",
+    "cpu": 0,
+    "disk": 0,
+    "netin": 0
+  }
+}

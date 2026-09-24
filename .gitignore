@@ -1,0 +1,39 @@
+.foreman/
+# agent worktrees created by Claude Code live inside the repo
+.claude/worktrees/
+
+# dependencies
+node_modules/
+
+# build output
+dist/
+# scratch build dir for the mock-term screenshot stage (apps/web/scripts/screenshot.ts) --
+# cleaned up automatically, but the cleanup itself is a best-effort retry on this Dropbox
+# checkout (Dropbox can hold a handle into it briefly after the preview server closes)
+dist-screenshot/
+
+# env files
+.env
+.env.*.local
+deploy/caddy-azure-dns/*.env
+deploy/caddy-azure-dns/.env
+
+# test coverage
+coverage/
+
+# vite
+.vite/
+
+# tanstack router plugin cache
+.tanstack/
+
+# typescript build info
+*.tsbuildinfo
+
+# os
+.DS_Store
+apps/web/screenshots/
+
+# python (agent/ tests)
+__pycache__/
+*.pyc

@@ -1,0 +1,61 @@
+Proxion
+Copyright (c) 2026 C2 Technology Systems
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This NOTICE file is provided for informational purposes, per section 4(d)
+of the Apache License, Version 2.0, to credit third-party projects Proxion
+is built on or derived from.
+
+------------------------------------------------------------------------
+
+Proxmox VE
+  Proxion's API client (packages/pve-api) is generated from an API schema
+  extracted from Proxmox VE's own documentation (pve-docs / the PVE API
+  viewer). Proxion is an independent, unofficial project and is not
+  affiliated with or endorsed by Proxmox Server Solutions GmbH.
+  https://pve.proxmox.com/wiki/Proxmox_VE_API
+  https://github.com/proxmox/pve-docs
+
+noVNC
+  Proxion's embedded VM/CT console speaks the same RFB-over-websocket
+  protocol PVE's own noVNC-based console uses, and the browser-side
+  console component is built on noVNC.
+  License: Mozilla Public License 2.0 (MPL-2.0)
+  https://github.com/novnc/noVNC
+
+xterm.js
+  Proxion's embedded node/container terminal is built on xterm.js.
+  License: MIT
+  https://github.com/xtermjs/xterm.js
+
+uPlot
+  Proxion's resource graphs (CPU/memory/disk/network over time) are built
+  on uPlot.
+  License: MIT
+  https://github.com/leeoniya/uPlot
+
+pngjs
+  Proxion's server encodes console thumbnails (captured over VNC) as PNG
+  with pngjs.
+  License: MIT
+  https://github.com/pngjs/pngjs
+
+Josefin Sans, Open Sans
+  Proxion's display (titles/big figures/the wordmark) and UI/body typefaces
+  -- including identifiers (UPIDs, MACs, volume IDs, etc.), which render in
+  Open Sans rather than a shipped monospace face -- self-hosted via
+  @fontsource-variable/josefin-sans and @fontsource-variable/open-sans.
+  Monospace is used only for the terminal and the task-log line viewer, via
+  the end user's own installed system monospace font (no webfont shipped).
+  License: SIL Open Font License 1.1 (OFL-1.1)
+  https://fonts.google.com/specimen/Josefin+Sans
+  https://fonts.google.com/specimen/Open+Sans
+
+------------------------------------------------------------------------
+
+See each dependency's own package for its exact license text and version.
+A full list of direct and transitive runtime dependencies and their
+licenses can be regenerated at any time with:
+
+    pnpm licenses list --prod

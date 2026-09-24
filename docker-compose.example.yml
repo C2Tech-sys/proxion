@@ -1,0 +1,62 @@
+# Example compose file for Proxion. Copy to docker-compose.yml, fill in the
+# real values below (see docs/deploy.md for how to get them), and run
+# `docker compose up -d`.
+#
+# Proxion terminates no TLS itself -- put it behind a reverse proxy (nginx,
+# Caddy, Traefik, ...) for TLS and to reach it from outside the host.
+# Whatever proxy you use MUST forward websocket upgrades (the noVNC console
+# and xterm.js terminal both run over `/ws/*`) -- see docs/deploy.md for
+# ready-to-use nginx and Caddy snippets.
+services:
+  proxion:
+    image: ghcr.io/c2tech-sys/proxion:0.1.0
+    # Or build it yourself from this checkout instead of pulling the published image:
+    # build: .
+    ports:
+      - '3080:3080'
+    environment:
+      NODE_ENV: production
+      PORT: '3080'
+      HOST: 0.0.0.0
+
+      # Proxmox VE connection. No trailing slash, no /api2/json.
+      PVE_URL: https://pve.example.local:8006
+
+      # TLS to PVE: prefer pinning the certificate's fingerprint (PVE's
+      # default cert is self-signed) over disabling verification.
+      # `pveum` one-liner to get it is in docs/deploy.md.
+      PVE_TLS_FINGERPRINT: ''
+      # PVE_TLS_INSECURE: "true"   # last resort; skips all verification
+
+      # Optional read-only service token, used for the live poller/SSE feed
+      # and (if PROXION_ALLOW_TOKEN_MODE=true) as a fallback identity for
+      # unauthenticated requests. See docs/deploy.md for the recommended
+      # PVEAuditor-based role and exact `pveum` commands to create one.
+      PVE_TOKEN_ID: proxion@pve!svc
+      PVE_TOKEN_SECRET: changeme
+
+      # Required in production: signs the session cookie. Generate with
+      # e.g. `openssl rand -hex 32`.
+      SESSION_SECRET: changeme
+
+      # Off by default -- see docs/deploy.md before enabling.
+      PROXION_ALLOW_TOKEN_MODE: 'false'
+
+      # Whether the session cookie gets `Secure`. Defaults to true here
+      # (NODE_ENV=production); set to "false" only if Proxion itself is
+      # served over plain HTTP (e.g. no TLS-terminating reverse proxy).
+      # PROXION_COOKIE_SECURE: "false"
+    volumes:
+      # Per-user preferences (one JSON file per user) -- a named volume so they survive
+      # container recreates/upgrades. The image already creates /app/data owned by uid 1000.
+      - proxion_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:3080/api/health']
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  proxion_data:

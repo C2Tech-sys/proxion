@@ -1,0 +1,30 @@
+{
+  "name": "@proxion/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/C2Tech-sys/proxion.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/C2Tech-sys/proxion#readme",
+  "bugs": {
+    "url": "https://github.com/C2Tech-sys/proxion/issues"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.1"
+  }
+}

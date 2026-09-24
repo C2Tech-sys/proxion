@@ -1,0 +1,393 @@
+@import 'tailwindcss';
+
+/*
+ * Proxion's typography (T11: the mono webfont is gone): a thin geometric display face for
+ * titles/big figures/the wordmark, and a neutral humanist sans for everything else -- including
+ * identifiers (UPIDs, MACs, volume IDs, IPs, Hardware-tab config strings), which the owner
+ * wanted off a shipped monospace face entirely. Both self-hosted, OFL-licensed. See NOTICE for
+ * attribution. (Typography previously went through T9b -- the owner rejected that look outright
+ * -- and T10, which added a shipped monospace webfont for identifiers before T11 removed it
+ * again; see git history.)
+ *   - Display: Josefin Sans -- h1 page titles, big stat/gauge figures, the wordmark.
+ *   - Sans:    Open Sans    -- everything else: nav, labels, body copy, tables (numeric columns
+ *              included) and identifiers alike, with `font-numeric` (tabular-nums) where digits
+ *              need to line up in a column.
+ * Monospace (`--font-mono`, a SYSTEM stack -- no webfont) survives only where alignment is
+ * functional, not decorative: the xterm terminal and the task-log line viewer. See
+ * components/console/theme.ts and TaskLogSheet.tsx.
+ */
+@import '@fontsource-variable/josefin-sans';
+@import '@fontsource-variable/open-sans';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Proxion design tokens.
+ * Neutral scale: zinc (matches Tailwind's zinc, not pure gray -- slight cool undertone).
+ * Accent: one electric teal, used sparingly (focus, active nav, primary actions).
+ * Status colors are semantic and stable across themes: running=emerald, stopped=zinc,
+ * paused/suspended=amber, error/unknown=red, template=violet, migrating=sky.
+ */
+:root {
+  --radius: 0.5rem;
+
+  --zinc-50: oklch(0.985 0 0);
+  --zinc-100: oklch(0.967 0.001 286.375);
+  --zinc-200: oklch(0.92 0.004 286.32);
+  --zinc-300: oklch(0.871 0.006 286.286);
+  --zinc-400: oklch(0.705 0.015 286.067);
+  --zinc-500: oklch(0.552 0.016 285.938);
+  --zinc-600: oklch(0.442 0.017 285.786);
+  --zinc-700: oklch(0.37 0.013 285.805);
+  --zinc-800: oklch(0.274 0.006 286.033);
+  --zinc-900: oklch(0.21 0.006 285.885);
+  --zinc-950: oklch(0.141 0.005 285.823);
+
+  --accent-teal: oklch(0.72 0.13 195);
+  --accent-teal-foreground: oklch(0.16 0.03 195);
+
+  /*
+   * Status colors are darkened for light mode and brightened for dark mode so text/badges
+   * using them stay at or above WCAG AA contrast against the page/card background in both
+   * themes, while the hue mapping (running=emerald, stopped=zinc, paused=amber, error=red,
+   * template=violet, migrating=sky) stays stable. See the `.dark` block for the dark values.
+   */
+  --status-running: oklch(0.48 0.15 149);
+  --status-stopped: var(--zinc-600);
+  --status-paused: oklch(0.55 0.16 80);
+  --status-error: oklch(0.52 0.22 27);
+  --status-template: oklch(0.5 0.18 300);
+  --status-migrating: oklch(0.5 0.15 230);
+
+  /* Tag chip lightness/chroma, tuned per theme for contrast (hue comes from the tag hash). */
+  --chip-l: 0.4;
+  --chip-c: 0.13;
+  --chip-bg-a: 12%;
+  --chip-border-a: 45%;
+
+  --background: oklch(1 0 0);
+  --foreground: var(--zinc-900);
+  --card: oklch(1 0 0);
+  --card-foreground: var(--zinc-900);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--zinc-900);
+  --primary: var(--zinc-900);
+  --primary-foreground: var(--zinc-50);
+  --secondary: var(--zinc-100);
+  --secondary-foreground: var(--zinc-900);
+  --muted: var(--zinc-100);
+  --muted-foreground: var(--zinc-500);
+  --accent: var(--accent-teal);
+  --accent-foreground: var(--accent-teal-foreground);
+  --destructive: var(--status-error);
+  --border: var(--zinc-200);
+  --input: var(--zinc-200);
+  --ring: var(--accent-teal);
+
+  --surface-sunken: var(--zinc-100);
+  --surface-raised: oklch(1 0 0);
+
+  /*
+   * Open Sans density tuning. `-size-adjust` feeds the native `font-size-adjust` property
+   * (rescales the rendered glyph size to a target ex-height/em ratio, independent of the
+   * declared font-size) so body text sits at ~14px / tables at ~13px per the design brief, and
+   * `-tracking` feeds `letter-spacing`. Open Sans's own x-height/em ratio (~0.535) is close to
+   * font-size-adjust's un-adjusted baseline, so this is a much smaller correction than the
+   * previous display-as-UI face needed. Applied in the `body` rule below. (T11 removed the
+   * matching `--font-mono-*` pair: `--font-mono` is now a system stack used only by the terminal
+   * and the task-log viewer, neither of which needs this density correction.)
+   *
+   * Josefin Sans (display) does NOT get this treatment (T10b, finding 1): `font-size-adjust`
+   * is an inherited property, so without an explicit reset `.font-display` elements inherited
+   * `body`'s 0.535 -- a ratio tuned for Open Sans's x-height, not Josefin's. Josefin Sans has a
+   * much lower x-height/em ratio, so the browser (chasing the same 0.535 target ex-height)
+   * substituted a much larger effective font-size: a "32px" h1 rendered with a ~45px
+   * cap-to-baseline box, a "28px" stat figure ~40px, the 14px wordmark ~20px -- roughly a 1.42x
+   * inflation across every declared display size. `--font-display-size-adjust: none` (applied by
+   * the `.font-display` utility below) disables the adjustment for the display face, so it
+   * renders at its own natural metrics for the declared font-size, same as it would with no
+   * `font-size-adjust` anywhere in the cascade. The declared display sizes below were re-tuned
+   * against that natural rendering, not the inflated one.
+   */
+  --font-sans-size-adjust: 0.535;
+  --font-sans-tracking: -0.006em;
+  --font-display-size-adjust: none;
+  --font-display-tracking: -0.01em;
+}
+
+.dark {
+  --background: var(--zinc-950);
+  --foreground: var(--zinc-100);
+  --card: var(--zinc-900);
+  --card-foreground: var(--zinc-100);
+  --popover: var(--zinc-900);
+  --popover-foreground: var(--zinc-100);
+  --primary: var(--zinc-100);
+  --primary-foreground: var(--zinc-900);
+  --secondary: var(--zinc-800);
+  --secondary-foreground: var(--zinc-100);
+  --muted: var(--zinc-800);
+  --muted-foreground: var(--zinc-400);
+  --accent: var(--accent-teal);
+  --accent-foreground: var(--accent-teal-foreground);
+  --destructive: var(--status-error);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: var(--accent-teal);
+
+  --surface-sunken: var(--zinc-950);
+  --surface-raised: var(--zinc-900);
+
+  /* Brightened status hues for AA contrast against dark card/background surfaces. */
+  --status-running: oklch(0.72 0.17 149);
+  --status-stopped: var(--zinc-400);
+  --status-paused: oklch(0.79 0.14 80);
+  --status-error: oklch(0.7 0.2 27);
+  --status-template: oklch(0.7 0.16 300);
+  --status-migrating: oklch(0.76 0.13 230);
+
+  --chip-l: 0.78;
+  --chip-c: 0.12;
+  --chip-bg-a: 16%;
+  --chip-border-a: 40%;
+}
+
+/*
+ * Deliberately a plain `@theme` block, NOT `@theme inline`, and deliberately separate from the
+ * `@theme inline` block below. Tailwind v4's `inline` option makes a utility's generated CSS
+ * inline the theme value's *own* text verbatim -- for the color tokens below, that text is
+ * already a `var(--x)` reference (e.g. `--color-background: var(--background)`), so inlining it
+ * just drops one level of indirection and utilities like `.bg-background` still end up with
+ * `background-color: var(--background)`, resolved at runtime, overridable by `.dark`. But a
+ * *literal* font stack has no such reference to inline: `@theme inline { --font-sans: 'Open
+ * Sans Variable', ... }` would compile `.font-sans`/`body`'s `font-sans` utility to the
+ * literal string `font-family: 'Open Sans Variable', ...` in the built CSS, baking it in at
+ * build time (this was T8's font-switching blocker, from the days this file offered several
+ * switchable pairings). A plain `@theme` block instead keeps the utility as
+ * `font-family: var(--font-sans)`, resolved at runtime -- see
+ * src/test/font-theme-inline-guard.test.ts, which guards this stays a plain block (extended in
+ * T10 to also cover `--font-display`).
+ */
+@theme {
+  --font-display: 'Josefin Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Open Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  /*
+   * T11: no shipped monospace webfont. This is a SYSTEM stack only, used exclusively where
+   * alignment is functional rather than decorative -- the xterm terminal (Terminal.tsx, via
+   * components/console/theme.ts's readCssFontFamily) and the task-log line viewer
+   * (TaskLogSheet.tsx). Every identifier display (UPIDs, MACs, IPs, volume IDs, storage names,
+   * config strings, kbd hints, ...) now renders in `--font-sans` instead.
+   */
+  --font-mono: ui-monospace, 'Cascadia Mono', 'Consolas', 'SF Mono', Menlo, monospace;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-raised: var(--surface-raised);
+
+  --color-status-running: var(--status-running);
+  --color-status-stopped: var(--status-stopped);
+  --color-status-paused: var(--status-paused);
+  --color-status-error: var(--status-error);
+  --color-status-template: var(--status-template);
+  --color-status-migrating: var(--status-migrating);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: light dark;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-size: 14px;
+    line-height: 1.35;
+    font-size-adjust: var(--font-sans-size-adjust);
+    letter-spacing: var(--font-sans-tracking);
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  .font-numeric {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /*
+   * Tag chip coloring: hue comes from a per-tag inline `--chip-hue` custom property
+   * (see TagChip.tsx); lightness/chroma/alpha come from theme tokens above so the same
+   * markup reads at AA contrast in both light and dark mode.
+   */
+  .tag-chip {
+    color: oklch(var(--chip-l) var(--chip-c) var(--chip-hue));
+    background-color: oklch(var(--chip-l) var(--chip-c) var(--chip-hue) / var(--chip-bg-a));
+    border-color: oklch(var(--chip-l) var(--chip-c) var(--chip-hue) / var(--chip-border-a));
+  }
+
+  /*
+   * Resets `font-size-adjust` to `none` for every use of Tailwind's `font-display` utility (see
+   * `--font-display-size-adjust`'s comment in `:root` above for why this exists) -- without it,
+   * `.font-display` elements inherit `body`'s Open-Sans-tuned adjust and Josefin Sans renders
+   * ~1.42x its declared size.
+   */
+  .font-display {
+    font-size-adjust: var(--font-display-size-adjust);
+  }
+}
+
+/*
+ * Console/terminal overrides (VncConsole.tsx, Terminal.tsx). xterm.js and noVNC ship their
+ * own base stylesheets; these just make them fill their flex container and pick up Proxion's
+ * theme instead of a hardcoded scrollbar/focus style.
+ */
+.xterm {
+  height: 100%;
+  padding: 4px 8px;
+  box-sizing: border-box;
+}
+.xterm-viewport {
+  scrollbar-color: var(--zinc-600) transparent;
+  scrollbar-width: thin;
+}
+.xterm:focus .xterm-cursor-layer {
+  outline: none;
+}
+/* noVNC's RFB canvas manages its own focus ring; suppress the browser default so it doesn't
+   double up with the console container's own border. */
+.novnc-canvas,
+[data-hotkey-scope='console'] canvas:focus {
+  outline: none;
+}
+
+/*
+ * Chart series colors (Monitor tab, Summary tab sparklines). One accent (teal, reuses the
+ * site accent) plus a small fixed set of secondary hues, applied consistently across every
+ * panel: in/primary=teal, out=violet, read=emerald, write=amber, ceiling/secondary=sky.
+ * See src/lib/chart-colors.ts, which resolves these to literal colors for uPlot's canvas.
+ */
+:root {
+  --chart-teal: var(--accent-teal);
+  --chart-violet: oklch(0.62 0.19 300);
+  --chart-emerald: oklch(0.6 0.15 149);
+  --chart-amber: oklch(0.65 0.16 80);
+  --chart-sky: oklch(0.62 0.13 230);
+  --chart-rose: oklch(0.62 0.18 20);
+}
+
+.dark {
+  --chart-violet: oklch(0.74 0.16 300);
+  --chart-emerald: oklch(0.72 0.17 149);
+  --chart-amber: oklch(0.78 0.14 80);
+  --chart-sky: oklch(0.76 0.13 230);
+  --chart-rose: oklch(0.72 0.17 20);
+}
+
+/*
+ * uPlot theme overrides. uPlot ships its own base stylesheet (imported by TimeSeriesChart)
+ * for layout; these rules only re-theme it to match Proxion's tokens in both light and dark.
+ */
+.u-legend {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.u-legend th {
+  font-weight: 500;
+}
+
+.u-inline.u-legend .u-series > * {
+  padding: 0 6px;
+}
+
+.u-legend .u-marker {
+  border-radius: 1px;
+}
+
+.ts-chart-tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  display: none;
+  pointer-events: none;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+  box-shadow: none;
+}
+
+.ts-chart-tooltip-time {
+  margin-bottom: 2px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.ts-chart-tooltip-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  border-radius: 999px;
+}
+
+/*
+ * Density (Preferences > Appearance): `data-density="compact"` on the shell root (see
+ * routes/_shell.tsx) tightens table rows and panel padding app-wide. Targets the `data-slot`
+ * hooks `components/ui/table.tsx` and `components/Panel.tsx` already expose, rather than raw
+ * Tailwind utility classes, so this survives either file's own className changes.
+ */
+[data-density='compact'] [data-slot='table-cell'] {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+[data-density='compact'] [data-slot='table-head'] {
+  height: 28px;
+}
+
+[data-density='compact'] [data-slot='panel-body'] {
+  padding: 8px;
+}

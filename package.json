@@ -1,0 +1,39 @@
+{
+  "name": "proxion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/C2Tech-sys/proxion.git"
+  },
+  "homepage": "https://github.com/C2Tech-sys/proxion#readme",
+  "bugs": {
+    "url": "https://github.com/C2Tech-sys/proxion/issues"
+  },
+  "packageManager": "pnpm@11.13.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @proxion/web --filter @proxion/server dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "test": "pnpm -r test",
+    "format": "prettier --write .",
+    "demo": "cross-env VITE_USE_FIXTURES=1 pnpm --filter @proxion/web dev"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "cross-env": "^10.1.0",
+    "eslint": "^10.10.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.12.0",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0"
+  }
+}

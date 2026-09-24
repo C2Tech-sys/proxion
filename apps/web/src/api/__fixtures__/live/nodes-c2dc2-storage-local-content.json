@@ -1,0 +1,46 @@
+{
+  "data": [
+    {
+      "size": 8497047552,
+      "content": "iso",
+      "volid": "local:iso/en-us_windows_server_2025_updated_aug_2026_x64_dvd_b0833651.iso",
+      "format": "iso",
+      "ctime": 1787680129
+    },
+    {
+      "volid": "local:iso/netgate-installer-v1.2-RELEASE-amd64.iso",
+      "format": "iso",
+      "ctime": 1787678418,
+      "size": 1059239936,
+      "content": "iso"
+    },
+    {
+      "size": 624447488,
+      "content": "iso",
+      "volid": "local:iso/noble-server-cloudimg-amd64.img",
+      "ctime": 1787754816,
+      "format": "iso"
+    },
+    {
+      "format": "iso",
+      "ctime": 1787678165,
+      "volid": "local:iso/virtio-win.iso",
+      "content": "iso",
+      "size": 789645312
+    },
+    {
+      "size": 129954319,
+      "content": "vztmpl",
+      "volid": "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst",
+      "ctime": 1787862968,
+      "format": "tzst"
+    },
+    {
+      "ctime": 1787862935,
+      "format": "tzst",
+      "volid": "local:vztmpl/debian-13-standard_13.6-1_arm64.tar.zst",
+      "content": "vztmpl",
+      "size": 129479452
+    }
+  ]
+}

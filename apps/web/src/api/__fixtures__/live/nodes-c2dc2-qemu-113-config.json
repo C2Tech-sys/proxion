@@ -1,0 +1,25 @@
+{
+  "data": {
+    "name": "vm-113",
+    "boot": "order=scsi0",
+    "startup": "order=2",
+    "scsihw": "virtio-scsi-single",
+    "balloon": 16384,
+    "net0": "virtio=02:00:00:00:00:01,bridge=vmbr1",
+    "vmgenid": "33f88903-a4ac-4b6e-b324-f94d1bd37437",
+    "efidisk0": "tank:vm-113-disk-0,efitype=4m,pre-enrolled-keys=0,size=1M",
+    "cpu": "host",
+    "scsi0": "tank:vm-113-disk-1,iothread=1,size=500G",
+    "digest": "9f20792128c23d67d38692b3881b0a24f13c7c73",
+    "sockets": 1,
+    "bios": "ovmf",
+    "onboot": 1,
+    "smbios1": "uuid=e7184899-face-49fa-ae2b-64fdd66e7568",
+    "agent": "enabled=1",
+    "ostype": "l26",
+    "meta": "creation-qemu=11.0.3,ctime=1787884558",
+    "memory": "16384",
+    "machine": "q35",
+    "cores": 4
+  }
+}

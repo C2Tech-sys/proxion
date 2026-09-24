@@ -1,0 +1,15 @@
+# Normalize line endings: store LF in the repo and check out LF everywhere,
+# including Windows, so the open-source tree is identical across platforms.
+* text=auto eol=lf
+
+# Windows-native scripts keep CRLF.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets.
+*.png binary
+*.jpg binary
+*.woff binary
+*.woff2 binary
+*.ico binary

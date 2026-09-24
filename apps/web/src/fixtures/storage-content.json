@@ -1,0 +1,126 @@
+{
+  "pve1/local": [
+    {
+      "volid": "local:iso/debian-12.7.0-amd64-netinst.iso",
+      "content": "iso",
+      "format": "iso",
+      "size": 663748608,
+      "ctime": 1780000000
+    },
+    {
+      "volid": "local:iso/ubuntu-24.04.1-live-server-amd64.iso",
+      "content": "iso",
+      "format": "iso",
+      "size": 2202009600,
+      "ctime": 1781000000
+    },
+    {
+      "volid": "local:iso/virtio-win-0.1.240.iso",
+      "content": "iso",
+      "format": "iso",
+      "size": 707788800,
+      "ctime": 1779000000,
+      "notes": "VirtIO drivers for Windows guests"
+    },
+    {
+      "volid": "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst",
+      "content": "vztmpl",
+      "format": "tzst",
+      "size": 134217728,
+      "ctime": 1778000000
+    },
+    {
+      "volid": "local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst",
+      "content": "vztmpl",
+      "format": "tzst",
+      "size": 145752064,
+      "ctime": 1778100000
+    },
+    {
+      "volid": "local:backup/vzdump-lxc-201-2026_09_10-03_00_11.tar.zst",
+      "content": "backup",
+      "format": "tzst",
+      "size": 421527552,
+      "ctime": 1789030811,
+      "vmid": 201,
+      "notes": "weekly"
+    }
+  ],
+  "pve1/local-zfs": [
+    { "volid": "local-zfs:subvol-200-disk-0", "content": "rootdir", "format": "subvol", "size": 8589934592, "used": 2748277454, "vmid": 200 },
+    { "volid": "local-zfs:subvol-201-disk-0", "content": "rootdir", "format": "subvol", "size": 4294967296, "used": 1589232679, "vmid": 201 },
+    { "volid": "local-zfs:subvol-202-disk-0", "content": "rootdir", "format": "subvol", "size": 17179869184, "used": 0, "vmid": 202 }
+  ],
+  "pve1/tank": [
+    { "volid": "tank:vm-100-disk-0", "content": "images", "format": "raw", "size": 34359738368, "used": 18253611008, "vmid": 100 },
+    { "volid": "tank:vm-101-disk-0", "content": "images", "format": "raw", "size": 34359738368, "used": 11274289152, "vmid": 101 },
+    { "volid": "tank:vm-102-disk-0", "content": "images", "format": "raw", "size": 137438953472, "used": 98784247808, "vmid": 102 },
+    { "volid": "tank:vm-103-disk-0", "content": "images", "format": "raw", "size": 137438953472, "used": 4194304000, "vmid": 103 },
+    { "volid": "tank:vm-104-disk-0", "content": "images", "format": "raw", "size": 21474836480, "used": 9663676416, "vmid": 104 },
+    { "volid": "tank:vm-105-disk-0", "content": "images", "format": "raw", "size": 21474836480, "used": 0, "vmid": 105 },
+    { "volid": "tank:vm-106-disk-0", "content": "images", "format": "raw", "size": 85899345920, "used": 47244640256, "vmid": 106 },
+    { "volid": "tank:vm-106-disk-1", "content": "images", "format": "raw", "size": 107374182400, "used": 60129542144, "vmid": 106 },
+    { "volid": "tank:vm-107-disk-0", "content": "images", "format": "raw", "size": 214748364800, "used": 171798691840, "vmid": 107 },
+    { "volid": "tank:vm-108-disk-0", "content": "images", "format": "raw", "size": 68719476736, "used": 30064771072, "vmid": 108 },
+    { "volid": "tank:vm-109-disk-0", "content": "images", "format": "raw", "size": 68719476736, "used": 0, "vmid": 109 },
+    { "volid": "tank:vm-110-disk-0", "content": "images", "format": "raw", "size": 21474836480, "used": 6442450944, "vmid": 110 },
+    { "volid": "tank:vm-111-disk-0", "content": "images", "format": "raw", "size": 42949672960, "used": 21474836480, "vmid": 111 },
+    { "volid": "tank:vm-100-disk-1", "content": "images", "format": "raw", "size": 34359738368, "used": 2147483648, "vmid": 100, "notes": "cloud-init" },
+    { "volid": "tank:vm-106-disk-2", "content": "images", "format": "raw", "size": 4194304, "used": 4194304, "vmid": 106, "notes": "EFI vars" }
+  ],
+  "pve1/tank-backups": [
+    {
+      "volid": "tank-backups:backup/vzdump-qemu-100-2026_09_16-02_12_35.vma.zst",
+      "content": "backup",
+      "format": "vma.zst",
+      "size": 12884901888,
+      "ctime": 1789574000,
+      "vmid": 100,
+      "notes": "nightly, auto",
+      "protected": false
+    },
+    {
+      "volid": "tank-backups:backup/vzdump-qemu-100-2026_09_09-02_11_02.vma.zst",
+      "content": "backup",
+      "format": "vma.zst",
+      "size": 12583174144,
+      "ctime": 1788969062,
+      "vmid": 100,
+      "notes": "nightly, auto",
+      "protected": false
+    },
+    {
+      "volid": "tank-backups:backup/vzdump-qemu-102-2026_09_16-01_45_10.vma.zst",
+      "content": "backup",
+      "format": "vma.zst",
+      "size": 46170898432,
+      "ctime": 1789562783,
+      "vmid": 102,
+      "notes": "pre-migration snapshot",
+      "protected": true,
+      "verification": { "state": "ok", "upid": "UPID:pve1:00021AF3:0A5B2C11:6AAA80A0:verifybackup:102:root@pam:" }
+    },
+    {
+      "volid": "tank-backups:backup/vzdump-qemu-106-2026_09_15-03_30_00.vma.zst",
+      "content": "backup",
+      "format": "vma.zst",
+      "size": 31126142976,
+      "ctime": 1789487400,
+      "vmid": 106,
+      "notes": "weekly, auto",
+      "protected": true,
+      "verification": { "state": "failed", "upid": "UPID:pve1:00021B10:0A5B2E44:6AAA9B20:verifybackup:106:root@pam:" }
+    },
+    {
+      "volid": "tank-backups:backup/vzdump-lxc-200-2026_09_14-04_00_22.tar.zst",
+      "content": "backup",
+      "format": "tzst",
+      "size": 1073741824,
+      "ctime": 1789401622,
+      "vmid": 200,
+      "notes": "weekly, auto",
+      "protected": false,
+      "verification": { "state": "ok", "upid": "UPID:pve1:00021C02:0A5B3010:6AAAA700:verifybackup:200:root@pam:" }
+    }
+  ]
+}

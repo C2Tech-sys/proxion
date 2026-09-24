@@ -1,0 +1,33 @@
+[Unit]
+Description=Proxion console screenshot agent
+After=network-online.target pve-cluster.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/proxion-agent/agent.env
+ExecStart=/usr/local/bin/proxion-agent --bind ${PROXION_AGENT_BIND} --port ${PROXION_AGENT_PORT}
+# Must run as root: only root can open Proxmox's per-VM QMP unix sockets at
+# /var/run/qemu-server/<vmid>.qmp, which is what this agent uses to request
+# a screendump. There is no lower-privilege way to reach that socket.
+User=root
+
+# Hardening. Note this still needs unix-socket access under /var/run and a
+# private, writable scratch directory for screendump output, so it stops
+# short of the stricter sandboxing (no ProtectKernelTunables/SystemCallFilter
+# lockdown) that would be safe for a non-root, no-IPC service.
+NoNewPrivileges=yes
+ProtectSystem=strict
+# /run/qemu-server holds the per-VM QMP sockets; connect() on a unix socket needs
+# write permission on it, so it must be writable inside the strict sandbox too.
+ReadWritePaths=/run/proxion-agent /run/qemu-server
+PrivateTmp=yes
+ProtectHome=yes
+RuntimeDirectory=proxion-agent
+RuntimeDirectoryMode=0700
+
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,188 @@
+{
+  "data": [
+    {
+      "state": "running",
+      "service": "chrony",
+      "active-state": "active",
+      "desc": "chrony, an NTP client/server",
+      "name": "chrony",
+      "unit-state": "enabled"
+    },
+    {
+      "service": "corosync",
+      "state": "dead",
+      "name": "corosync",
+      "unit-state": "enabled",
+      "desc": "Corosync Cluster Engine",
+      "active-state": "inactive"
+    },
+    {
+      "active-state": "active",
+      "service": "cron",
+      "unit-state": "enabled",
+      "name": "cron",
+      "desc": "Regular background program processing daemon",
+      "state": "running"
+    },
+    {
+      "state": "running",
+      "desc": "Kernel Samepage Merging (KSM) Tuning Daemon",
+      "unit-state": "enabled",
+      "name": "ksmtuned",
+      "service": "ksmtuned",
+      "active-state": "active"
+    },
+    {
+      "state": "running",
+      "service": "lxcfs",
+      "active-state": "active",
+      "desc": "FUSE filesystem for LXC",
+      "name": "lxcfs",
+      "unit-state": "enabled"
+    },
+    {
+      "desc": "Postfix Mail Transport Agent (main/default instance)",
+      "active-state": "active",
+      "name": "postfix",
+      "unit-state": "enabled",
+      "state": "running",
+      "service": "postfix"
+    },
+    {
+      "service": "proxmox-firewall",
+      "state": "running",
+      "unit-state": "enabled",
+      "name": "proxmox-firewall",
+      "desc": "Proxmox nftables firewall",
+      "active-state": "active"
+    },
+    {
+      "unit-state": "enabled",
+      "name": "pve-cluster",
+      "active-state": "active",
+      "desc": "The Proxmox VE cluster filesystem",
+      "service": "pve-cluster",
+      "state": "running"
+    },
+    {
+      "active-state": "active",
+      "desc": "Proxmox VE firewall",
+      "name": "pve-firewall",
+      "unit-state": "enabled",
+      "state": "running",
+      "service": "pve-firewall"
+    },
+    {
+      "state": "running",
+      "service": "pve-ha-crm",
+      "desc": "PVE Cluster HA Resource Manager Daemon",
+      "active-state": "active",
+      "unit-state": "enabled",
+      "name": "pve-ha-crm"
+    },
+    {
+      "state": "running",
+      "service": "pve-ha-lrm",
+      "desc": "PVE Local HA Resource Manager Daemon",
+      "active-state": "active",
+      "name": "pve-ha-lrm",
+      "unit-state": "enabled"
+    },
+    {
+      "desc": "Proxmox VE LXC Syscall Daemon",
+      "active-state": "active",
+      "unit-state": "enabled",
+      "name": "pve-lxc-syscalld",
+      "state": "running",
+      "service": "pve-lxc-syscalld"
+    },
+    {
+      "service": "pvedaemon",
+      "state": "running",
+      "name": "pvedaemon",
+      "unit-state": "enabled",
+      "active-state": "active",
+      "desc": "PVE API Daemon"
+    },
+    {
+      "name": "pvefw-logger",
+      "unit-state": "enabled",
+      "desc": "Proxmox VE firewall logger",
+      "active-state": "active",
+      "service": "pvefw-logger",
+      "state": "running"
+    },
+    {
+      "active-state": "active",
+      "service": "pveproxy",
+      "name": "pveproxy",
+      "unit-state": "enabled",
+      "desc": "PVE API Proxy Server",
+      "state": "running"
+    },
+    {
+      "active-state": "active",
+      "desc": "Proxmox VE scheduler",
+      "unit-state": "enabled",
+      "name": "pvescheduler",
+      "state": "running",
+      "service": "pvescheduler"
+    },
+    {
+      "name": "pvestatd",
+      "unit-state": "enabled",
+      "desc": "PVE Status Daemon",
+      "active-state": "active",
+      "service": "pvestatd",
+      "state": "running"
+    },
+    {
+      "state": "running",
+      "service": "qmeventd",
+      "desc": "PVE Qemu Event Daemon",
+      "active-state": "active",
+      "unit-state": "enabled",
+      "name": "qmeventd"
+    },
+    {
+      "state": "running",
+      "desc": "PVE SPICE Proxy Server",
+      "name": "spiceproxy",
+      "unit-state": "enabled",
+      "service": "spiceproxy",
+      "active-state": "active"
+    },
+    {
+      "desc": "OpenBSD Secure Shell server",
+      "active-state": "active",
+      "name": "sshd",
+      "unit-state": "enabled",
+      "state": "running",
+      "service": "sshd"
+    },
+    {
+      "state": "dead",
+      "service": "syslog",
+      "desc": "syslog.service",
+      "active-state": "inactive",
+      "name": "syslog",
+      "unit-state": "not-found"
+    },
+    {
+      "desc": "Journal Service",
+      "active-state": "active",
+      "name": "systemd-journald",
+      "unit-state": "static",
+      "state": "running",
+      "service": "systemd-journald"
+    },
+    {
+      "unit-state": "not-found",
+      "name": "systemd-timesyncd",
+      "desc": "systemd-timesyncd.service",
+      "active-state": "inactive",
+      "service": "systemd-timesyncd",
+      "state": "dead"
+    }
+  ]
+}

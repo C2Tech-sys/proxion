@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+.git
+.foreman
+.claude
+.vite
+.tanstack
+coverage
+*.tsbuildinfo
+.env
+.env.*.local

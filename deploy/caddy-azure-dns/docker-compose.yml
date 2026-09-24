@@ -1,0 +1,51 @@
+# Proxion behind Caddy, with Let's Encrypt certificates issued via the
+# Azure DNS challenge -- no inbound public ports required. See README.md
+# in this directory for the full setup walkthrough.
+#
+# `BIND_ADDR` (in .env) is the host's mesh IP (e.g. a Tailscale/WireGuard
+# address). Caddy's 80/443 are published on that address only -- never on
+# 0.0.0.0 -- so the host stays unreachable from the public internet even
+# though Let's Encrypt can still complete the DNS-01 challenge.
+services:
+  proxion:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: proxion:local
+    # Bound to loopback only -- reached exclusively through the caddy
+    # service on the shared compose network, never published externally.
+    ports:
+      - '127.0.0.1:3080:3080'
+    env_file: ./proxion.env
+    volumes:
+      # Per-user preferences -- a named volume so they survive container recreates/upgrades.
+      - proxion_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:3080/api/health']
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+  caddy:
+    build:
+      context: ./caddy
+    image: proxion-caddy:local
+    ports:
+      - '${BIND_ADDR}:443:443'
+      - '${BIND_ADDR}:80:80'
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    env_file: ./caddy.env
+    restart: unless-stopped
+    depends_on:
+      proxion:
+        condition: service_healthy
+
+volumes:
+  caddy_data:
+  caddy_config:
+  proxion_data:

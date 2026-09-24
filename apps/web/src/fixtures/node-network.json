@@ -1,0 +1,47 @@
+{
+  "pve1": [
+    {
+      "iface": "vmbr0",
+      "type": "bridge",
+      "method": "static",
+      "active": true,
+      "autostart": true,
+      "cidr": "10.10.10.254/24",
+      "gateway": "10.10.10.1",
+      "bridge_ports": "eno1",
+      "bridge_vlan_aware": true,
+      "comments": "Primary LAN bridge"
+    },
+    {
+      "iface": "vmbr1",
+      "type": "bridge",
+      "method": "manual",
+      "active": true,
+      "autostart": true,
+      "bridge_ports": "eno2",
+      "bridge_vlan_aware": true,
+      "comments": "Storage/replication bridge"
+    },
+    {
+      "iface": "eno1",
+      "type": "eth",
+      "method": "manual",
+      "active": true,
+      "autostart": true
+    },
+    {
+      "iface": "eno2",
+      "type": "eth",
+      "method": "manual",
+      "active": true,
+      "autostart": true
+    },
+    {
+      "iface": "lo",
+      "type": "eth",
+      "method": "loopback",
+      "active": true,
+      "autostart": true
+    }
+  ]
+}

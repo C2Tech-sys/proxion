@@ -1,0 +1,35 @@
+{
+  "pve1": {
+    "cpu": 0.14,
+    "cpuinfo": {
+      "cpus": 32,
+      "sockets": 1,
+      "cores": 16,
+      "model": "AMD EPYC 7443P 24-Core Processor",
+      "mhz": "2850.000"
+    },
+    "memory": {
+      "total": 137438953472,
+      "used": 56349970924,
+      "free": 81088982548
+    },
+    "swap": {
+      "total": 8589934592,
+      "used": 134217728,
+      "free": 8455716864
+    },
+    "rootfs": {
+      "total": 214748364800,
+      "used": 66571993088,
+      "free": 148176371712
+    },
+    "uptime": 1839600,
+    "loadavg": ["1.42", "1.58", "1.61"],
+    "pveversion": "pve-manager/8.3.0/lab",
+    "kversion": "Linux 6.8.12-4-pve",
+    "boot-info": {
+      "mode": "efi",
+      "secureboot": false
+    }
+  }
+}

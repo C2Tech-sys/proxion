@@ -1,0 +1,52 @@
+{
+  "data": [
+    {
+      "used_fraction": 0.00264147953612011,
+      "storage": "local",
+      "enabled": 1,
+      "content": "vztmpl,import,iso,backup,snippets",
+      "total": 3818211770368,
+      "active": 1,
+      "used": 10085728256,
+      "shared": 0,
+      "type": "dir",
+      "avail": 3808126042112
+    },
+    {
+      "used_fraction": 0.154130941373164,
+      "enabled": 1,
+      "storage": "tank-backups",
+      "type": "dir",
+      "shared": 0,
+      "used": 2192600072192,
+      "active": 1,
+      "content": "backup",
+      "total": 14225567252480,
+      "avail": 12032967180288
+    },
+    {
+      "storage": "local-zfs",
+      "enabled": 1,
+      "used_fraction": 0.0103096601349018,
+      "avail": 3808126152704,
+      "type": "zfspool",
+      "shared": 0,
+      "used": 39669465088,
+      "content": "rootdir,images",
+      "total": 3847795617792,
+      "active": 1
+    },
+    {
+      "used_fraction": 0.208688781976855,
+      "storage": "tank",
+      "enabled": 1,
+      "content": "rootdir,images",
+      "total": 15206365265920,
+      "active": 1,
+      "used": 3173397845640,
+      "shared": 0,
+      "type": "zfspool",
+      "avail": 12032967420280
+    }
+  ]
+}

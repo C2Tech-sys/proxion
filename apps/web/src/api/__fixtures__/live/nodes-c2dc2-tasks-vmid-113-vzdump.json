@@ -1,0 +1,41 @@
+{
+  "data": [
+    {
+      "endtime": 1790126214,
+      "user": "backup@pve",
+      "upid": "UPID:c2dc2:003E8E95:090DFD6E:6AB32811:vzdump:113:msp360@pve:",
+      "status": "OK",
+      "pstart": 151911790,
+      "type": "vzdump",
+      "id": "113",
+      "starttime": 1790126097,
+      "node": "c2dc2",
+      "pid": 4099733
+    },
+    {
+      "status": "OK",
+      "endtime": 1790040611,
+      "user": "backup@pve",
+      "upid": "UPID:c2dc2:0032458E:088B8366:6AB1DA0C:vzdump:113:msp360@pve:",
+      "pstart": 143360870,
+      "id": "113",
+      "type": "vzdump",
+      "node": "c2dc2",
+      "pid": 3294606,
+      "starttime": 1790040588
+    },
+    {
+      "id": "113",
+      "type": "vzdump",
+      "starttime": 1789968347,
+      "node": "c2dc2",
+      "pid": 2568005,
+      "status": "OK",
+      "endtime": 1789968380,
+      "user": "backup@pve",
+      "upid": "UPID:c2dc2:00272F45:081D4835:6AB0BFDB:vzdump:113:msp360@pve:",
+      "pstart": 136136757
+    }
+  ],
+  "total": 22
+}

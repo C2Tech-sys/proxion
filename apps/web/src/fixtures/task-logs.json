@@ -1,0 +1,30 @@
+{
+  "UPID:pve1:000A1007:6AAAA0C3:6AAAA0C3:qmstart:100:root@pam:": [
+    { "n": 1, "t": "task started by HA resource agent" },
+    { "n": 2, "t": "starting VM 100: UPID:pve1:000A1007:6AAAA0C3:6AAAA0C3:qmstart:100:root@pam:" },
+    { "n": 3, "t": "TASK OK" }
+  ],
+  "UPID:pve1:000A1118:6AAAA0B3:6AAAA0B3:vzdump:100:root@pam:": [
+    { "n": 1, "t": "INFO: starting new backup job: vzdump 100 --mode snapshot --storage tank-backups --node pve1" },
+    { "n": 2, "t": "INFO: Starting Backup of VM 100 (qemu)" },
+    { "n": 3, "t": "INFO: status = running" },
+    { "n": 4, "t": "INFO: backup mode: snapshot" },
+    { "n": 5, "t": "INFO: ionice priority: 7" },
+    { "n": 6, "t": "INFO: VM Name: web-prod-01" },
+    { "n": 7, "t": "INFO: include disk 'scsi0' 'tank:vm-100-disk-0' 32G" },
+    { "n": 8, "t": "INFO: creating vzdump archive '/mnt/pve/tank-backups/dump/vzdump-qemu-100-2026_09_16-02_12_35.vma.zst'" },
+    { "n": 9, "t": "INFO: started backup task 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'" },
+    { "n": 10, "t": "INFO: resuming VM again" },
+    { "n": 11, "t": "INFO:   1% (340.1 MiB of 32.0 GiB) in 3s, read: 113.4 MiB/s, write: 98.2 MiB/s" },
+    { "n": 12, "t": "INFO:  34% (11.2 GiB of 32.0 GiB) in 1m 45s, read: 121.6 MiB/s, write: 110.3 MiB/s" },
+    { "n": 13, "t": "INFO:  78% (25.4 GiB of 32.0 GiB) in 3m 58s, read: 118.9 MiB/s, write: 105.1 MiB/s" }
+  ],
+  "UPID:pve1:000A100E:6AAA9871:6AAA9871:qmstop:101:admin@pve:": [
+    { "n": 1, "t": "stopping VM 101: UPID:pve1:000A100E:6AAA9871:6AAA9871:qmstop:101:admin@pve:" },
+    { "n": 2, "t": "TASK OK" }
+  ],
+  "UPID:pve1:000A101C:6AAA879A:6AAA879A:qmsnapshot:103:root@pam:": [
+    { "n": 1, "t": "snapshotting VM 103 'nightly' (running = 0)" },
+    { "n": 2, "t": "TASK OK" }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "data": [
+    {
+      "altnames": [
+        "enp198s0f1np1",
+        "enx5c6f6939a299"
+      ],
+      "method": "manual",
+      "families": [
+        "inet"
+      ],
+      "iface": "nic1",
+      "exists": 1,
+      "type": "eth",
+      "active": 1,
+      "method6": "manual",
+      "priority": 3
+    },
+    {
+      "bridge_ports": "nic1",
+      "gateway": "192.0.2.1",
+      "method": "static",
+      "iface": "vmbr0",
+      "bridge_fd": "0",
+      "priority": 4,
+      "cidr": "192.0.2.2/30",
+      "method6": "manual",
+      "type": "bridge",
+      "bridge_stp": "off",
+      "address": "192.0.2.2",
+      "families": [
+        "inet"
+      ],
+      "autostart": 1,
+      "active": 1,
+      "netmask": "30"
+    },
+    {
+      "bridge_stp": "off",
+      "autostart": 1,
+      "active": 1,
+      "netmask": "24",
+      "address": "172.16.10.254",
+      "families": [
+        "inet"
+      ],
+      "comments": "",
+      "method": "static",
+      "bridge_ports": "",
+      "priority": 7,
+      "cidr": "172.16.10.254/24",
+      "method6": "manual",
+      "type": "bridge",
+      "iface": "vmbr1",
+      "bridge_fd": "0"
+    },
+    {
+      "iface": "nic0",
+      "families": [
+        "inet"
+      ],
+      "altnames": [
+        "enp198s0f0np0",
+        "enx5c6f6939a298"
+      ],
+      "exists": 1,
+      "method": "manual",
+      "type": "eth",
+      "method6": "manual",
+      "priority": 5
+    }
+  ]
+}

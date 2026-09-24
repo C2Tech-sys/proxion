@@ -1,0 +1,290 @@
+{
+  "100": {
+    "result": [
+      {
+        "name": "lo",
+        "hardware-address": "00:00:00:00:00:00",
+        "ip-addresses": [
+          {
+            "ip-address": "127.0.0.1",
+            "ip-address-type": "ipv4",
+            "prefix": 8
+          },
+          {
+            "ip-address": "::1",
+            "ip-address-type": "ipv6",
+            "prefix": 128
+          }
+        ]
+      },
+      {
+        "name": "eth0",
+        "hardware-address": "bc:24:11:64:00:01",
+        "ip-addresses": [
+          {
+            "ip-address": "10.10.10.0",
+            "ip-address-type": "ipv4",
+            "prefix": 24
+          },
+          {
+            "ip-address": "fe80::64",
+            "ip-address-type": "ipv6",
+            "prefix": 64
+          }
+        ]
+      }
+    ]
+  },
+  "101": {
+    "result": [
+      {
+        "name": "lo",
+        "hardware-address": "00:00:00:00:00:00",
+        "ip-addresses": [
+          {
+            "ip-address": "127.0.0.1",
+            "ip-address-type": "ipv4",
+            "prefix": 8
+          },
+          {
+            "ip-address": "::1",
+            "ip-address-type": "ipv6",
+            "prefix": 128
+          }
+        ]
+      },
+      {
+        "name": "eth0",
+        "hardware-address": "bc:24:11:65:00:01",
+        "ip-addresses": [
+          {
+            "ip-address": "10.10.10.1",
+            "ip-address-type": "ipv4",
+            "prefix": 24
+          },
+          {
+            "ip-address": "fe80::65",
+            "ip-address-type": "ipv6",
+            "prefix": 64
+          }
+        ]
+      }
+    ]
+  },
+  "102": {
+    "result": [
+      {
+        "name": "lo",
+        "hardware-address": "00:00:00:00:00:00",
+        "ip-addresses": [
+          {
+            "ip-address": "127.0.0.1",
+            "ip-address-type": "ipv4",
+            "prefix": 8
+          },
+          {
+            "ip-address": "::1",
+            "ip-address-type": "ipv6",
+            "prefix": 128
+          }
+        ]
+      },
+      {
+        "name": "eth0",
+        "hardware-address": "bc:24:11:66:00:01",
+        "ip-addresses": [
+          {
+            "ip-address": "10.10.10.2",
+            "ip-address-type": "ipv4",
+            "prefix": 24
+          },
+          {
+            "ip-address": "fe80::66",
+            "ip-address-type": "ipv6",
+            "prefix": 64
+          }
+        ]
+      }
+    ]
+  },
+  "104": {
+    "result": [
+      {
+        "name": "lo",
+        "hardware-address": "00:00:00:00:00:00",
+        "ip-addresses": [
+          {
+            "ip-address": "127.0.0.1",
+            "ip-address-type": "ipv4",
+            "prefix": 8
+          },
+          {
+            "ip-address": "::1",
+            "ip-address-type": "ipv6",
+            "prefix": 128
+          }
+        ]
+      },
+      {
+        "name": "eth0",
+        "hardware-address": "bc:24:11:68:00:01",
+        "ip-addresses": [
+          {
+            "ip-address": "10.10.10.4",
+            "ip-address-type": "ipv4",
+            "prefix": 24
+          },
+          {
+            "ip-address": "fe80::68",
+            "ip-address-type": "ipv6",
+            "prefix": 64
+          }
+        ]
+      }
+    ]
+  },
+  "106": {
+    "result": [
+      {
+        "name": "lo",
+        "hardware-address": "00:00:00:00:00:00",
+        "ip-addresses": [
+          {
+            "ip-address": "127.0.0.1",
+            "ip-address-type": "ipv4",
+            "prefix": 8
+          },
+          {
+            "ip-address": "::1",
+            "ip-address-type": "ipv6",
+            "prefix": 128
+          }
+        ]
+      },
+      {
+        "name": "Ethernet",
+        "hardware-address": "bc:24:11:6a:00:01",
+        "ip-addresses": [
+          {
+            "ip-address": "10.10.10.6",
+            "ip-address-type": "ipv4",
+            "prefix": 24
+          },
+          {
+            "ip-address": "fe80::6a",
+            "ip-address-type": "ipv6",
+            "prefix": 64
+          }
+        ]
+      }
+    ]
+  },
+  "107": {
+    "result": [
+      {
+        "name": "lo",
+        "hardware-address": "00:00:00:00:00:00",
+        "ip-addresses": [
+          {
+            "ip-address": "127.0.0.1",
+            "ip-address-type": "ipv4",
+            "prefix": 8
+          },
+          {
+            "ip-address": "::1",
+            "ip-address-type": "ipv6",
+            "prefix": 128
+          }
+        ]
+      },
+      {
+        "name": "Ethernet",
+        "hardware-address": "bc:24:11:6b:00:01",
+        "ip-addresses": [
+          {
+            "ip-address": "10.10.10.7",
+            "ip-address-type": "ipv4",
+            "prefix": 24
+          },
+          {
+            "ip-address": "fe80::6b",
+            "ip-address-type": "ipv6",
+            "prefix": 64
+          }
+        ]
+      }
+    ]
+  },
+  "108": {
+    "result": [
+      {
+        "name": "lo",
+        "hardware-address": "00:00:00:00:00:00",
+        "ip-addresses": [
+          {
+            "ip-address": "127.0.0.1",
+            "ip-address-type": "ipv4",
+            "prefix": 8
+          },
+          {
+            "ip-address": "::1",
+            "ip-address-type": "ipv6",
+            "prefix": 128
+          }
+        ]
+      },
+      {
+        "name": "eth0",
+        "hardware-address": "bc:24:11:6c:00:01",
+        "ip-addresses": [
+          {
+            "ip-address": "10.10.10.8",
+            "ip-address-type": "ipv4",
+            "prefix": 24
+          },
+          {
+            "ip-address": "fe80::6c",
+            "ip-address-type": "ipv6",
+            "prefix": 64
+          }
+        ]
+      }
+    ]
+  },
+  "111": {
+    "result": [
+      {
+        "name": "lo",
+        "hardware-address": "00:00:00:00:00:00",
+        "ip-addresses": [
+          {
+            "ip-address": "127.0.0.1",
+            "ip-address-type": "ipv4",
+            "prefix": 8
+          },
+          {
+            "ip-address": "::1",
+            "ip-address-type": "ipv6",
+            "prefix": 128
+          }
+        ]
+      },
+      {
+        "name": "eth0",
+        "hardware-address": "bc:24:11:6f:00:01",
+        "ip-addresses": [
+          {
+            "ip-address": "10.10.11.11",
+            "ip-address-type": "ipv4",
+            "prefix": 24
+          },
+          {
+            "ip-address": "fe80::6f",
+            "ip-address-type": "ipv6",
+            "prefix": 64
+          }
+        ]
+      }
+    ]
+  }
+}

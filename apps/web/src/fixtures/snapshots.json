@@ -1,0 +1,33 @@
+{
+  "qemu-100": [
+    { "name": "current" },
+    { "name": "pre-upgrade", "description": "Before OS package upgrade.", "snaptime": 1789200000 },
+    {
+      "name": "post-upgrade",
+      "description": "After OS package upgrade, verified boot.",
+      "parent": "pre-upgrade",
+      "snaptime": 1789300000
+    },
+    {
+      "name": "before-migration",
+      "description": "Snapshot with RAM before live migration test.",
+      "parent": "post-upgrade",
+      "snaptime": 1789450000,
+      "vmstate": true
+    }
+  ],
+  "qemu-106": [
+    { "name": "current" },
+    { "name": "fresh-install", "description": "Clean Windows 11 install, no domain join.", "snaptime": 1788000000 },
+    {
+      "name": "domain-joined",
+      "description": "Joined to lab.local domain, GPOs applied.",
+      "parent": "fresh-install",
+      "snaptime": 1788500000
+    }
+  ],
+  "lxc-200": [
+    { "name": "current" },
+    { "name": "initial", "description": "Base Debian image, before Caddy install.", "snaptime": 1787000000 }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+	# Optional: lets Let's Encrypt reach you about certificate problems.
+	# Leave ACME_EMAIL empty in caddy.env to omit it -- Caddy accepts an
+	# empty `email` value the same as not setting one.
+	email {$ACME_EMAIL}
+}
+
+{$PROXION_HOST} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	# ACME DNS-01 challenge via Azure DNS -- no inbound port 80/443 needs
+	# to be reachable from the public internet for certificate issuance
+	# or renewal, which is what makes the mesh-only bind in
+	# docker-compose.yml possible.
+	tls {
+		dns azure {
+			tenant_id       {$AZURE_TENANT_ID}
+			client_id       {$AZURE_CLIENT_ID}
+			client_secret   {$AZURE_CLIENT_SECRET}
+			subscription_id {$AZURE_SUBSCRIPTION_ID}
+			resource_group_name {$AZURE_RESOURCE_GROUP}
+		}
+	}
+
+	# `reverse_proxy` forwards the `Upgrade`/`Connection` headers to the
+	# upstream automatically -- no extra directives are needed for
+	# Proxion's noVNC (`/ws/vnc/*`) and xterm.js (`/ws/term/*`) websocket
+	# bridges to work. Confirmed against Caddy 2's documented behavior
+	# (same note as docs/deploy.md's Caddy snippet).
+	reverse_proxy proxion:3080
+
+	log {
+		output stdout
+		format console
+	}
+}
