@@ -45,7 +45,11 @@ jobs:
         env:
           VITE_USE_FIXTURES: '1'
           VITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}/
-        run: pnpm build
+        run: |
+          # The web app imports workspace packages (@proxion/core, @proxion/pve-api) by their
+          # built output, so build those first -- the same order the root `pnpm -r build` uses.
+          pnpm --filter @proxion/core --filter @proxion/pve-api build
+          pnpm --filter @proxion/web build
 
       # GitHub Pages has no server-side rewrite: an unknown path (a deep link like
       # /proxion/vm/pve1/qemu/100, or a browser refresh on any in-app route) 404s unless the
