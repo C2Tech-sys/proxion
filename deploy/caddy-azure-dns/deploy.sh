@@ -97,7 +97,7 @@ cmd_update() {
   compose pull proxion
   compose up -d --no-deps proxion
   wait_for_health proxion
-  echo "proxion updated and recreated ($(compose images proxion --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | tail -n 1))."
+  echo "proxion updated and recreated (running $(compose ps -q proxion | xargs docker inspect --format '{{.Config.Image}}'))."
 }
 
 cmd_build() {
