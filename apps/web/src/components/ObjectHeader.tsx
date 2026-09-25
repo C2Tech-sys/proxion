@@ -1,5 +1,16 @@
 import { useState, type ReactNode } from 'react';
-import { Loader2, MoreHorizontal, Pause, Pencil, Play, Power, RotateCcw, RotateCw, Square } from 'lucide-react';
+import {
+  ArrowRightLeft,
+  Loader2,
+  MoreHorizontal,
+  Pause,
+  Pencil,
+  Play,
+  Power,
+  RotateCcw,
+  RotateCw,
+  Square,
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -17,7 +28,8 @@ import { TagChip } from '@/components/TagChip';
 import { GuestActionDialog } from '@/components/actions/GuestActionDialog';
 import { useGuestActionFlow } from '@/components/actions/useGuestActionFlow';
 import { RenameGuestDialog } from '@/components/actions/RenameGuestDialog';
-import { useAuthMe } from '@/api/hooks';
+import { MigrateGuestDialog } from '@/components/actions/MigrateGuestDialog';
+import { useAuthMe, useClusterResources } from '@/api/hooks';
 import { usePermissions } from '@/api/actionHooks';
 import { USE_FIXTURES } from '@/api/client';
 import type { GuestType } from '@/api/types';
@@ -115,18 +127,23 @@ function GuestQuickActions({
 }) {
   const auth = useAuthMe();
   const permissions = usePermissions(vmid);
+  const clusterResources = useClusterResources();
   const flow = useGuestActionFlow({ node, type, vmid, name });
   const [renameOpen, setRenameOpen] = useState(false);
+  const [migrateOpen, setMigrateOpen] = useState(false);
 
   // Fixture/demo mode has no real session concept (and nothing real to protect) -- it always
   // demonstrates the enabled state. A real deployment gates strictly on the caller's own
-  // session + VM.PowerMgmt (or, for rename, VM.Config.Options); the server enforces both
-  // independently of this client-side gate.
+  // session + VM.PowerMgmt (or, for rename, VM.Config.Options; for migrate, VM.Migrate);
+  // the server enforces all three independently of this client-side gate.
   const isSessionMode = USE_FIXTURES || auth.data?.mode === 'session';
   const hasPowerMgmt = permissions.data?.can('VM.PowerMgmt') === true;
   const hasConfigOptions = permissions.data?.can('VM.Config.Options') === true;
+  const hasMigrate = permissions.data?.can('VM.Migrate') === true;
+  const otherNodeCount = (clusterResources.data ?? []).filter((r) => r.type === 'node' && r.node !== node).length;
   const canWrite = isSessionMode && hasPowerMgmt;
   const canRename = isSessionMode && hasConfigOptions;
+  const canMigrate = isSessionMode && hasMigrate && otherNodeCount > 0;
   const disabledReason = !isSessionMode
     ? 'Read-only: signed in with a service token'
     : !hasPowerMgmt
@@ -137,6 +154,13 @@ function GuestQuickActions({
     : !hasConfigOptions
       ? "You don't have VM.Config.Options on this guest"
       : undefined;
+  const migrateDisabledReason = !isSessionMode
+    ? 'Read-only: signed in with a service token'
+    : !hasMigrate
+      ? "You don't have VM.Migrate on this guest"
+      : otherNodeCount === 0
+        ? 'No other node to migrate to'
+        : undefined;
 
   const running = status === 'running';
   const paused = status === 'paused';
@@ -236,6 +260,13 @@ function GuestQuickActions({
             >
               <Pencil /> Rename…
             </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!canMigrate}
+              title={canMigrate ? undefined : migrateDisabledReason}
+              onSelect={() => setMigrateOpen(true)}
+            >
+              <ArrowRightLeft /> Migrate…
+            </DropdownMenuItem>
             {showDestructiveActions && (
               <>
                 <DropdownMenuSeparator />
@@ -279,6 +310,16 @@ function GuestQuickActions({
         type={type}
         vmid={vmid}
         currentName={name}
+      />
+      <MigrateGuestDialog
+        key={migrateOpen ? 'open' : 'closed'}
+        open={migrateOpen}
+        onOpenChange={setMigrateOpen}
+        node={node}
+        type={type}
+        vmid={vmid}
+        name={name}
+        status={status}
       />
     </>
   );

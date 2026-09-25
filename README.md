@@ -117,11 +117,11 @@ pnpm install && pnpm demo
 ## Feature status
 
 Reads go through a permanently read-only proxy. The writes this app
-performs -- guest power actions, rename/notes, and snapshot
-create/delete/rollback (below) -- each go through their own allow-listed
-route, gated on a signed-in session and the matching PVE privilege on that
-guest. Nothing else here can migrate, edit config, or otherwise change your
-cluster -- `/api/pve/*` itself stays a read-only proxy.
+performs -- guest power actions, rename/notes, snapshot
+create/delete/rollback, and migrate (below) -- each go through their own
+allow-listed route, gated on a signed-in session and the matching PVE
+privilege on that guest. Nothing else here can edit config or otherwise
+change your cluster -- `/api/pve/*` itself stays a read-only proxy.
 
 | Area                                               | Status          | Notes                                                                                                                                                                  |
 | -------------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -144,7 +144,8 @@ cluster -- `/api/pve/*` itself stays a read-only proxy.
 | Preferences                                        | Works           | Theme, density, default Monitor range, console thumbnails on/off + refresh interval, inventory rail width, and your Summary panel order -- stored server-side per user, so they follow you across browsers. Read-only under the shared service token. |
 | Power actions                                      | Works (session sign-in only) | Start/Shut down/Reboot/Pause/Resume/Stop/Reset from the VM/CT object header (Start/Shut down/Reboot/Stop also in the inventory tree's context menu), each behind a confirmation dialog. Needs a signed-in session and `VM.PowerMgmt` on the guest -- the shared service token stays read-only, and so does the raw `/api/pve/*` proxy; this goes through one small, allow-listed server route instead. |
 | Rename / notes                                     | Works (session sign-in only) | Rename a VM/CT from the object header's "More" menu or the inventory tree's context menu; edit its notes (the PVE description field) inline from the Summary tab's Notes panel. Needs a signed-in session and `VM.Config.Options` on the guest -- a different privilege than power actions, checked independently; the shared service token stays read-only here too. |
-| Any other write action (migrate/config edit/...)   | Not implemented | The proxy rejects non-`GET` requests to `/api/pve/*` outright; only guest power actions, rename/notes and snapshots (above) have dedicated write routes so far.         |
+| Migrate                                            | Works (session sign-in only) | Move a VM/CT to another cluster node from the object header's "More" menu or the inventory tree's context menu: a target-node picker (offline nodes and PVE's `not_allowed_nodes` disabled with the reason) plus the migrate precheck (running state, local disks, local resources), online/local-disks options for qemu, automatic restart-mode for a running lxc. Needs a signed-in session, `VM.Migrate` on the guest, and another node in the cluster -- the shared service token stays read-only here too. |
+| Any other write action (config edit/...)           | Not implemented | The proxy rejects non-`GET` requests to `/api/pve/*` outright; only guest power actions, rename/notes, snapshots and migrate (above) have dedicated write routes so far.         |
 
 ### Console thumbnails: host agent (optional)
 

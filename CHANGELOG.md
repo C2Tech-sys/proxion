@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Migrate a VM/CT to another cluster node from the object header's "More"
+  menu or the inventory tree's context menu: a target-node picker with a
+  live precheck (running state, local disks, local resources), online/
+  local-disks options for qemu, and automatic restart-mode migration for a
+  running lxc. Needs a signed-in session and `VM.Migrate` on the guest, same
+  allow-listed-write-route pattern as power actions, rename/notes and
+  snapshots.
+
 ## [0.2.2] - 2026-09-25
 
 ### Fixed

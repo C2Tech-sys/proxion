@@ -5,6 +5,8 @@ import {
   fixtureCreateSnapshot,
   fixtureDeleteSnapshot,
   fixtureRollbackSnapshot,
+  fixtureMigrateGuest,
+  fixtureMigratePrecheck,
 } from '@/api/actionsFixture';
 import type { GuestType } from '@/api/types';
 
@@ -263,6 +265,92 @@ export async function rollbackSnapshot(
 
   if (res.status === 202) {
     return (await res.json()) as SnapshotActionResult;
+  }
+  return throwSnapshotError(res);
+}
+
+/** Body for `migrateGuest`. Matches the server's own body contract for
+ * `POST /api/actions/guest/:node/:type/:vmid/migrate`. `withLocalDisks` is qemu-only;
+ * `restart` is lxc-only -- the server 400s if either is sent for the other guest type. */
+export interface MigrateGuestBody {
+  target: string;
+  online?: boolean;
+  /** qemu only. */
+  withLocalDisks?: boolean;
+  /** lxc only. */
+  restart?: boolean;
+  bwlimit?: number;
+  targetStorage?: string;
+}
+
+/** One node's migrate-precheck disqualification, as `MigratePrecheck.notAllowedNodes` reports
+ * it -- matches the server's own normalised shape (`apps/server/src/actions/migrateRoutes.ts`). */
+export interface MigratePrecheckNodeReason {
+  unavailableStorages: string[];
+  blockingHaResources: string[];
+}
+
+/** The guest's migrate precheck, normalised the same way for both guest types by the server
+ * (real PVE's own qemu/lxc migrate-precheck endpoints report different, hyphenation-inconsistent
+ * shapes -- see `migrateRoutes.ts`). lxc always reports empty `localDisks`/`localResources`,
+ * since PVE's own lxc precheck doesn't report either. */
+export interface MigratePrecheck {
+  running: boolean;
+  allowedNodes: string[];
+  notAllowedNodes: Record<string, MigratePrecheckNodeReason>;
+  localDisks: Array<{ volid: string; size: number; cdrom: boolean; isUnused: boolean }>;
+  localResources: string[];
+}
+
+/**
+ * Requests one guest migrate. Real mode: `POST /api/actions/guest/:node/:type/:vmid/migrate`
+ * (see the server README's "Guest actions" section). Fixture mode: simulates the request and
+ * moves the guest to the target node in the in-memory fixture resources (`actionsFixture.ts` /
+ * `fixtures.ts`'s `setFixtureGuestNode`).
+ */
+export async function migrateGuest(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  body: MigrateGuestBody,
+): Promise<GuestActionResult> {
+  if (USE_FIXTURES) {
+    return fixtureMigrateGuest(node, type, vmid, body);
+  }
+
+  const res = await fetch(`/api/actions/guest/${node}/${type}/${vmid}/migrate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 202) {
+    return (await res.json()) as GuestActionResult;
+  }
+  return throwSnapshotError(res);
+}
+
+/**
+ * Requests the guest's migrate precheck against `target`. Real mode:
+ * `GET /api/actions/guest/:node/:type/:vmid/migrate/precheck?target=<node>` (see the server
+ * README's "Guest actions" section). Fixture mode: a synthetic, demo-friendly precheck computed
+ * from the in-memory fixture data (`fixtures.ts`'s `getFixtureMigratePrecheck`).
+ */
+export async function getMigratePrecheck(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  target: string,
+): Promise<MigratePrecheck> {
+  if (USE_FIXTURES) {
+    return fixtureMigratePrecheck(node, type, vmid, target);
+  }
+
+  const res = await fetch(
+    `/api/actions/guest/${node}/${type}/${vmid}/migrate/precheck?target=${encodeURIComponent(target)}`,
+  );
+  if (res.ok) {
+    return (await res.json()) as MigratePrecheck;
   }
   return throwSnapshotError(res);
 }
