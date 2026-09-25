@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-25
+
+The first feature release after launch: a cluster-wide Guests list, snapshot
+management, and the polish items from the v0.1 backlog.
+
 ### Added
 
 - Guests page (`/guests`): a vSphere-style "VMs and Templates" view -- every guest across the
@@ -207,7 +212,8 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/C2Tech-sys/proxion/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/C2Tech-sys/proxion/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/C2Tech-sys/proxion/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/C2Tech-sys/proxion/releases/tag/v0.1.0
