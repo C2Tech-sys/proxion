@@ -1,11 +1,18 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { PveApiError, type PveClient } from '@proxion/pve-api';
 import { resolveIdentity } from '../pve/identity.js';
-import { SESSION_COOKIE } from '../auth/session.js';
+import { registerSnapshotRoutes } from './snapshotRoutes.js';
+import {
+  guestTypeSchema,
+  vmidSchema,
+  MAX_DESCRIPTION_LENGTH,
+  sanitizeDescription,
+  sanitizeMessage,
+  rateLimitKey,
+  hasPrivilege,
+} from './shared.js';
 
-const guestTypeSchema = z.enum(['qemu', 'lxc']);
-const vmidSchema = z.coerce.number().int().positive();
 const actionSchema = z.enum(['start', 'shutdown', 'stop', 'reboot', 'reset', 'suspend', 'resume']);
 
 /** These three actions only exist for `qemu` guests -- PVE has no lxc equivalent for reset, and
@@ -20,9 +27,6 @@ const bodySchema = z
     forceStop: z.boolean().optional(),
   })
   .strict();
-
-/** PVE's own limit on the `description` config field (both qemu and lxc). */
-const MAX_DESCRIPTION_LENGTH = 8192;
 
 /** PVE's max length for qemu's `name` field / lxc's `hostname` field -- both are validated as a
  * dns-name (see `isValidDnsName`), but the two have different total-length caps. */
@@ -66,56 +70,21 @@ function isValidDnsName(value: string, maxTotalLength: number): boolean {
   return value.split('.').every((label) => DNS_LABEL_RE.test(label));
 }
 
-// The control-character range this strips from `description` before it's sent to PVE -- every
-// C0 control character and DEL except `\n` (0x0a) and `\t` (0x09), which are left alone.
-// eslint-disable-next-line no-control-regex
-const DESCRIPTION_CONTROL_CHARS_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
-
 /** Normalises `description` to `\n` line endings and strips control characters other than
  * `\n`/`\t` before it's sent to PVE. Never lengthens the string, so validating `configBodySchema`'s
- * `description.max()` against the *un*-sanitised input is still a safe upper bound. */
-function sanitizeDescription(value: string): string {
-  return value.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(DESCRIPTION_CONTROL_CHARS_RE, '');
-}
-
-const MAX_MESSAGE_LENGTH = 300;
-
-// The control-character range is exactly what this needs to strip from a PVE error message
-// before it's relayed to the browser.
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHARS_RE = /[\x00-\x1f\x7f]/g;
-
-/** PVE's own error message, trimmed of control characters and capped in length before it's
- * relayed to the browser. */
-function sanitizeMessage(message: string): string {
-  const stripped = message.replace(CONTROL_CHARS_RE, '').trim();
-  return stripped.length > MAX_MESSAGE_LENGTH ? `${stripped.slice(0, MAX_MESSAGE_LENGTH)}…` : stripped;
-}
-
-/** Rate-limit key: per session when there is one (the signed cookie value is already unique per
- * session and never logged/parsed here), otherwise per caller IP. */
-function rateLimitKey(req: FastifyRequest): string {
-  const sid = req.cookies?.[SESSION_COOKIE];
-  return sid ? `session:${sid}` : req.ip;
-}
+ * `description.max()` against the *un*-sanitised input is still a safe upper bound. Now defined
+ * in `shared.ts` (re-imported above) so `snapshotRoutes.ts` can use it too without a circular
+ * import between the two route files. */
 
 async function hasPowerMgmt(client: PveClient, vmid: number): Promise<boolean> {
-  const vmPath = `/vms/${vmid}`;
-  const perms = (await client.get('/access/permissions', { path: vmPath })) as Record<string, unknown>;
-  // Real PVE nests the result under the requested path (`{ "/vms/113": { "VM.PowerMgmt": 1, ... } }`);
-  // fall back to a flat map in case that ever changes (mirrors `thumbnailRoutes.ts`).
-  const scoped = (perms[vmPath] as Record<string, unknown> | undefined) ?? perms;
-  return Boolean(scoped['VM.PowerMgmt']);
+  return hasPrivilege(client, vmid, 'VM.PowerMgmt');
 }
 
 /** Same shape as `hasPowerMgmt`, checking `VM.Config.Options` instead -- the privilege that gates
  * the rename/notes route below. A caller with `VM.PowerMgmt` but not `VM.Config.Options` (or vice
  * versa) is a different privilege and must still be refused. */
 async function hasConfigOptions(client: PveClient, vmid: number): Promise<boolean> {
-  const vmPath = `/vms/${vmid}`;
-  const perms = (await client.get('/access/permissions', { path: vmPath })) as Record<string, unknown>;
-  const scoped = (perms[vmPath] as Record<string, unknown> | undefined) ?? perms;
-  return Boolean(scoped['VM.Config.Options']);
+  return hasPrivilege(client, vmid, 'VM.Config.Options');
 }
 
 type ConfigChange = 'name' | 'description';
@@ -413,4 +382,9 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
       reply.code(200).send({ ok: true, changed });
     },
   );
+
+  // Snapshot create/delete/rollback (`snapshotRoutes.ts`) share this same 30/minute bucket --
+  // passed the already-built limiter rather than each getting its own via `app.rateLimit()`, for
+  // the identical reason the power-action and config routes above share it.
+  registerSnapshotRoutes(app, guestActionsRateLimit);
 }

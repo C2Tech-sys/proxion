@@ -1,17 +1,24 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import { USE_FIXTURES } from '@/api/client';
-import { CLUSTER_RESOURCES_QUERY_KEY } from '@/api/liveState';
+import { CLUSTER_RESOURCES_QUERY_KEY, TASKS_QUERY_KEY } from '@/api/liveState';
 import {
   guestAction,
   updateGuestConfig,
+  createSnapshot,
+  deleteSnapshot,
+  rollbackSnapshot,
   GuestActionError,
   type GuestAction,
   type GuestActionBody,
   type GuestConfigPatch,
+  type CreateSnapshotBody,
+  type DeleteSnapshotOptions,
+  type RollbackSnapshotOptions,
+  type SnapshotActionResult,
 } from '@/api/actions';
-import type { GuestType } from '@/api/types';
+import type { GuestType, PveTask } from '@/api/types';
 
 const ACTION_LABELS: Record<GuestAction, string> = {
   start: 'Start',
@@ -89,6 +96,109 @@ export function useUpdateGuestConfig() {
       void queryClient.invalidateQueries({ queryKey: ['vm-config', vars.node, vars.type, vars.vmid] });
       void queryClient.invalidateQueries({ queryKey: ['vm-status', vars.node, vars.type, vars.vmid] });
       void queryClient.invalidateQueries({ queryKey: CLUSTER_RESOURCES_QUERY_KEY });
+    },
+  });
+}
+
+/** One snapshot create/delete/rollback, as `useSnapshotAction`'s single mutation dispatches it --
+ * mirrors the three server routes (`apps/server/src/actions/snapshotRoutes.ts`) and their web
+ * `src/api/actions.ts` counterparts. */
+export type SnapshotActionVars =
+  | { op: 'create'; node: string; type: GuestType; vmid: number; body: CreateSnapshotBody }
+  | { op: 'delete'; node: string; type: GuestType; vmid: number; snapname: string; options?: DeleteSnapshotOptions }
+  | {
+      op: 'rollback';
+      node: string;
+      type: GuestType;
+      vmid: number;
+      snapname: string;
+      options?: RollbackSnapshotOptions;
+    };
+
+const SNAPSHOT_ACTION_LABEL: Record<SnapshotActionVars['op'], string> = {
+  create: 'Snapshot requested',
+  delete: 'Snapshot delete requested',
+  rollback: 'Rollback requested',
+};
+
+function runSnapshotAction(vars: SnapshotActionVars): Promise<SnapshotActionResult> {
+  switch (vars.op) {
+    case 'create':
+      return createSnapshot(vars.node, vars.type, vars.vmid, vars.body);
+    case 'delete':
+      return deleteSnapshot(vars.node, vars.type, vars.vmid, vars.snapname, vars.options);
+    case 'rollback':
+      return rollbackSnapshot(vars.node, vars.type, vars.vmid, vars.snapname, vars.options);
+  }
+}
+
+/** How long after a snapshot mutation succeeds to invalidate `['snapshots', ...]` a second time,
+ * on top of the immediate invalidation -- PVE's own snapshot create/delete/rollback are
+ * asynchronous tasks (this mutation only gets a UPID back, not the finished result), so a second
+ * pass a few seconds later catches the common case where the task has already finished by then,
+ * without waiting on the live task feed. */
+const SNAPSHOT_REFETCH_DELAY_MS = 3000;
+
+/** How long `watchTaskCompletion` keeps a task's live-feed subscription open before giving up --
+ * belt-and-suspenders so a UPID that never shows up in `['tasks']` (e.g. it scrolled out of the
+ * cluster-wide recent-task window before this ever saw it) doesn't leak a subscription forever. */
+const TASK_WATCH_TIMEOUT_MS = 60_000;
+
+/**
+ * Watches the shared `['tasks']` query (kept live by `subscribeLiveEvents` in `liveState.ts`,
+ * which this never imports or modifies -- only reads its cache) for `upid` to show up with an
+ * `endtime`, then calls `onFinished` once and stops watching. A no-op in fixture mode: the fixture
+ * client has no live task feed, and `SNAPSHOT_REFETCH_DELAY_MS`'s delayed invalidation alone is
+ * enough there (the fixture mutation has already completed synchronously by the time it fires).
+ */
+function watchTaskCompletion(queryClient: QueryClient, upid: string, onFinished: () => void): void {
+  if (USE_FIXTURES) return;
+
+  const stop = queryClient.getQueryCache().subscribe((event) => {
+    const key = event.query.queryKey;
+    if (key.length !== TASKS_QUERY_KEY.length || key[0] !== TASKS_QUERY_KEY[0]) return;
+    const tasks = queryClient.getQueryData<PveTask[]>(TASKS_QUERY_KEY);
+    const task = tasks?.find((t) => t.upid === upid);
+    if (task && task.endtime !== undefined) {
+      onFinished();
+      clearTimeout(timeout);
+      stop();
+    }
+  });
+  const timeout = setTimeout(stop, TASK_WATCH_TIMEOUT_MS);
+}
+
+/**
+ * Requests one snapshot create/delete/rollback (`src/api/actions.ts`). On success: a
+ * "<Snapshot action> requested — task <short upid>" toast, and invalidates this guest's own
+ * `['snapshots', ...]` query immediately, again ~3s later (`SNAPSHOT_REFETCH_DELAY_MS`), and once
+ * more the moment the live task feed reports the task finished (`watchTaskCompletion`) -- PVE's
+ * snapshot operations are all asynchronous tasks, so none of the three alone is reliably both
+ * fast and correct. A rollback also invalidates this guest's status query and the cluster-wide
+ * resources query, since `start: true` can boot a stopped guest back up. On error: a toast with
+ * the server's message, same convention as `useGuestAction`.
+ */
+export function useSnapshotAction() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: runSnapshotAction,
+    onSuccess: (result, vars) => {
+      toast.success(`${SNAPSHOT_ACTION_LABEL[vars.op]} — task ${shortUpid(result.upid)}`);
+
+      const snapshotsKey = ['snapshots', vars.node, vars.type, vars.vmid];
+      const invalidateSnapshots = () => void queryClient.invalidateQueries({ queryKey: snapshotsKey });
+      invalidateSnapshots();
+      setTimeout(invalidateSnapshots, SNAPSHOT_REFETCH_DELAY_MS);
+      watchTaskCompletion(queryClient, result.upid, invalidateSnapshots);
+
+      if (vars.op === 'rollback') {
+        void queryClient.invalidateQueries({ queryKey: ['vm-status', vars.node, vars.type, vars.vmid] });
+        void queryClient.invalidateQueries({ queryKey: CLUSTER_RESOURCES_QUERY_KEY });
+      }
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof GuestActionError ? error.message : 'The snapshot action could not be started.');
     },
   });
 }

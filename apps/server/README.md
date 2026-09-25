@@ -164,6 +164,45 @@ mapped the same way as the power-action route. Each successful update logs
 one `info` line (username, node, type, vmid, changed) -- never the name or
 description text itself.
 
+**`POST /api/actions/guest/:node/:type/:vmid/snapshots`** creates a snapshot.
+The JSON body is `{ snapname: string; description?: string; vmstate?: boolean }`,
+strictly validated -- an unknown key is `400`. `snapname` must start with a
+letter, then letters/digits/underscores/hyphens, 2-40 characters total, and
+must not be `current` (PVE's reserved live-state sentinel); a bad name is
+`400 { error: "invalid-snapname", message }`. `description` is capped at
+8192 characters and sanitised exactly like the config route's own
+`description` (line endings normalised, control characters stripped, never
+logged). `vmstate` (include RAM) only applies to qemu guests -- sending it
+for an lxc guest is `400`. The permission checked is `VM.Snapshot` on
+`/vms/{vmid}` (missing it is `403 { error: "forbidden", missing:
+"VM.Snapshot" }`). The create goes out as one `POST
+/nodes/{node}/{type}/{vmid}/snapshot` call (qemu accepts `vmstate`; lxc's
+endpoint has no such parameter) -- PVE's snapshot create is asynchronous, so
+a success responds `202 { upid }`, same as the power-action route.
+
+**`DELETE /api/actions/guest/:node/:type/:vmid/snapshots/:snapname`** deletes
+a snapshot -- the same name rule applies (`current` is `400`). An optional
+`?force=1` query param is forwarded to PVE as `force`. Permission, identity,
+token-mode and error-mapping are exactly as the create route above, checking
+`VM.Snapshot` again, and it goes out as `DELETE
+/nodes/{node}/{type}/{vmid}/snapshot/{snapname}`, responding `202 { upid }`.
+
+**`POST /api/actions/guest/:node/:type/:vmid/snapshots/:snapname/rollback`**
+rolls a guest back to a snapshot -- the same name rule applies. The JSON body
+is `{ start?: boolean }`; `start` (start the guest after rolling back) is
+qemu-only -- sending it for an lxc guest is `400`, since lxc's rollback
+endpoint has no such parameter. This is the one snapshot route with its own,
+stricter permission: `VM.Snapshot.Rollback` on `/vms/{vmid}` (missing it is
+`403 { error: "forbidden", missing: "VM.Snapshot.Rollback" }` -- `VM.Snapshot`
+alone is not enough, since a rollback discards data a plain snapshot
+operation never does). It goes out as `POST
+/nodes/{node}/{type}/{vmid}/snapshot/{snapname}/rollback`, responding
+`202 { upid }`.
+
+All three snapshot routes share the same 30/minute rate-limit bucket as the
+power-action and config routes above, and log one `info` line per request
+(username, node, type, vmid, snapname, upid) -- never the description.
+
 ## Live state: poller + SSE
 
 Only active when a service token (`PVE_TOKEN_ID` + `PVE_TOKEN_SECRET`) is

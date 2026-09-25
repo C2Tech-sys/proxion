@@ -1,6 +1,14 @@
-import { setFixtureGuestConfig, setFixtureGuestStatus } from '@/api/fixtures';
+import { setFixtureGuestConfig, setFixtureGuestStatus, setFixtureSnapshots } from '@/api/fixtures';
 import type { GuestType } from '@/api/types';
-import type { GuestAction, GuestActionResult, GuestConfigPatch, GuestConfigUpdateResult } from '@/api/actions';
+import type {
+  CreateSnapshotBody,
+  GuestAction,
+  GuestActionResult,
+  GuestConfigPatch,
+  GuestConfigUpdateResult,
+  RollbackSnapshotOptions,
+  SnapshotActionResult,
+} from '@/api/actions';
 
 /** Matches the real route's own simulated latency budget closely enough to feel real, without
  * being long enough to make the demo feel slow. */
@@ -34,9 +42,15 @@ let fixtureUpidSeq = 0;
  * "task <short upid>" toast and for the Tasks drawer to not look out of place, if it ever grows
  * fixture-mode task rows for these actions. */
 function fakeUpid(node: string, vmid: number, action: GuestAction): string {
+  return fakeUpidFor(node, vmid, action);
+}
+
+/** Shared by `fakeUpid` above and the three snapshot fixtures below -- `op` is a PVE task type
+ * string (`snapshot`, `delsnapshot`, `qmrollback`/`vzrollback`, or a guest power action). */
+function fakeUpidFor(node: string, vmid: number, op: string): string {
   fixtureUpidSeq += 1;
   const seq = fixtureUpidSeq.toString(16).padStart(8, '0');
-  return `UPID:${node}:${seq}:00000000:00000000:${action}:${vmid}:demo@pve!fixtures:`;
+  return `UPID:${node}:${seq}:00000000:00000000:${op}:${vmid}:demo@pve!fixtures:`;
 }
 
 /** Fixture-mode implementation of `guestAction` (see `src/api/actions.ts`): no real request,
@@ -67,4 +81,52 @@ export async function fixtureUpdateGuestConfig(
   if (patch.name !== undefined) changed.push('name');
   if (patch.description !== undefined) changed.push('description');
   return delay({ ok: true, changed });
+}
+
+/** Fixture-mode implementation of `createSnapshot` (see `src/api/actions.ts`): no real request,
+ * just a simulated delay and an in-memory add to the fixture snapshot tree (`setFixtureSnapshots`). */
+export async function fixtureCreateSnapshot(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  body: CreateSnapshotBody,
+): Promise<SnapshotActionResult> {
+  setFixtureSnapshots(node, type, vmid, {
+    op: 'create',
+    snapname: body.snapname,
+    ...(body.description !== undefined ? { description: body.description } : {}),
+    ...(body.vmstate !== undefined ? { vmstate: body.vmstate } : {}),
+  });
+  return delay({ upid: fakeUpidFor(node, vmid, 'snapshot') });
+}
+
+/** Fixture-mode implementation of `deleteSnapshot` (see `src/api/actions.ts`): no real request,
+ * just a simulated delay and an in-memory removal from the fixture snapshot tree. `force` has no
+ * fixture-visible effect (there's nothing to force through against in-memory data). */
+export async function fixtureDeleteSnapshot(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  snapname: string,
+): Promise<SnapshotActionResult> {
+  setFixtureSnapshots(node, type, vmid, { op: 'delete', snapname });
+  return delay({ upid: fakeUpidFor(node, vmid, 'delsnapshot') });
+}
+
+/** Fixture-mode implementation of `rollbackSnapshot` (see `src/api/actions.ts`): no real
+ * request, just a simulated delay, an in-memory move of "current" under the chosen snapshot, and
+ * -- when `start` is set -- the same fixture status flip `fixtureGuestAction('start')` gives, so
+ * the demo visibly reflects a rollback booting a stopped guest back up. */
+export async function fixtureRollbackSnapshot(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  snapname: string,
+  options?: RollbackSnapshotOptions,
+): Promise<SnapshotActionResult> {
+  setFixtureSnapshots(node, type, vmid, { op: 'rollback', snapname });
+  if (options?.start) {
+    setFixtureGuestStatus(node, type, vmid, 'running');
+  }
+  return delay({ upid: fakeUpidFor(node, vmid, 'rollback') });
 }
