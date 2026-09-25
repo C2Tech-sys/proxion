@@ -1,5 +1,5 @@
 import { useState, type DragEvent, type ReactNode } from 'react';
-import { Copy, GripVertical, HardDrive, Network, Pencil } from 'lucide-react';
+import { Camera, Copy, GripVertical, HardDrive, Network, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { ArrangeablePanel } from '@/components/ArrangeablePanel';
@@ -9,6 +9,7 @@ import { Sparkline } from '@/components/Sparkline';
 import { EmptyState } from '@/components/EmptyState';
 import { ConsoleThumbnail } from '@/components/ConsoleThumbnail';
 import { NotesEditor } from '@/components/NotesEditor';
+import { SnapshotCreateDialog } from '@/components/actions/SnapshotDialogs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { usePrefs, useUpdatePrefs } from '@/api/prefsHooks';
 import { Button } from '@/components/ui/button';
@@ -22,6 +23,7 @@ import {
   useClusterResources,
   useNodeTasks,
   useRrd,
+  useSnapshots,
   useVmConfig,
   useVmStatus,
 } from '@/api/hooks';
@@ -110,6 +112,8 @@ export function SummaryTab({ node, type, vmid }: VmTabProps) {
   const permissions = usePermissions(vmid);
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [arrangeMode, setArrangeMode] = useState(false);
+  const snapshotsQuery = useSnapshots(node, type, vmid);
+  const [snapshotDialogOpen, setSnapshotDialogOpen] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
 
@@ -118,6 +122,15 @@ export function SummaryTab({ node, type, vmid }: VmTabProps) {
   const isSessionMode = USE_FIXTURES || auth.data?.mode === 'session';
   const hasConfigOptions = permissions.data?.can('VM.Config.Options') === true;
   const canEditNotes = isSessionMode && hasConfigOptions;
+  // Same gate the Snapshots tab uses for its own "Take snapshot" button.
+  const hasSnapshotPrivilege = permissions.data?.can('VM.Snapshot') === true;
+  const canTakeSnapshot = isSessionMode && hasSnapshotPrivilege;
+  const takeSnapshotDisabledReason = !isSessionMode
+    ? 'Read-only: signed in with a service token'
+    : "You don't have VM.Snapshot on this guest";
+  const realSnapshots = (snapshotsQuery.data ?? [])
+    .filter((snap) => snap.name !== 'current')
+    .sort((a, b) => (b.snaptime ?? 0) - (a.snaptime ?? 0));
   const notesDisabledReason = !isSessionMode
     ? 'Read-only: signed in with a service token'
     : "You don't have VM.Config.Options on this guest";
@@ -448,15 +461,51 @@ export function SummaryTab({ node, type, vmid }: VmTabProps) {
     snapshots: {
       title: 'Snapshots',
       span: 1,
-      content: (
-        <EmptyState
-          message="0 snapshots."
-          action={
-            <Button variant="ghost" size="sm" disabled>
-              Take snapshot
-            </Button>
-          }
-        />
+      action: canTakeSnapshot ? (
+        <Button variant="ghost" size="sm" onClick={() => setSnapshotDialogOpen(true)}>
+          <Camera /> Take snapshot
+        </Button>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span tabIndex={0} className="inline-flex rounded-md focus-visible:ring-[3px] focus-visible:ring-ring/50">
+              <Button variant="ghost" size="sm" disabled aria-disabled="true" tabIndex={-1} className="pointer-events-none">
+                <Camera /> Take snapshot
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{takeSnapshotDisabledReason}</TooltipContent>
+        </Tooltip>
+      ),
+      content: snapshotsQuery.isLoading ? (
+        <Skeleton className="h-16" />
+      ) : realSnapshots.length === 0 ? (
+        <EmptyState message="No snapshots yet." />
+      ) : (
+        <div className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-1.5">
+            {realSnapshots.slice(0, 3).map((snap) => (
+              <li key={snap.name} className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="truncate" title={snap.description || snap.name}>
+                  {snap.name}
+                </span>
+                <span className="shrink-0 font-numeric text-xs text-muted-foreground">
+                  {snap.snaptime ? formatDateTime(snap.snaptime) : '\u2014'}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <Link
+            to="/vm/$node/$type/$vmid"
+            params={{ node, type, vmid: String(vmid) }}
+            search={{ tab: 'snapshots' }}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            {realSnapshots.length === 1
+              ? '1 snapshot \u00b7 open the Snapshots tab'
+              : `${realSnapshots.length} snapshots \u00b7 open the Snapshots tab`}
+          </Link>
+        </div>
       ),
     },
 
@@ -682,6 +731,16 @@ export function SummaryTab({ node, type, vmid }: VmTabProps) {
           );
         })}
       </div>
+
+      <SnapshotCreateDialog
+        key={snapshotDialogOpen ? 'open' : 'closed'}
+        open={snapshotDialogOpen}
+        onOpenChange={setSnapshotDialogOpen}
+        node={node}
+        type={type}
+        vmid={vmid}
+        canIncludeRam={type === 'qemu' && status?.status === 'running'}
+      />
     </div>
   );
 }

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-25
+
+### Fixed
+
+- The Summary tab's Snapshots panel was still the read-only placeholder ("0
+  snapshots" and a permanently disabled button). It now shows the guest's real
+  snapshots, links to the Snapshots tab, and its "Take snapshot" opens the same
+  create dialog as the tab, under the same permission gate.
+
 ## [0.2.0] - 2026-09-25
 
 The first feature release after launch: a cluster-wide Guests list, snapshot
@@ -212,7 +221,8 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/C2Tech-sys/proxion/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/C2Tech-sys/proxion/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/C2Tech-sys/proxion/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/C2Tech-sys/proxion/compare/v0.1.0...v0.1.1
