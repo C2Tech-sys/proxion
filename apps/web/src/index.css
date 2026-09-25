@@ -217,6 +217,20 @@
 }
 
 @layer base {
+  /*
+   * Disabled state for the form primitives, as a rule on the real `:disabled` pseudo-class
+   * rather than `disabled:` utility classes on the element: password managers read class
+   * names, not styles, and Keeper skips a field whose class attribute contains "opacity"
+   * (bisected on the live site against v0.1.1: `disabled:opacity-50` alone hid its icon; a
+   * made-up "disabled-marker" class did not). A login field must never carry such a token.
+   */
+  [data-slot='input']:disabled,
+  [data-slot='textarea']:disabled {
+    pointer-events: none;
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
   * {
     @apply border-border outline-ring/50;
   }

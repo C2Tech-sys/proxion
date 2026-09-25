@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-25
+
+### Fixed
+
+- Password managers now recognise the login form. Keeper skipped the fields
+  because their class attribute contained `disabled:opacity-50` (it reads class
+  names, not styles, and treats "opacity" as a faded or hidden field). The
+  disabled look for inputs and textareas moved to a stylesheet rule on the
+  real `:disabled` state, and a test forbids such tokens on the login fields.
+
 ## [0.1.1] - 2026-09-24
 
 Launch polish: a public demo, a password-manager-friendly login form, and
@@ -163,6 +173,7 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/C2Tech-sys/proxion/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/C2Tech-sys/proxion/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/C2Tech-sys/proxion/releases/tag/v0.1.0

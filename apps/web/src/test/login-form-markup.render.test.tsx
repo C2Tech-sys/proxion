@@ -34,4 +34,13 @@ describe('login form markup for password managers', () => {
     expect(form).toHaveAttribute('method', 'post');
     expect(form?.querySelector('button[type="submit"]')).not.toBeNull();
   });
+
+  it("never puts manager-hostile words in the login fields' class attribute", () => {
+    // Keeper skips fields whose class names contain "opacity" (proven on the live site); the
+    // rest are the usual suspects other managers sniff for -- see input.tsx.
+    const hostile = /opacity|pointer-events-none|hidden|invisible|readonly/i;
+    for (const el of Array.from(document.querySelectorAll('input#username, input#password'))) {
+      expect(el.getAttribute('class') ?? '').not.toMatch(hostile);
+    }
+  });
 });
