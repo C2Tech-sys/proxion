@@ -64,3 +64,14 @@ export async function hasPrivilege(client: PveClient, vmid: number, privilege: s
   const scoped = (perms[vmPath] as Record<string, unknown> | undefined) ?? perms;
   return Boolean(scoped[privilege]);
 }
+
+/** Same as `hasPrivilege`, but for a node-scoped privilege on `/nodes/{node}` (e.g.
+ * `Sys.PowerMgmt`) instead of a guest-scoped one on `/vms/{vmid}` -- used by `nodeRoutes.ts`.
+ * Additive next to `hasPrivilege` rather than a generalisation of it, so the existing guest-action
+ * callers/tests are untouched. */
+export async function hasNodePrivilege(client: PveClient, node: string, privilege: string): Promise<boolean> {
+  const nodePath = `/nodes/${node}`;
+  const perms = (await client.get('/access/permissions', { path: nodePath })) as Record<string, unknown>;
+  const scoped = (perms[nodePath] as Record<string, unknown> | undefined) ?? perms;
+  return Boolean(scoped[privilege]);
+}

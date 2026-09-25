@@ -14,6 +14,8 @@ import type {
   GuestConfigUpdateResult,
   MigrateGuestBody,
   MigratePrecheck,
+  NodeActionCommand,
+  NodeActionResult,
   RollbackSnapshotOptions,
   SnapshotActionResult,
 } from '@/api/actions';
@@ -163,4 +165,17 @@ export async function fixtureMigratePrecheck(
   target: string | undefined,
 ): Promise<MigratePrecheck> {
   return delay(getFixtureMigratePrecheck(node, type, vmid, target));
+}
+
+/** Fixture-mode implementation of `nodeAction` (see `src/api/actions.ts`): no real request, just
+ * a simulated delay -- a node reboot/shutdown has no fixture-visible state to change (there's no
+ * "node is down" concept in the demo's in-memory cluster resources), so `node`/`command` are
+ * accepted only to match `nodeAction`'s own signature and otherwise unused. */
+export async function fixtureNodeAction(
+  node: string,
+  command: NodeActionCommand,
+): Promise<NodeActionResult> {
+  void node;
+  void command;
+  return delay({ ok: true });
 }

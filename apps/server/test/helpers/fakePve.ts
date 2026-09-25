@@ -24,6 +24,9 @@ export interface FakePve {
    * a privilege set `false` here is removed even if it would otherwise default to present.
    */
   setVmPermissions: (vmid: number, privs: Record<string, boolean>) => void;
+  /** Same as `setVmPermissions`, but for a node-scoped path (`/access/permissions?path=/nodes/{node}`)
+   * instead of a guest-scoped one -- used by `nodeActions.test.ts`. */
+  setNodePermissions: (node: string, privs: Record<string, boolean>) => void;
   /** Sets the `status` field `status/current` reports for a given (type, vmid). Defaults to `running`. */
   setVmStatus: (type: 'qemu' | 'lxc', vmid: number, status: 'running' | 'stopped') => void;
   /** Every `POST .../status/{action}` request PVE has received, in order (path + parsed form body). */
@@ -65,6 +68,11 @@ export interface FakePve {
   /** Sets the `GET .../{type}/{vmid}/migrate` precheck response for a given (type, vmid) --
    * whatever raw PVE-shaped object is given here is returned verbatim as `{ data: ... }`. */
   setMigratePrecheck: (type: 'qemu' | 'lxc', vmid: number, data: unknown) => void;
+  /** Every `POST .../nodes/{node}/status` request PVE has received, in order (node + parsed form
+   * body). Used by `nodeActions.test.ts` to assert exactly what was sent. */
+  nodeStatusCalls: Array<{ node: string; body: Record<string, string> }>;
+  /** Makes the next matching `POST .../nodes/{node}/status` call fail with the given status/message. */
+  setNodeStatusError: (node: string, status: number, message: string) => void;
   close: () => Promise<void>;
 }
 
@@ -181,12 +189,15 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   // route -- default to "allowed" / "running" so most tests need no setup.
   const consolePermissionByVmid = new Map<number, boolean>();
   const extraPermsByVmid = new Map<number, Record<string, boolean>>();
+  const extraPermsByNode = new Map<string, Record<string, boolean>>();
   const statusByGuest = new Map<string, 'running' | 'stopped'>();
 
   app.get('/api2/json/access/permissions', async (req, reply) => {
     const query = req.query as { path?: string };
-    const match = query.path?.match(/^\/vms\/(\d+)$/);
-    const vmid = match ? Number(match[1]) : undefined;
+    const vmMatch = query.path?.match(/^\/vms\/(\d+)$/);
+    const nodeMatch = query.path?.match(/^\/nodes\/(.+)$/);
+    const vmid = vmMatch ? Number(vmMatch[1]) : undefined;
+    const node = nodeMatch ? nodeMatch[1] : undefined;
     const allowed = vmid === undefined ? true : (consolePermissionByVmid.get(vmid) ?? true);
     // Real PVE nests the result under the requested path, e.g.
     // `{ "/vms/113": { "VM.Console": 1, ... } }` -- not a flat map.
@@ -200,6 +211,20 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
         if (grant) base[priv] = 1;
         else delete base[priv];
       }
+    }
+    // Node-scoped path (`/nodes/{node}`): no defaults at all -- absent a `setNodePermissions`
+    // call, a node grants nothing (unlike the vm path's `VM.Console`/`VM.Audit` defaults, which
+    // exist for the console-thumbnail tests that predate node permissions entirely).
+    if (node !== undefined) {
+      const nodeOverrides = extraPermsByNode.get(node);
+      const nodeBase: Record<string, number> = {};
+      if (nodeOverrides) {
+        for (const [priv, grant] of Object.entries(nodeOverrides)) {
+          if (grant) nodeBase[priv] = 1;
+        }
+      }
+      reply.send({ data: { [path]: nodeBase } });
+      return;
     }
     reply.send({ data: { [path]: base } });
   });
@@ -360,6 +385,24 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   registerMigrateRoutesForType('qemu');
   registerMigrateRoutesForType('lxc');
 
+  // Node power-action endpoint (`POST /nodes/{node}/status`), used by `src/actions/nodeRoutes.ts`.
+  // PVE returns nothing useful for this endpoint (no UPID); this records every call (node +
+  // parsed form body) and replies with an empty `data` on success, same recording pattern as the
+  // guest-action/config/snapshot/migrate routes above.
+  const nodeStatusCalls: Array<{ node: string; body: Record<string, string> }> = [];
+  const nodeStatusErrors = new Map<string, { status: number; message: string }>();
+
+  app.post('/api2/json/nodes/:node/status', async (req, reply) => {
+    const { node } = req.params as { node: string };
+    nodeStatusCalls.push({ node, body: (req.body ?? {}) as Record<string, string> });
+    const failure = nodeStatusErrors.get(node);
+    if (failure) {
+      reply.code(failure.status).send({ data: null, message: failure.message });
+      return;
+    }
+    reply.send({ data: null });
+  });
+
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
   return {
@@ -392,6 +435,9 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     },
     setVmPermissions: (vmid: number, privs: Record<string, boolean>) => {
       extraPermsByVmid.set(vmid, privs);
+    },
+    setNodePermissions: (node: string, privs: Record<string, boolean>) => {
+      extraPermsByNode.set(node, privs);
     },
     setVmStatus: (type: 'qemu' | 'lxc', vmid: number, status: 'running' | 'stopped') => {
       statusByGuest.set(`${type}:${vmid}`, status);
@@ -432,6 +478,12 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     },
     setMigratePrecheck: (type: 'qemu' | 'lxc', vmid: number, data: unknown) => {
       migratePrechecks.set(migrateKey(type, vmid), data);
+    },
+    get nodeStatusCalls() {
+      return nodeStatusCalls;
+    },
+    setNodeStatusError: (node: string, status: number, message: string) => {
+      nodeStatusErrors.set(node, { status, message });
     },
     close: () => app.close(),
   };

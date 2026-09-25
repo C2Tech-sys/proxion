@@ -4,6 +4,7 @@ import { PveApiError, type PveClient } from '@proxion/pve-api';
 import { resolveIdentity } from '../pve/identity.js';
 import { registerSnapshotRoutes } from './snapshotRoutes.js';
 import { registerMigrateRoutes } from './migrateRoutes.js';
+import { registerNodeRoutes } from './nodeRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -391,4 +392,7 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
 
   // Guest migrate (start + precheck) (`migrateRoutes.ts`) shares the same bucket, same rationale.
   registerMigrateRoutes(app, guestActionsRateLimit);
+
+  // Node power actions (reboot/shutdown) (`nodeRoutes.ts`) share the same bucket, same rationale.
+  registerNodeRoutes(app, guestActionsRateLimit);
 }

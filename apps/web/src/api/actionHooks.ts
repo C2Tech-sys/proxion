@@ -14,6 +14,7 @@ import {
   rollbackSnapshot,
   migrateGuest,
   getMigratePrecheck,
+  nodeAction,
   GuestActionError,
   type GuestAction,
   type GuestActionBody,
@@ -23,6 +24,7 @@ import {
   type RollbackSnapshotOptions,
   type SnapshotActionResult,
   type MigrateGuestBody,
+  type NodeActionCommand,
 } from '@/api/actions';
 import type { GuestType, PveTask } from '@/api/types';
 
@@ -295,6 +297,40 @@ export function useMigratePrecheck(
   });
 }
 
+export interface NodeActionVars {
+  node: string;
+  command: NodeActionCommand;
+}
+
+const NODE_ACTION_LABEL: Record<NodeActionCommand, string> = {
+  reboot: 'Reboot requested for',
+  shutdown: 'Shutdown requested for',
+};
+
+/**
+ * Requests one node power action (`src/api/actions.ts`). On success: a "<Reboot/Shutdown>
+ * requested for <node>" toast, and invalidates this node's own status query plus the cluster-wide
+ * resources query, same convention as `useGuestAction`. There is no UPID to watch for completion
+ * (PVE's `/nodes/{node}/status` returns nothing useful -- see `nodeRoutes.ts`), so unlike
+ * `useMigrateGuest`/`useSnapshotAction` this doesn't wait on the live task feed. On error: a
+ * toast with the server's message.
+ */
+export function useNodeAction() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (vars: NodeActionVars) => nodeAction(vars.node, vars.command),
+    onSuccess: (_result, vars) => {
+      toast.success(`${NODE_ACTION_LABEL[vars.command]} ${vars.node}`);
+      void queryClient.invalidateQueries({ queryKey: ['node-status', vars.node] });
+      void queryClient.invalidateQueries({ queryKey: CLUSTER_RESOURCES_QUERY_KEY });
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof GuestActionError ? error.message : 'The node action could not be started.');
+    },
+  });
+}
+
 export interface GuestPermissions {
   /** Whether the caller holds the given PVE privilege on this guest (e.g. `"VM.PowerMgmt"`). */
   can: (privilege: string) => boolean;
@@ -331,6 +367,31 @@ export function usePermissions(vmid: number) {
       return { can: (privilege: string) => Boolean(scoped[privilege]) };
     },
     enabled: !USE_FIXTURES && Boolean(vmid),
+    staleTime: 5 * 60 * 1000,
+    ...(USE_FIXTURES ? { initialData: ALL_PRIVILEGES } : {}),
+  });
+}
+
+/**
+ * The caller's PVE permissions on one node (`GET /access/permissions?path=/nodes/{node}`, through
+ * the existing read-only `/api/pve/*` proxy) -- same shape and rationale as `usePermissions`
+ * above, scoped to `/nodes/{node}` instead of `/vms/{vmid}` for `NodePowerMenu`'s own gating
+ * (`Sys.PowerMgmt`). Fixture mode never makes the request -- the demo always reports every
+ * privilege as granted, same as `usePermissions`.
+ */
+export function useNodePermissions(node: string) {
+  const nodePath = `/nodes/${node}`;
+
+  return useQuery({
+    queryKey: ['node-permissions', node],
+    queryFn: async (): Promise<GuestPermissions> => {
+      const res = await fetch(`/api/pve/access/permissions?path=${encodeURIComponent(nodePath)}`);
+      if (!res.ok) throw new Error(`Failed to load permissions for node ${node}: ${res.status}`);
+      const envelope = (await res.json()) as { data?: unknown };
+      const scoped = scopedPermissions(envelope.data, nodePath);
+      return { can: (privilege: string) => Boolean(scoped[privilege]) };
+    },
+    enabled: !USE_FIXTURES && Boolean(node),
     staleTime: 5 * 60 * 1000,
     ...(USE_FIXTURES ? { initialData: ALL_PRIVILEGES } : {}),
   });
