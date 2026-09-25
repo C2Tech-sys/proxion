@@ -7,6 +7,7 @@ import {
   fixtureRollbackSnapshot,
   fixtureMigrateGuest,
   fixtureMigratePrecheck,
+  fixtureNodeAction,
 } from '@/api/actionsFixture';
 import type { GuestType } from '@/api/types';
 
@@ -353,6 +354,37 @@ export async function getMigratePrecheck(
   const res = await fetch(`/api/actions/guest/${node}/${type}/${vmid}/migrate/precheck${query}`);
   if (res.ok) {
     return (await res.json()) as MigratePrecheck;
+  }
+  return throwSnapshotError(res);
+}
+
+/** The node power actions this app supports -- matches the server's own allow-list
+ * (`apps/server/src/actions/nodeRoutes.ts`). */
+export type NodeActionCommand = 'reboot' | 'shutdown';
+
+export interface NodeActionResult {
+  ok: true;
+}
+
+/**
+ * Requests one node power action. Real mode: `POST /api/actions/node/:node/:command` (see the
+ * server README's "Node power" section). PVE returns nothing useful for this endpoint, so there
+ * is no UPID here (unlike `guestAction`) -- just `{ ok: true }` on success. Fixture mode:
+ * simulates the request; it has no fixture-visible state to change.
+ */
+export async function nodeAction(node: string, command: NodeActionCommand): Promise<NodeActionResult> {
+  if (USE_FIXTURES) {
+    return fixtureNodeAction(node, command);
+  }
+
+  const res = await fetch(`/api/actions/node/${node}/${command}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+
+  if (res.status === 202) {
+    return (await res.json()) as NodeActionResult;
   }
   return throwSnapshotError(res);
 }

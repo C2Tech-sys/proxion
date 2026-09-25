@@ -4,6 +4,7 @@ import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { EmptyState } from '@/components/EmptyState';
 import { StatusDot } from '@/components/StatusDot';
 import { TabStrip } from '@/components/TabStrip';
+import { NodePowerMenu } from '@/components/actions/NodePowerMenu';
 import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { useNodeStatus } from '@/api/hooks';
 import { isNotFoundError } from '@/api/errors';
@@ -69,7 +70,10 @@ function NodePage() {
     // internally (one scrollbar, in the tab body) instead of the whole page scrolling.
     <div className="flex h-full min-h-0 flex-1 flex-col">
       {/* Same two-row shape as ObjectHeader.tsx (T10b, finding 2): title + type label on the
-          title row, uptime as metadata on its own 13px line below. */}
+          title row, uptime as metadata on its own 13px line below. The "Power" dropdown (T29)
+          sits in the same `ml-auto` slot ObjectHeader's own `extra` prop occupies on guest
+          pages, for the identical reason: quick actions belong at the right edge of the title
+          row, ahead of nothing else here since this page has no per-guest actions of its own. */}
       <div className="flex flex-col gap-1 border-b border-border px-4 py-2.5">
         <Breadcrumbs items={[{ label: 'Datacenter', to: 'home' }, { label: node }]} />
         <div className="flex items-center gap-2">
@@ -78,6 +82,9 @@ function NodePage() {
             {node}
           </h1>
           <span className="shrink-0 text-xs text-muted-foreground">Node</span>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <NodePowerMenu node={node} />
+          </div>
         </div>
         {status && (
           <div className="flex items-center gap-2 text-[13px] text-muted-foreground">

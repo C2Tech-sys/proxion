@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Storage browser (`/storage/$node/$storage`): a vSphere-style datastore object page --
   summary strip plus a searchable, sortable content browser -- with every existing storage
   entry point (inventory tree, command palette, dashboard, node Storage tab) now linking to it.
+- Reboot/Shut down a cluster node from a "Power" dropdown on the node page header, behind a
+  confirmation dialog showing the node's running guests and requiring the node name to be typed
+  to confirm. Needs a signed-in session and `Sys.PowerMgmt` on the node, same allow-listed-write-
+  route pattern as power actions, rename/notes, snapshots and migrate.
 
 ## [0.2.2] - 2026-09-25
 
