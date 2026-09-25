@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-25
+
 ### Added
 
 - Migrate a VM/CT to another cluster node from the object header's "More"
@@ -23,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   confirmation dialog showing the node's running guests and requiring the node name to be typed
   to confirm. Needs a signed-in session and `Sys.PowerMgmt` on the node, same allow-listed-write-
   route pattern as power actions, rename/notes, snapshots and migrate.
+
+### Changed
+
+- The browser demo's sample cluster now has two nodes (`pve1`, `pve2`) with a
+  few guests on each, so Migrate can be tried end to end without a real host.
 
 ## [0.2.2] - 2026-09-25
 
@@ -251,7 +258,8 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/C2Tech-sys/proxion/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/C2Tech-sys/proxion/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/C2Tech-sys/proxion/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/C2Tech-sys/proxion/compare/v0.1.2...v0.2.0

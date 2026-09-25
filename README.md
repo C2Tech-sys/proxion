@@ -19,8 +19,9 @@ terminal, and deep links back to the stock UI for everything else.
 It's a pnpm monorepo: a Vite/React frontend, a Fastify API/proxy server,
 and a generated Proxmox VE API client. The read-only PVE proxy
 (`/api/pve/*`) is permanently write-blocked; the writes Proxion does
-perform -- guest power actions, rename/notes, snapshots, console thumbnails
-and per-user preferences -- each go through their own allow-listed route,
+perform -- guest power actions, rename/notes, snapshots, migrate, node
+reboot/shutdown, console thumbnails and per-user preferences -- each go
+through their own allow-listed route,
 checked against your real PVE privileges -- see
 [Feature status](#feature-status) below.
 
@@ -268,7 +269,7 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 - **Phase 2 (current)**: more actions, each as its own allow-listed route,
   same pattern as guest power actions. Rename/notes, snapshot
   create/rollback/delete and the cluster-wide Guests list shipped in 0.2;
-  migrate is next.
+  migrate, node reboot/shutdown and the storage browser shipped in 0.3.
 - **Phase 3**: VMware-style extras -- console thumbnails in the inventory
   tree itself (today: dashboard and VM/CT Summary only), a built-in SSH
   client for nodes/guests, alarms/alerting, and a storage browser.
