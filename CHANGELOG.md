@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Snapshot create, delete and rollback. The Snapshots tab gets a "Take snapshot" button
+  (name, optional description, "Include RAM" for a running qemu guest) and a per-row "…" menu
+  with "Roll back…" and "Delete…", each behind its own confirmation. Goes through three new
+  allow-listed server routes (`VM.Snapshot` for create/delete, `VM.Snapshot.Rollback` for
+  rollback -- a different, stricter privilege), same session-sign-in-only pattern as the
+  existing power actions and rename/notes.
+
 ## [0.1.2] - 2026-09-25
 
 ### Fixed

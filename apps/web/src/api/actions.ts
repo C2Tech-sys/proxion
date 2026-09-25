@@ -1,5 +1,11 @@
 import { USE_FIXTURES } from '@/api/client';
-import { fixtureGuestAction, fixtureUpdateGuestConfig } from '@/api/actionsFixture';
+import {
+  fixtureGuestAction,
+  fixtureUpdateGuestConfig,
+  fixtureCreateSnapshot,
+  fixtureDeleteSnapshot,
+  fixtureRollbackSnapshot,
+} from '@/api/actionsFixture';
 import type { GuestType } from '@/api/types';
 
 /** The guest power actions this app supports -- a fixed allow-list, matching the server's own
@@ -34,6 +40,29 @@ interface GuestActionErrorBody {
   error?: string;
   message?: string;
   missing?: string;
+}
+
+/** Body for `createSnapshot`. Matches the server's own body contract for
+ * `POST /api/actions/guest/:node/:type/:vmid/snapshots`. */
+export interface CreateSnapshotBody {
+  snapname: string;
+  description?: string;
+  /** Include RAM (a running-state snapshot) -- qemu only; the server 400s if sent for lxc. */
+  vmstate?: boolean;
+}
+
+export interface DeleteSnapshotOptions {
+  force?: boolean;
+}
+
+export interface RollbackSnapshotOptions {
+  /** Start the guest after the rollback completes -- qemu only; the server 400s if sent for lxc. */
+  start?: boolean;
+}
+
+export interface SnapshotActionResult {
+  /** The PVE task UPID for this snapshot operation, same shape as `GuestActionResult`. */
+  upid: string;
 }
 
 /** A short, human-readable message for one of the server's known error shapes; falls back to
@@ -135,4 +164,105 @@ export async function updateGuestConfig(
     errorBody = undefined;
   }
   throw new GuestActionError(res.status, describeError(res.status, res.statusText, errorBody));
+}
+
+/** Shared by the three snapshot functions below: reads a non-202 response's error body (best
+ * effort) and throws the same `GuestActionError` shape `guestAction`/`updateGuestConfig` do. */
+async function throwSnapshotError(res: Response): Promise<never> {
+  let errorBody: GuestActionErrorBody | undefined;
+  try {
+    errorBody = (await res.json()) as GuestActionErrorBody;
+  } catch {
+    errorBody = undefined;
+  }
+  throw new GuestActionError(res.status, describeError(res.status, res.statusText, errorBody));
+}
+
+/**
+ * Requests one snapshot create. Real mode:
+ * `POST /api/actions/guest/:node/:type/:vmid/snapshots` (see the server README's "Guest
+ * actions" section). Fixture mode: simulates the request and adds the snapshot to the in-memory
+ * fixture snapshot tree (`actionsFixture.ts` / `fixtures.ts`'s `setFixtureSnapshots`).
+ */
+export async function createSnapshot(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  body: CreateSnapshotBody,
+): Promise<SnapshotActionResult> {
+  if (USE_FIXTURES) {
+    return fixtureCreateSnapshot(node, type, vmid, body);
+  }
+
+  const res = await fetch(`/api/actions/guest/${node}/${type}/${vmid}/snapshots`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 202) {
+    return (await res.json()) as SnapshotActionResult;
+  }
+  return throwSnapshotError(res);
+}
+
+/**
+ * Requests one snapshot delete. Real mode:
+ * `DELETE /api/actions/guest/:node/:type/:vmid/snapshots/:snapname` (see the server README's
+ * "Guest actions" section). Fixture mode: simulates the request and removes the snapshot from
+ * the in-memory fixture snapshot tree.
+ */
+export async function deleteSnapshot(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  snapname: string,
+  options?: DeleteSnapshotOptions,
+): Promise<SnapshotActionResult> {
+  if (USE_FIXTURES) {
+    return fixtureDeleteSnapshot(node, type, vmid, snapname);
+  }
+
+  const query = options?.force ? '?force=1' : '';
+  const res = await fetch(
+    `/api/actions/guest/${node}/${type}/${vmid}/snapshots/${encodeURIComponent(snapname)}${query}`,
+    { method: 'DELETE' },
+  );
+
+  if (res.status === 202) {
+    return (await res.json()) as SnapshotActionResult;
+  }
+  return throwSnapshotError(res);
+}
+
+/**
+ * Requests one snapshot rollback. Real mode:
+ * `POST /api/actions/guest/:node/:type/:vmid/snapshots/:snapname/rollback` (see the server
+ * README's "Guest actions" section). Fixture mode: simulates the request and moves the "current"
+ * (live-state) row in the in-memory fixture snapshot tree under the chosen snapshot.
+ */
+export async function rollbackSnapshot(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  snapname: string,
+  options?: RollbackSnapshotOptions,
+): Promise<SnapshotActionResult> {
+  if (USE_FIXTURES) {
+    return fixtureRollbackSnapshot(node, type, vmid, snapname, options);
+  }
+
+  const res = await fetch(
+    `/api/actions/guest/${node}/${type}/${vmid}/snapshots/${encodeURIComponent(snapname)}/rollback`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(options ?? {}),
+    },
+  );
+
+  if (res.status === 202) {
+    return (await res.json()) as SnapshotActionResult;
+  }
+  return throwSnapshotError(res);
 }

@@ -358,3 +358,92 @@ export function setFixtureGuestConfig(
     }
   }
 }
+
+/** One snapshot create/delete/rollback, as `setFixtureSnapshots` applies it. Mirrors the three
+ * server routes in `apps/server/src/actions/snapshotRoutes.ts`. */
+export type SnapshotFixtureAction =
+  | { op: 'create'; snapname: string; description?: string; vmstate?: boolean }
+  | { op: 'delete'; snapname: string }
+  | { op: 'rollback'; snapname: string };
+
+/** `s` with its `parent` field set to `parent`, or removed entirely when `parent` is `undefined`
+ * -- avoids ever assigning `parent: undefined` explicitly (this codebase's tsconfig has
+ * `exactOptionalPropertyTypes`, which treats that as a different, disallowed thing from omitting
+ * the key). */
+function withParent(s: Snapshot, parent: string | undefined): Snapshot {
+  const next: Snapshot = { ...s };
+  if (parent === undefined) {
+    delete next.parent;
+  } else {
+    next.parent = parent;
+  }
+  return next;
+}
+
+/**
+ * Test/demo-only mutator: the ONE way `src/api/actionsFixture.ts`'s snapshot create/delete/
+ * rollback simulate a write against the shared in-memory `snapshots` fixture (served by
+ * `getSnapshots()`/`useSnapshots()`), in place -- same convention as `setFixtureGuestStatus`/
+ * `setFixtureGuestConfig` above.
+ *
+ * The fixture tracks where the synthetic "current" (live-state) row sits via its own `parent`
+ * field -- unused by `buildSnapshotTree` today (it drops `current` and attaches a "NOW" leaf
+ * under every branch tip instead, see `lib/snapshots.ts`), but kept accurate here regardless, the
+ * same way a real PVE snapshot tree would track it, in case a future consumer reads it directly:
+ *
+ * - `create`: the new snapshot becomes a child of wherever `current` was (PVE always snapshots
+ *   from the live state), and `current` itself moves to sit under the new snapshot -- exactly
+ *   what taking a snapshot does on a real guest.
+ * - `delete`: the named snapshot is removed; anything that pointed at it as `parent` (including
+ *   `current`, if it was there) is re-parented to the removed snapshot's own parent, so the chain
+ *   never orphans.
+ * - `rollback`: `current` moves to sit under the chosen snapshot -- matching real PVE, which
+ *   doesn't otherwise touch the snapshot list on a rollback (every snapshot, before and after the
+ *   rollback target, stays exactly where it was).
+ *
+ * A no-op if no matching guest exists (kept lenient, same as the other fixture mutators); a
+ * `delete`/`rollback` naming a snapshot that doesn't exist is also a no-op.
+ */
+export function setFixtureSnapshots(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  action: SnapshotFixtureAction,
+): void {
+  const key = `${type}-${vmid}`;
+  const list = snapshots[key];
+  if (!list) return;
+
+  const currentIndex = list.findIndex((s) => s.name === 'current');
+  const currentParent = currentIndex !== -1 ? list[currentIndex]!.parent : undefined;
+
+  if (action.op === 'create') {
+    const created: Snapshot = {
+      name: action.snapname,
+      snaptime: Math.floor(Date.now() / 1000),
+      ...(action.description !== undefined ? { description: action.description } : {}),
+      ...(currentParent !== undefined ? { parent: currentParent } : {}),
+      ...(action.vmstate ? { vmstate: true } : {}),
+    };
+    const next = [...list, created];
+    if (currentIndex !== -1) next[currentIndex] = withParent(next[currentIndex]!, action.snapname);
+    snapshots[key] = next;
+    return;
+  }
+
+  if (action.op === 'delete') {
+    const targetIndex = list.findIndex((s) => s.name === action.snapname);
+    if (targetIndex === -1) return;
+    const targetParent = list[targetIndex]!.parent;
+    snapshots[key] = list
+      .filter((_, i) => i !== targetIndex)
+      .map((s) => (s.parent === action.snapname ? withParent(s, targetParent) : s));
+    return;
+  }
+
+  // action.op === 'rollback'
+  if (currentIndex === -1) return;
+  const next = [...list];
+  next[currentIndex] = withParent(next[currentIndex]!, action.snapname);
+  snapshots[key] = next;
+}

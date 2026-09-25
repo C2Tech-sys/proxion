@@ -159,6 +159,28 @@ async function gotoVmSnapshots(page: Page, base: string) {
   );
 }
 
+/** T26: snapshot create/delete/rollback -- the row "…" menu open on a real snapshot. */
+async function gotoVmSnapshotsActions(page: Page, base: string) {
+  await gotoVmSnapshots(page, base);
+  await page.getByRole('button', { name: 'Actions for pre-upgrade' }).click();
+  await page.getByRole('menuitem', { name: /Roll back/ }).waitFor();
+}
+
+/** T26: the "Take snapshot" create dialog. */
+async function gotoVmSnapshotCreateDialog(page: Page, base: string) {
+  await gotoVmSnapshots(page, base);
+  await page.getByRole('button', { name: 'Take snapshot' }).click();
+  await page.getByRole('textbox', { name: 'Snapshot name' }).waitFor();
+}
+
+/** T26: the destructive rollback confirmation. */
+async function gotoVmSnapshotRollbackDialog(page: Page, base: string) {
+  await gotoVmSnapshotsActions(page, base);
+  await page.getByRole('menuitem', { name: /Roll back/ }).click();
+  await page.getByRole('alertdialog').waitFor();
+  await page.getByText('Start the guest afterwards').waitFor();
+}
+
 async function gotoVmBackups(page: Page, base: string) {
   await gotoWithRetry(page, `${base}/vm/pve1/qemu/100?tab=backups`, () =>
     page.getByText('Volume ID').waitFor(),
@@ -386,6 +408,10 @@ export const SCREENSHOT_CASES: ScreenshotCase[] = [
   // T22: Summary tab arrange mode + a saved custom order.
   { name: 'vm-summary-arrange', theme: 'dark', run: gotoVmSummaryArrange },
   { name: 'vm-summary-reordered', theme: 'dark', run: gotoVmSummaryReordered },
+  // T26: snapshot create/delete/rollback.
+  { name: 'vm-snapshots-actions', theme: 'dark', run: gotoVmSnapshotsActions },
+  { name: 'vm-snapshot-create', theme: 'dark', run: gotoVmSnapshotCreateDialog },
+  { name: 'vm-snapshot-rollback', theme: 'dark', run: gotoVmSnapshotRollbackDialog },
 ];
 
 /**

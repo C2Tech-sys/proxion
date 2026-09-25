@@ -40,6 +40,20 @@ export interface FakePve {
   configCalls: Array<{ path: string; body: Record<string, string> }>;
   /** Makes the next matching `PUT .../{type}/{vmid}/config` call fail with the given status/message. */
   setConfigError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string) => void;
+  /** Every snapshot create/delete/rollback request PVE has received, in order (method + path +
+   * parsed form body). Used by `actionsSnapshots.test.ts` to assert exactly what was sent. */
+  snapshotCalls: Array<{ method: string; path: string; body: Record<string, string> }>;
+  /** Makes the next matching snapshot create/delete/rollback call fail with the given
+   * status/message. `op` distinguishes the three routes sharing one `(type, vmid, snapname)` key
+   * space (a delete and a rollback of the same snapshot name are different failures). */
+  setSnapshotError: (
+    op: 'create' | 'delete' | 'rollback',
+    type: 'qemu' | 'lxc',
+    vmid: number,
+    snapname: string,
+    status: number,
+    message: string,
+  ) => void;
   close: () => Promise<void>;
 }
 
@@ -240,6 +254,60 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   registerConfigRoute('qemu');
   registerConfigRoute('lxc');
 
+  // Snapshot create (`POST .../snapshot`), delete (`DELETE .../snapshot/{snapname}`) and
+  // rollback (`POST .../snapshot/{snapname}/rollback`), used by `src/actions/snapshotRoutes.ts`.
+  // Records every call (method + path + parsed form body) and returns a fake UPID on success,
+  // same pattern as the power-action/config routes above.
+  const snapshotCalls: Array<{ method: string; path: string; body: Record<string, string> }> = [];
+  const snapshotErrors = new Map<string, { status: number; message: string }>();
+
+  function snapshotErrorKey(
+    op: 'create' | 'delete' | 'rollback',
+    type: 'qemu' | 'lxc',
+    vmid: number,
+    snapname: string,
+  ): string {
+    return `${op}:${type}:${vmid}:${snapname}`;
+  }
+
+  function registerSnapshotRoutesForType(type: 'qemu' | 'lxc') {
+    app.post(`/api2/json/nodes/:node/${type}/:vmid/snapshot`, async (req, reply) => {
+      const { vmid } = req.params as { node: string; vmid: string };
+      const body = (req.body ?? {}) as Record<string, string>;
+      snapshotCalls.push({ method: 'POST', path: req.url, body });
+      const failure = snapshotErrors.get(snapshotErrorKey('create', type, Number(vmid), body.snapname ?? ''));
+      if (failure) {
+        reply.code(failure.status).send({ data: null, message: failure.message });
+        return;
+      }
+      reply.send({ data: `UPID:fakepve:00000001:00000000:00000000:snapshot:${vmid}:root@pam:` });
+    });
+    app.delete(`/api2/json/nodes/:node/${type}/:vmid/snapshot/:snapname`, async (req, reply) => {
+      const { vmid, snapname } = req.params as { node: string; vmid: string; snapname: string };
+      // `client.delete()` sends any remaining params (e.g. `force`) as a query string, not a
+      // form body -- DELETE isn't in `PveHttp`'s `METHODS_WITH_BODY` (see `packages/pve-api/src/http.ts`).
+      snapshotCalls.push({ method: 'DELETE', path: req.url, body: (req.query ?? {}) as Record<string, string> });
+      const failure = snapshotErrors.get(snapshotErrorKey('delete', type, Number(vmid), snapname));
+      if (failure) {
+        reply.code(failure.status).send({ data: null, message: failure.message });
+        return;
+      }
+      reply.send({ data: `UPID:fakepve:00000001:00000000:00000000:delsnapshot:${vmid}:root@pam:` });
+    });
+    app.post(`/api2/json/nodes/:node/${type}/:vmid/snapshot/:snapname/rollback`, async (req, reply) => {
+      const { vmid, snapname } = req.params as { node: string; vmid: string; snapname: string };
+      snapshotCalls.push({ method: 'POST', path: req.url, body: (req.body ?? {}) as Record<string, string> });
+      const failure = snapshotErrors.get(snapshotErrorKey('rollback', type, Number(vmid), snapname));
+      if (failure) {
+        reply.code(failure.status).send({ data: null, message: failure.message });
+        return;
+      }
+      reply.send({ data: `UPID:fakepve:00000001:00000000:00000000:rollback:${vmid}:root@pam:` });
+    });
+  }
+  registerSnapshotRoutesForType('qemu');
+  registerSnapshotRoutesForType('lxc');
+
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
   return {
@@ -287,6 +355,19 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     },
     setConfigError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string) => {
       configErrors.set(configErrorKey(type, vmid), { status, message });
+    },
+    get snapshotCalls() {
+      return snapshotCalls;
+    },
+    setSnapshotError: (
+      op: 'create' | 'delete' | 'rollback',
+      type: 'qemu' | 'lxc',
+      vmid: number,
+      snapname: string,
+      status: number,
+      message: string,
+    ) => {
+      snapshotErrors.set(snapshotErrorKey(op, type, vmid, snapname), { status, message });
     },
     close: () => app.close(),
   };

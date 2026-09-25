@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { guestAction, GuestActionError } from '@/api/actions';
+import { createSnapshot, deleteSnapshot, guestAction, rollbackSnapshot, GuestActionError } from '@/api/actions';
 
 // Forces the real (non-fixture) code path in `guestAction` so its `fetch()`-based request and
 // error mapping actually run, rather than the fixture flip -- see `auth-gate.render.test.tsx`
@@ -82,6 +82,86 @@ describe('guestAction (real client)', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(502, { error: 'pve-unreachable' })));
 
     const error = await guestAction('pve1', 'qemu', 100, 'start').catch((e: unknown) => e);
+    expect((error as Error).message).toBe('Proxmox VE is unreachable');
+  });
+});
+
+describe('createSnapshot/deleteSnapshot/rollbackSnapshot (real client)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('createSnapshot POSTs the body JSON-encoded and resolves with the upid on 202', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(202, { upid: 'UPID:pve1:snap' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createSnapshot('pve1', 'qemu', 100, {
+      snapname: 'pre-upgrade',
+      description: 'before the upgrade',
+      vmstate: true,
+    });
+    expect(result).toEqual({ upid: 'UPID:pve1:snap' });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/actions/guest/pve1/qemu/100/snapshots');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({
+      snapname: 'pre-upgrade',
+      description: 'before the upgrade',
+      vmstate: true,
+    });
+  });
+
+  it('createSnapshot surfaces the server\'s invalid-snapname message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(400, { error: 'invalid-snapname', message: 'Name must start with a letter.' })),
+    );
+
+    const error = await createSnapshot('pve1', 'qemu', 100, { snapname: '1bad' }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(GuestActionError);
+    expect((error as Error).message).toBe('Name must start with a letter.');
+  });
+
+  it('deleteSnapshot DELETEs with ?force=1 when requested', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(202, { upid: 'UPID:pve1:del' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await deleteSnapshot('pve1', 'qemu', 100, 'pre-upgrade', { force: true });
+    expect(result).toEqual({ upid: 'UPID:pve1:del' });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/actions/guest/pve1/qemu/100/snapshots/pre-upgrade?force=1');
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('deleteSnapshot omits the query string when force is not requested', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(202, { upid: 'UPID:pve1:del' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await deleteSnapshot('pve1', 'qemu', 100, 'pre-upgrade');
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/actions/guest/pve1/qemu/100/snapshots/pre-upgrade');
+  });
+
+  it('rollbackSnapshot POSTs { start } and resolves with the upid on 202', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(202, { upid: 'UPID:pve1:rb' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await rollbackSnapshot('pve1', 'qemu', 100, 'pre-upgrade', { start: true });
+    expect(result).toEqual({ upid: 'UPID:pve1:rb' });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/actions/guest/pve1/qemu/100/snapshots/pre-upgrade/rollback');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ start: true });
+  });
+
+  it('rollbackSnapshot maps pve-unreachable to a readable message', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(502, { error: 'pve-unreachable' })));
+
+    const error = await rollbackSnapshot('pve1', 'qemu', 100, 'pre-upgrade').catch((e: unknown) => e);
     expect((error as Error).message).toBe('Proxmox VE is unreachable');
   });
 });
