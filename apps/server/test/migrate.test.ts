@@ -57,6 +57,15 @@ describe('guest migrate routes', () => {
     return app.inject(injectOptions);
   }
 
+  /** Same as `precheck`, but with no `?target=` at all -- PVE's own precheck endpoints accept an
+   * absent `target` too (see `migrateRoutes.ts`), and this is how the web dialog's node picker
+   * learns cluster-wide `allowedNodes`/`notAllowedNodes` before any target is chosen. */
+  function precheckNoTarget(path: string, options: { cookie?: string } = {}) {
+    const injectOptions: InjectOptions = { method: 'GET', url: `/api/actions/guest${path}/migrate/precheck` };
+    if (options.cookie !== undefined) injectOptions.headers = { cookie: options.cookie };
+    return app.inject(injectOptions);
+  }
+
   describe('validation (400)', () => {
     it('rejects target === node', async () => {
       const cookie = await setupSession();
@@ -106,14 +115,10 @@ describe('guest migrate routes', () => {
       expect(res.statusCode).toBe(400);
     });
 
-    it('precheck rejects a missing target', async () => {
+    it('precheck rejects an invalid (but present) target', async () => {
       const cookie = await setupSession();
       fakePve.setVmPermissions(100, { 'VM.Migrate': true });
-      const res = await app.inject({
-        method: 'GET',
-        url: '/api/actions/guest/node1/qemu/100/migrate/precheck',
-        headers: { cookie },
-      });
+      const res = await precheck('/node1/qemu/100', 'not a node!', { cookie });
       expect(res.statusCode).toBe(400);
     });
 
@@ -201,6 +206,38 @@ describe('guest migrate routes', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'pve-rejected', message: 'target node is offline' });
+  });
+
+  it('precheck succeeds without a target, and PVE saw no target query param', async () => {
+    const cookie = await setupSession();
+    fakePve.setVmPermissions(100, { 'VM.Migrate': true });
+    fakePve.setMigratePrecheck('qemu', 100, {
+      running: true,
+      allowed_nodes: ['node2'],
+      not_allowed_nodes: { node3: { unavailable_storages: ['local-lvm'] } },
+      local_disks: [],
+      local_resources: [],
+    });
+
+    const res = await precheckNoTarget('/node1/qemu/100', { cookie });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      running: true,
+      allowedNodes: ['node2'],
+      notAllowedNodes: { node3: { unavailableStorages: ['local-lvm'], blockingHaResources: [] } },
+      localDisks: [],
+      localResources: [],
+    });
+
+    const call = fakePve.migratePrecheckCalls.at(-1);
+    expect(call?.path).toBe('/api2/json/nodes/node1/qemu/100/migrate');
+    expect(call?.path).not.toContain('target=');
+
+    const withTarget = await precheck('/node1/qemu/100', 'node2', { cookie });
+    expect(withTarget.statusCode).toBe(200);
+    const secondCall = fakePve.migratePrecheckCalls.at(-1);
+    expect(secondCall?.path).toContain('target=node2');
   });
 
   it('precheck normalises the qemu shape', async () => {

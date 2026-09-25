@@ -331,24 +331,26 @@ export async function migrateGuest(
 }
 
 /**
- * Requests the guest's migrate precheck against `target`. Real mode:
- * `GET /api/actions/guest/:node/:type/:vmid/migrate/precheck?target=<node>` (see the server
- * README's "Guest actions" section). Fixture mode: a synthetic, demo-friendly precheck computed
- * from the in-memory fixture data (`fixtures.ts`'s `getFixtureMigratePrecheck`).
+ * Requests the guest's migrate precheck, optionally against `target`. Real mode:
+ * `GET /api/actions/guest/:node/:type/:vmid/migrate/precheck` (`?target=<node>` when given -- see
+ * the server README's "Guest actions" section). PVE's own precheck endpoint accepts an absent
+ * `target` too, reporting cluster-wide `allowedNodes`/`notAllowedNodes` either way -- omitting it
+ * is how `MigrateGuestDialog` learns every node's eligibility before any target is chosen.
+ * Fixture mode: a synthetic, demo-friendly precheck computed from the in-memory fixture data
+ * (`fixtures.ts`'s `getFixtureMigratePrecheck`).
  */
 export async function getMigratePrecheck(
   node: string,
   type: GuestType,
   vmid: number,
-  target: string,
+  target: string | undefined,
 ): Promise<MigratePrecheck> {
   if (USE_FIXTURES) {
     return fixtureMigratePrecheck(node, type, vmid, target);
   }
 
-  const res = await fetch(
-    `/api/actions/guest/${node}/${type}/${vmid}/migrate/precheck?target=${encodeURIComponent(target)}`,
-  );
+  const query = target !== undefined ? `?target=${encodeURIComponent(target)}` : '';
+  const res = await fetch(`/api/actions/guest/${node}/${type}/${vmid}/migrate/precheck${query}`);
   if (res.ok) {
     return (await res.json()) as MigratePrecheck;
   }

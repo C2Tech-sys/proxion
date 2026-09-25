@@ -268,15 +268,30 @@ export function useMigrateGuest() {
 }
 
 /**
- * The guest's migrate precheck against `target` (`src/api/actions.ts`). Disabled until a
- * `target` is chosen -- `MigrateGuestDialog` only renders a target picker once cluster resources
- * are loaded, and doesn't query this until the user has (or a default has been) selected one.
+ * The guest's migrate precheck, keyed on `target` -- which is a valid key on its own:
+ * `MigrateGuestDialog` queries this once with `target: undefined` as soon as it opens (PVE's own
+ * precheck endpoint accepts an absent `target` too, and reports cluster-wide
+ * `allowedNodes`/`notAllowedNodes` either way -- see `migrateRoutes.ts`), so every node's
+ * eligibility for the picker is known before any target is chosen, then again with whichever
+ * node is picked, refining the guest-intrinsic (`running`) and target-specific (local disks/
+ * storage) detail. `placeholderData` keeps the last response visible while a newly-keyed query
+ * (e.g. the moment a target is first chosen) is in flight, so the picker's eligibility list never
+ * flickers back to "unknown" mid-choice. `enabled` is wired to the dialog's own `open` state --
+ * this component stays mounted, just hidden, between opens, and would otherwise fire a precheck
+ * request for every closed dialog on the page.
  */
-export function useMigratePrecheck(node: string, type: GuestType, vmid: number, target: string | undefined) {
+export function useMigratePrecheck(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  target: string | undefined,
+  enabled = true,
+) {
   return useQuery({
-    queryKey: ['migrate-precheck', node, type, vmid, target],
-    queryFn: () => getMigratePrecheck(node, type, vmid, target as string),
-    enabled: Boolean(target),
+    queryKey: ['migrate-precheck', node, type, vmid, target ?? null],
+    queryFn: () => getMigratePrecheck(node, type, vmid, target),
+    enabled,
+    placeholderData: (previousData) => previousData,
   });
 }
 

@@ -312,7 +312,7 @@ function GuestQuickActions({
         currentName={name}
       />
       <MigrateGuestDialog
-        key={migrateOpen ? 'open' : 'closed'}
+        key={migrateOpen ? 'migrate-open' : 'migrate-closed'}
         open={migrateOpen}
         onOpenChange={setMigrateOpen}
         node={node}

@@ -56,6 +56,9 @@ export interface FakePve {
   ) => void;
   /** Every migrate POST request PVE has received, in order (type + path + parsed form body). */
   migrateCalls: Array<{ type: 'qemu' | 'lxc'; path: string; body: Record<string, string> }>;
+  /** Every migrate precheck GET request PVE has received, in order (type + full path, including
+   * any `?target=` query string PVE itself saw -- or its absence). */
+  migratePrecheckCalls: Array<{ type: 'qemu' | 'lxc'; path: string }>;
   /** Makes the next matching `POST .../{type}/{vmid}/migrate` call fail with the given
    * status/message. */
   setMigrateError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string) => void;
@@ -322,6 +325,7 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   // (type + path + parsed form body) and returns a fake UPID on success, same pattern as the
   // power-action/config/snapshot routes above.
   const migrateCalls: Array<{ type: 'qemu' | 'lxc'; path: string; body: Record<string, string> }> = [];
+  const migratePrecheckCalls: Array<{ type: 'qemu' | 'lxc'; path: string }> = [];
   const migrateErrors = new Map<string, { status: number; message: string }>();
   const migratePrechecks = new Map<string, unknown>();
 
@@ -338,6 +342,7 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   function registerMigrateRoutesForType(type: 'qemu' | 'lxc') {
     app.get(`/api2/json/nodes/:node/${type}/:vmid/migrate`, async (req, reply) => {
       const { vmid } = req.params as { node: string; vmid: string };
+      migratePrecheckCalls.push({ type, path: req.url });
       const data = migratePrechecks.get(migrateKey(type, Number(vmid))) ?? defaultPrecheck(type);
       reply.send({ data });
     });
@@ -418,6 +423,9 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     },
     get migrateCalls() {
       return migrateCalls;
+    },
+    get migratePrecheckCalls() {
+      return migratePrecheckCalls;
     },
     setMigrateError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string) => {
       migrateErrors.set(migrateKey(type, vmid), { status, message });

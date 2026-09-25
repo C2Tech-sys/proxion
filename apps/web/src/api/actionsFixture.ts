@@ -160,7 +160,7 @@ export async function fixtureMigratePrecheck(
   node: string,
   type: GuestType,
   vmid: number,
-  target: string,
+  target: string | undefined,
 ): Promise<MigratePrecheck> {
   return delay(getFixtureMigratePrecheck(node, type, vmid, target));
 }

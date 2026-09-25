@@ -77,6 +77,14 @@ const CLUSTER_NODES: ClusterResource[] = [
   { id: 'node/pve3', type: 'node', node: 'pve3', status: 'offline' },
 ];
 
+/** Same three nodes, but `pve3` online too -- for the `notAllowedNodes`-driven disabling tests,
+ * where "not eligible" needs to come from PVE's own precheck data rather than being offline. */
+const CLUSTER_NODES_ALL_ONLINE: ClusterResource[] = [
+  { id: 'node/pve1', type: 'node', node: 'pve1', status: 'online' },
+  { id: 'node/pve2', type: 'node', node: 'pve2', status: 'online' },
+  { id: 'node/pve3', type: 'node', node: 'pve3', status: 'online' },
+];
+
 const EMPTY_PRECHECK: MigratePrecheck = {
   running: true,
   allowedNodes: ['pve2'],
@@ -241,6 +249,83 @@ describe('Migrate… gating and dialog', () => {
         withLocalDisks: true,
       }),
     );
+  });
+
+  it("a not-allowed (but online) node is disabled in the picker with PVE's reason", async () => {
+    mockUseAuthMe.mockReturnValue(authData('session'));
+    mockUsePermissions.mockReturnValue(permissionsData(true));
+    mockUseClusterResources.mockReturnValue({ data: CLUSTER_NODES_ALL_ONLINE });
+    mockGetMigratePrecheck.mockResolvedValue({
+      ...EMPTY_PRECHECK,
+      allowedNodes: [],
+      notAllowedNodes: { pve3: { unavailableStorages: ['tank'], blockingHaResources: [] } },
+    });
+
+    renderHeader();
+    const dialog = await openMigrateDialog();
+
+    fireEvent.click(within(dialog).getByRole('combobox', { name: 'Target node' }));
+    const pve3Option = await screen.findByRole('option', { name: /pve3/ });
+    expect(pve3Option).toHaveAttribute('aria-disabled', 'true');
+    expect(pve3Option.textContent).toContain('Storage not available: tank');
+    const pve2Option = screen.getByRole('option', { name: /pve2/ });
+    expect(pve2Option).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it(
+    'the first eligible node becomes the default target; confirm is enabled and sends it; ' +
+      'precheck is queried without a target first, then with the chosen one',
+    async () => {
+      mockUseAuthMe.mockReturnValue(authData('session'));
+      mockUsePermissions.mockReturnValue(permissionsData(true));
+      mockUseClusterResources.mockReturnValue({ data: CLUSTER_NODES_ALL_ONLINE });
+      mockGetMigratePrecheck.mockResolvedValue({
+        ...EMPTY_PRECHECK,
+        allowedNodes: [],
+        notAllowedNodes: { pve3: { unavailableStorages: ['tank'], blockingHaResources: [] } },
+      });
+
+      renderHeader();
+      const dialog = await openMigrateDialog();
+
+      // pve2 -- the only eligible node -- becomes the default target with no picker interaction
+      // at all, and confirm is enabled and fires with target: 'pve2'.
+      await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Migrate' })).toBeEnabled());
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Migrate' }));
+      await waitFor(() =>
+        expect(mockMigrateGuest).toHaveBeenCalledWith(
+          'pve1',
+          'qemu',
+          100,
+          expect.objectContaining({ target: 'pve2' }),
+        ),
+      );
+
+      // The cluster-wide precheck (no target) ran first, so the picker knew pve3 was not-allowed
+      // before any target was chosen; a later call was then made with the chosen target (pve2).
+      expect(mockGetMigratePrecheck.mock.calls[0]).toEqual(['pve1', 'qemu', 100, undefined]);
+      expect(mockGetMigratePrecheck.mock.calls.some((call) => call[3] === 'pve2')).toBe(true);
+    },
+  );
+
+  it('no eligible target node: confirm is disabled and "No eligible target node" is shown', async () => {
+    mockUseAuthMe.mockReturnValue(authData('session'));
+    mockUsePermissions.mockReturnValue(permissionsData(true));
+    mockUseClusterResources.mockReturnValue({ data: CLUSTER_NODES_ALL_ONLINE });
+    mockGetMigratePrecheck.mockResolvedValue({
+      ...EMPTY_PRECHECK,
+      allowedNodes: [],
+      notAllowedNodes: {
+        pve2: { unavailableStorages: ['tank'], blockingHaResources: [] },
+        pve3: { unavailableStorages: [], blockingHaResources: ['ha:vm100'] },
+      },
+    });
+
+    renderHeader();
+    const dialog = await openMigrateDialog();
+
+    await within(dialog).findByText('No eligible target node');
+    expect(within(dialog).getByRole('button', { name: 'Migrate' })).toBeDisabled();
   });
 
   it('lxc running: confirm sends target/restart only', async () => {

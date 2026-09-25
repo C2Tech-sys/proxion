@@ -382,15 +382,16 @@ const FIXTURE_LOCAL_DISK_VMIDS = new Set([100]);
  * Test/demo-only: `src/api/actionsFixture.ts`'s `fixtureMigratePrecheck` reads this for a
  * synthetic but demo-plausible migrate precheck -- computed from the shared in-memory `resources`
  * (running state, other-node eligibility) plus the synthetic `FIXTURE_LOCAL_DISK_VMIDS` above.
- * `target` only matters for whether it's excluded from its own `notAllowedNodes`/`allowedNodes`
- * split; every other node's eligibility is reported the same way real PVE's own precheck reports
- * the whole cluster's candidates in one call, target or no.
+ * `target` is optional, mirroring the real precheck endpoint (and the server route -- see
+ * `migrateRoutes.ts`): every other node's eligibility is reported the same way whether or not one
+ * was given, matching real PVE's own precheck, which reports the whole cluster's candidates in
+ * one call, target or no.
  */
 export function getFixtureMigratePrecheck(
   node: string,
   type: GuestType,
   vmid: number,
-  target: string,
+  target: string | undefined,
 ): MigratePrecheck {
   const resource = resources.find((r) => r.node === node && r.type === type && r.vmid === vmid);
   const running = resource?.status === 'running';

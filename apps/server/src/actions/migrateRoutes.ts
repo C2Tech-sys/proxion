@@ -172,23 +172,31 @@ function normalizeLxcPrecheck(raw: RawLxcMigratePrecheck): MigratePrecheckResult
   };
 }
 
+/**
+ * `target` is optional here, matching PVE's own migrate-precheck endpoints (both accept an absent
+ * `target`, per the generated endpoint table) -- called without one, PVE reports its
+ * `allowed_nodes`/`not_allowed_nodes` for the whole cluster, which is how the web dialog's node
+ * picker knows every candidate's eligibility before any target is chosen; called with one, PVE
+ * refines the guest-intrinsic/target-specific detail (local disks, unavailable storage) for that
+ * node specifically.
+ */
 async function callMigratePrecheck(
   client: PveClient,
   type: 'qemu' | 'lxc',
-  { node, vmid, target }: MigrateRouteParams & { target: string },
+  { node, vmid, target }: MigrateRouteParams & { target?: string | undefined },
 ): Promise<MigratePrecheckResult> {
   if (type === 'qemu') {
     const raw = (await client.get('/nodes/{node}/qemu/{vmid}/migrate', {
       node,
       vmid,
-      target,
+      ...(target !== undefined ? { target } : {}),
     })) as unknown as RawQemuMigratePrecheck;
     return normalizeQemuPrecheck(raw);
   }
   const raw = (await client.get('/nodes/{node}/lxc/{vmid}/migrate', {
     node,
     vmid,
-    target,
+    ...(target !== undefined ? { target } : {}),
   })) as unknown as RawLxcMigratePrecheck;
   return normalizeLxcPrecheck(raw);
 }
@@ -303,15 +311,24 @@ export function registerMigrateRoutes(
         return;
       }
 
+      // `target` is optional here (unlike the POST body above): PVE's own migrate-precheck
+      // endpoints accept an absent `target` too, reporting `allowed_nodes`/`not_allowed_nodes`
+      // for the whole cluster in that case -- the web dialog's node picker calls this once with
+      // no target at all, before the caller has chosen one, to learn every candidate's
+      // eligibility up front (see `MigrateGuestDialog`'s own doc comment).
       const query = req.query as { target?: string };
-      const target = targetNodeSchema.safeParse(query.target);
-      if (!target.success) {
-        reply.code(400).send({ error: 'Invalid or missing target' });
-        return;
-      }
-      if (target.data === params.node) {
-        reply.code(400).send({ error: 'target must differ from the guest\'s current node' });
-        return;
+      let target: string | undefined;
+      if (query.target !== undefined) {
+        const parsed = targetNodeSchema.safeParse(query.target);
+        if (!parsed.success) {
+          reply.code(400).send({ error: 'Invalid target' });
+          return;
+        }
+        if (parsed.data === params.node) {
+          reply.code(400).send({ error: 'target must differ from the guest\'s current node' });
+          return;
+        }
+        target = parsed.data;
       }
 
       const identity = await resolveIdentity(app, req);
@@ -339,7 +356,7 @@ export function registerMigrateRoutes(
 
       let precheck: MigratePrecheckResult;
       try {
-        precheck = await callMigratePrecheck(identity.client, params.type, { ...params, target: target.data });
+        precheck = await callMigratePrecheck(identity.client, params.type, { ...params, target });
       } catch (error) {
         if (sendPveError(reply, error)) return;
         app.log.warn({ err: error }, 'Migrate precheck request failed');

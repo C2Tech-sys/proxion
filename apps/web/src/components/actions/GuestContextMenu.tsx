@@ -209,7 +209,7 @@ export function GuestContextMenu({ guest, children }: GuestContextMenuProps) {
         currentName={guest.name}
       />
       <MigrateGuestDialog
-        key={migrateOpen ? 'open' : 'closed'}
+        key={migrateOpen ? 'migrate-open' : 'migrate-closed'}
         open={migrateOpen}
         onOpenChange={setMigrateOpen}
         node={guest.node}
