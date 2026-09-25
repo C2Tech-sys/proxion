@@ -14,6 +14,17 @@ vi.mock('@/api/client', async () => {
 });
 
 import { useAlerts, useClusterResources, useTasks } from './hooks';
+import { __resetLiveEventsForTests } from './liveState';
+
+// `subscribeLiveEvents` (used by every hook here via `useLiveMode`) shares one module-singleton
+// `EventSource` across subscribers (reference-counted, with a grace period before actually
+// closing -- see liveState.ts). Without resetting it between tests, a hook unmounted at one
+// test's cleanup can leave that shared connection alive long enough for the *next* test's hook to
+// reuse it instead of opening a fresh (fake) `EventSource`, so `FakeEventSource.instances` (reset
+// per test below) would stay empty even though a real subscriber attached successfully.
+afterEach(() => {
+  __resetLiveEventsForTests();
+});
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];

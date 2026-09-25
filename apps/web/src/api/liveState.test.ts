@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ALERTS_QUERY_KEY,
+  CLOSE_GRACE_MS,
   CLUSTER_RESOURCES_QUERY_KEY,
   NODE_TASKS_QUERY_KEY_PREFIX,
   TASKS_QUERY_KEY,
+  __resetLiveEventsForTests,
   fetchLiveState,
   subscribeLiveEvents,
 } from './liveState';
@@ -13,6 +15,12 @@ import {
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
+
+// The shared connection is a module-level singleton (that's the point of this refactor): reset it
+// after every test so one test's leftover connection/grace-period timer never leaks into the next.
+afterEach(() => {
+  __resetLiveEventsForTests();
+});
 
 describe('fetchLiveState', () => {
   afterEach(() => {
@@ -67,6 +75,11 @@ class FakeEventSource {
   emit(type: string, data: unknown) {
     const event = { data: JSON.stringify(data) } as MessageEvent<string>;
     for (const cb of this.listeners.get(type) ?? []) cb(event);
+  }
+
+  /** A native `error` event carries no payload; used to simulate a drop/reconnect cycle. */
+  emitError() {
+    for (const cb of this.listeners.get('error') ?? []) cb({} as MessageEvent<string>);
   }
 }
 
@@ -136,11 +149,121 @@ describe('subscribeLiveEvents', () => {
     unsubscribe();
   });
 
-  it('unsubscribe closes the connection', () => {
+  it('unsubscribe closes the connection after the grace period', async () => {
     const unsubscribe = subscribeLiveEvents(queryClient);
     const source = FakeEventSource.instances[0]!;
     unsubscribe();
+    // Zero subscribers doesn't close synchronously any more -- see CLOSE_GRACE_MS -- so wait it out.
+    await new Promise((resolve) => setTimeout(resolve, CLOSE_GRACE_MS + 10));
     expect(source.closed).toBe(true);
+  });
+});
+
+describe('subscribeLiveEvents shares one EventSource across subscribers (singleton + grace period)', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient();
+    FakeEventSource.instances.length = 0;
+    vi.stubGlobal('EventSource', FakeEventSource);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('two subscribers share a single EventSource', () => {
+    const unsubscribe1 = subscribeLiveEvents(queryClient);
+    const unsubscribe2 = subscribeLiveEvents(queryClient);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    unsubscribe1();
+    unsubscribe2();
+  });
+
+  it('unsubscribing one of two leaves the connection open', () => {
+    const unsubscribe1 = subscribeLiveEvents(queryClient);
+    const unsubscribe2 = subscribeLiveEvents(queryClient);
+    const source = FakeEventSource.instances[0]!;
+
+    unsubscribe1();
+    expect(source.closed).toBe(false);
+
+    unsubscribe2();
+    vi.advanceTimersByTime(CLOSE_GRACE_MS);
+  });
+
+  it('unsubscribing both closes the connection only after the grace period', () => {
+    const unsubscribe1 = subscribeLiveEvents(queryClient);
+    const unsubscribe2 = subscribeLiveEvents(queryClient);
+    const source = FakeEventSource.instances[0]!;
+
+    unsubscribe1();
+    unsubscribe2();
+    expect(source.closed).toBe(false);
+
+    vi.advanceTimersByTime(CLOSE_GRACE_MS - 1);
+    expect(source.closed).toBe(false);
+
+    vi.advanceTimersByTime(1);
+    expect(source.closed).toBe(true);
+  });
+
+  it('resubscribing within the grace period reuses the same instance (StrictMode subscribe/unsubscribe/subscribe)', () => {
+    const unsubscribe1 = subscribeLiveEvents(queryClient);
+    const source = FakeEventSource.instances[0]!;
+    unsubscribe1();
+
+    // Resubscribe before CLOSE_GRACE_MS elapses -- simulates React StrictMode's immediate
+    // double-invoke of an effect (mount -> cleanup -> mount again).
+    vi.advanceTimersByTime(CLOSE_GRACE_MS - 50);
+    const unsubscribe2 = subscribeLiveEvents(queryClient);
+
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(source.closed).toBe(false);
+
+    vi.advanceTimersByTime(CLOSE_GRACE_MS);
+    expect(source.closed).toBe(false); // the second subscriber is still active
+
+    unsubscribe2();
+    vi.advanceTimersByTime(CLOSE_GRACE_MS);
+    expect(source.closed).toBe(true);
+  });
+
+  it('delivers events to every active subscriber', () => {
+    const secondClient = new QueryClient();
+
+    const unsubscribe1 = subscribeLiveEvents(queryClient);
+    const unsubscribe2 = subscribeLiveEvents(secondClient);
+    const source = FakeEventSource.instances[0]!;
+
+    source.emit('resources', [{ id: 'shared' }]);
+    expect(queryClient.getQueryData(CLUSTER_RESOURCES_QUERY_KEY)).toEqual([{ id: 'shared' }]);
+    expect(secondClient.getQueryData(CLUSTER_RESOURCES_QUERY_KEY)).toEqual([{ id: 'shared' }]);
+
+    unsubscribe1();
+    unsubscribe2();
+  });
+
+  it('an error/reconnect on the shared connection still delivers events to every subscriber', () => {
+    const secondClient = new QueryClient();
+    const unsubscribe1 = subscribeLiveEvents(queryClient);
+    const unsubscribe2 = subscribeLiveEvents(secondClient);
+    const source = FakeEventSource.instances[0]!;
+
+    // Simulate a drop; the native EventSource reconnects on the same instance without any
+    // `error` handling of our own (unchanged from before this refactor).
+    source.emitError();
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(source.closed).toBe(false);
+
+    source.emit('resources', [{ id: 'post-reconnect' }]);
+    expect(queryClient.getQueryData(CLUSTER_RESOURCES_QUERY_KEY)).toEqual([{ id: 'post-reconnect' }]);
+    expect(secondClient.getQueryData(CLUSTER_RESOURCES_QUERY_KEY)).toEqual([{ id: 'post-reconnect' }]);
+
+    unsubscribe1();
+    unsubscribe2();
   });
 });
 

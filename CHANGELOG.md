@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A page no longer opens two (or three) `/api/events` SSE connections. Every live hook
+  (`useClusterResources`/`useTasks`/`useAlerts`, each via `useLiveMode`) now shares one
+  reference-counted `EventSource` per page; the first subscriber opens it, later ones attach to
+  it, and the last unsubscribe closes it after a short grace period (so React StrictMode's
+  subscribe/unsubscribe/subscribe double-invoke reuses the same connection instead of tearing it
+  down and reopening it).
+- The resizable left rail no longer drifts from its saved pixel width when the browser window is
+  resized: it used to keep its on-mount percentage, so its on-screen pixel width grew or shrank
+  with the window. The rail's persisted pixel width is re-derived to a percentage and reapplied
+  on every (debounced) window resize, without fighting an in-progress drag or the collapsed state.
+- The Hardware tab now formats disk, EFI disk, and TPM state drive sizes the same way the Summary
+  tab does (e.g. `32.0 GiB`) instead of showing PVE's raw config-file suffix (`32G`) verbatim; the
+  raw value is still available as a tooltip.
+
 ## [0.1.2] - 2026-09-25
 
 ### Fixed

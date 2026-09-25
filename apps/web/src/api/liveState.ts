@@ -39,12 +39,90 @@ export async function fetchLiveState(): Promise<LiveStateSnapshot | null> {
 }
 
 /**
+ * How long to keep the shared `EventSource` open with zero subscribers before actually closing
+ * it. A page's several live hooks (`useClusterResources`/`useTasks`/`useAlerts`, each via
+ * `useLiveMode`) subscribe/unsubscribe independently as they mount and re-render, and React
+ * StrictMode double-invokes an effect (subscribe, immediately unsubscribe, subscribe again) --
+ * without a grace window, that teardown-then-resubscribe cycle would close and reopen the
+ * connection for no reason. Any subscribe within this window reuses the existing instance.
+ */
+export const CLOSE_GRACE_MS = 250;
+
+/**
+ * Test-only escape hatch: force-closes and clears the module-singleton shared connection, so each
+ * test starts from a clean slate instead of reusing (or racing the grace-period close of) whatever
+ * a previous test's subscribers left behind. Never called by application code.
+ */
+export function __resetLiveEventsForTests(): void {
+  if (!shared) return;
+  if (shared.closeTimer !== undefined) clearTimeout(shared.closeTimer);
+  shared.source.close();
+  shared = null;
+}
+
+interface LiveEventsSubscriber {
+  onSnapshot: (ev: MessageEvent<string>) => void;
+  onResources: (ev: MessageEvent<string>) => void;
+  onTasks: (ev: MessageEvent<string>) => void;
+  onAlerts: (ev: MessageEvent<string>) => void;
+}
+
+interface SharedConnection {
+  source: EventSource;
+  subscribers: Map<symbol, LiveEventsSubscriber>;
+  closeTimer: ReturnType<typeof setTimeout> | undefined;
+}
+
+/** The one `/api/events` connection shared by every `subscribeLiveEvents` caller (module-singleton, reference-counted). */
+let shared: SharedConnection | null = null;
+
+/**
+ * Opens the shared `EventSource` on the first subscriber and forwards every named event to
+ * whichever subscribers are currently registered, so a page holds exactly one connection no
+ * matter how many hooks/components call `subscribeLiveEvents`. Reconnect/backoff is left
+ * entirely to the browser's native `EventSource` behavior (unchanged from before this refactor:
+ * neither the old nor the new code adds its own `error` handling), so the same instance keeps
+ * delivering to every registered subscriber across a drop and reconnect.
+ */
+function ensureSharedConnection(): SharedConnection {
+  if (shared) {
+    if (shared.closeTimer !== undefined) {
+      clearTimeout(shared.closeTimer);
+      shared.closeTimer = undefined;
+    }
+    return shared;
+  }
+
+  const source = new EventSource('/api/events');
+  const subscribers = new Map<symbol, LiveEventsSubscriber>();
+
+  source.addEventListener('snapshot', (ev) => {
+    for (const s of subscribers.values()) s.onSnapshot(ev);
+  });
+  source.addEventListener('resources', (ev) => {
+    for (const s of subscribers.values()) s.onResources(ev);
+  });
+  source.addEventListener('tasks', (ev) => {
+    for (const s of subscribers.values()) s.onTasks(ev);
+  });
+  source.addEventListener('alerts', (ev) => {
+    for (const s of subscribers.values()) s.onAlerts(ev);
+  });
+
+  shared = { source, subscribers, closeTimer: undefined };
+  return shared;
+}
+
+/**
  * Subscribes to `GET /api/events` (SSE) and writes every event straight into the react-query
  * cache: `snapshot` (sent once on connect) updates both keys; `resources`/`tasks` update just
- * their own. Returns an unsubscribe function that closes the connection.
+ * their own. Every subscriber shares one underlying `EventSource` (see `ensureSharedConnection`)
+ * -- the first call opens it, later calls attach to it, and the last unsubscribe closes it after
+ * `CLOSE_GRACE_MS`. Returns an unsubscribe function.
  */
 export function subscribeLiveEvents(queryClient: QueryClient): () => void {
-  const source = new EventSource('/api/events');
+  const conn = ensureSharedConnection();
+  const id = Symbol('liveEventsSubscriber');
 
   let invalidateTimer: ReturnType<typeof setTimeout> | undefined;
   /**
@@ -62,41 +140,47 @@ export function subscribeLiveEvents(queryClient: QueryClient): () => void {
     }, NODE_TASKS_INVALIDATE_DEBOUNCE_MS);
   }
 
-  const onSnapshot = (ev: MessageEvent<string>) => {
-    const snapshot = JSON.parse(ev.data) as LiveStateSnapshot;
-    queryClient.setQueryData(CLUSTER_RESOURCES_QUERY_KEY, snapshot.resources);
-    queryClient.setQueryData(TASKS_QUERY_KEY, snapshot.tasks);
-    queryClient.setQueryData(ALERTS_QUERY_KEY, snapshot.alerts);
-    scheduleNodeTasksInvalidate();
-  };
-  const onResources = (ev: MessageEvent<string>) => {
-    queryClient.setQueryData(CLUSTER_RESOURCES_QUERY_KEY, JSON.parse(ev.data) as ClusterResource[]);
-  };
-  const onTasks = (ev: MessageEvent<string>) => {
-    queryClient.setQueryData(TASKS_QUERY_KEY, JSON.parse(ev.data) as PveTask[]);
-    scheduleNodeTasksInvalidate();
-  };
-  /**
-   * The poller recomputes and emits `alerts` on every cluster-task poll (not just its own slow
-   * vzdump-history one) so a healed backup shows up within seconds -- see the server's
-   * `poller.ts`. Written straight into the cache like `resources`/`tasks` above, no debounce
-   * needed (there's no downstream `['node-tasks', ...]`-style fan-out to collapse).
-   */
-  const onAlerts = (ev: MessageEvent<string>) => {
-    queryClient.setQueryData(ALERTS_QUERY_KEY, JSON.parse(ev.data) as Alert[]);
+  const subscriber: LiveEventsSubscriber = {
+    onSnapshot: (ev) => {
+      const snapshot = JSON.parse(ev.data) as LiveStateSnapshot;
+      queryClient.setQueryData(CLUSTER_RESOURCES_QUERY_KEY, snapshot.resources);
+      queryClient.setQueryData(TASKS_QUERY_KEY, snapshot.tasks);
+      queryClient.setQueryData(ALERTS_QUERY_KEY, snapshot.alerts);
+      scheduleNodeTasksInvalidate();
+    },
+    onResources: (ev) => {
+      queryClient.setQueryData(CLUSTER_RESOURCES_QUERY_KEY, JSON.parse(ev.data) as ClusterResource[]);
+    },
+    onTasks: (ev) => {
+      queryClient.setQueryData(TASKS_QUERY_KEY, JSON.parse(ev.data) as PveTask[]);
+      scheduleNodeTasksInvalidate();
+    },
+    /**
+     * The poller recomputes and emits `alerts` on every cluster-task poll (not just its own slow
+     * vzdump-history one) so a healed backup shows up within seconds -- see the server's
+     * `poller.ts`. Written straight into the cache like `resources`/`tasks` above, no debounce
+     * needed (there's no downstream `['node-tasks', ...]`-style fan-out to collapse).
+     */
+    onAlerts: (ev) => {
+      queryClient.setQueryData(ALERTS_QUERY_KEY, JSON.parse(ev.data) as Alert[]);
+    },
   };
 
-  source.addEventListener('snapshot', onSnapshot);
-  source.addEventListener('resources', onResources);
-  source.addEventListener('tasks', onTasks);
-  source.addEventListener('alerts', onAlerts);
+  conn.subscribers.set(id, subscriber);
 
   return () => {
-    source.removeEventListener('snapshot', onSnapshot);
-    source.removeEventListener('resources', onResources);
-    source.removeEventListener('tasks', onTasks);
-    source.removeEventListener('alerts', onAlerts);
+    conn.subscribers.delete(id);
     if (invalidateTimer !== undefined) clearTimeout(invalidateTimer);
-    source.close();
+    if (conn.subscribers.size > 0) return;
+    conn.closeTimer = setTimeout(() => {
+      conn.closeTimer = undefined;
+      // Re-check size: a resubscribe within the grace period reuses `conn` (via
+      // `ensureSharedConnection`'s `shared` reuse) and would have cleared this timer already,
+      // but guard anyway in case a future change schedules closing differently.
+      if (shared === conn && conn.subscribers.size === 0) {
+        conn.source.close();
+        shared = null;
+      }
+    }, CLOSE_GRACE_MS);
   };
 }

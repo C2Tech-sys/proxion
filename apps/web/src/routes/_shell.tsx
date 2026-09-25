@@ -93,7 +93,41 @@ function ShellLayout() {
   const railWidthPrefAppliedRef = useRef(false);
   const { data: prefs } = usePrefs();
 
+  // Set by the handle's `onDragging` callback below; read (never subscribed to, so it never
+  // triggers a re-render) by the debounced `resize` handler so an in-progress drag is never
+  // fought by a re-derive-from-pixels that happens to land mid-drag.
+  const isDraggingRef = useRef(false);
+  const resizeDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
   const railSize = (sidebarWidth / viewportWidth()) * 100;
+
+  // `sidebarWidth` (persisted, in pixels) is the source of truth; `railSize` above only converts
+  // it to the percentage `ResizablePanel` wants, and that percentage is stale the instant the
+  // viewport width it was derived from changes. `defaultSize` (below) is honored only on the
+  // panel's first mount, so without this, resizing the window leaves the rail at its old
+  // percentage -- correct at the old width, wrong (drifted in pixels) at the new one. On every
+  // `resize` (debounced ~100ms so a drag-resize of the OS window doesn't thrash this), re-derive
+  // the percentage from the persisted pixel width and apply it via the imperative `resize()` API,
+  // which `defaultSize` can't reach after mount. Skipped while the user is dragging the handle
+  // itself (`isDraggingRef`) and while the rail is collapsed (there's no pixel width to restore
+  // to -- `railSize`/`onResize` below already special-case that state as 0).
+  useEffect(() => {
+    function handleWindowResize() {
+      if (resizeDebounceRef.current !== undefined) clearTimeout(resizeDebounceRef.current);
+      resizeDebounceRef.current = setTimeout(() => {
+        resizeDebounceRef.current = undefined;
+        if (isDraggingRef.current) return;
+        const panel = railRef.current;
+        if (!panel || panel.isCollapsed()) return;
+        panel.resize((sidebarWidth / viewportWidth()) * 100);
+      }, 100);
+    }
+    window.addEventListener('resize', handleWindowResize);
+    return () => {
+      window.removeEventListener('resize', handleWindowResize);
+      if (resizeDebounceRef.current !== undefined) clearTimeout(resizeDebounceRef.current);
+    };
+  }, [sidebarWidth]);
 
   useEffect(() => {
     if (railWidthPrefAppliedRef.current || !prefs?.railWidth) return;
@@ -157,7 +191,7 @@ function ShellLayout() {
           >
             <InventoryTree />
           </ResizablePanel>
-          <ResizableHandle />
+          <ResizableHandle onDragging={(isDragging) => { isDraggingRef.current = isDragging; }} />
           {/* Sibling sizes must sum to exactly 100, or the group renormalises every panel and
               the rail lands a few pixels off the width the user actually chose. */}
           <ResizablePanel defaultSize={collapsed ? 100 : 100 - railSize}>

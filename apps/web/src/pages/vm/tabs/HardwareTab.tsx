@@ -6,7 +6,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useVmConfig } from '@/api/hooks';
 import { errorMessage } from '@/api/errors';
-import { formatBytes } from '@/lib/format';
+import { formatBytes, formatDriveSize } from '@/lib/format';
 import {
   getDrives,
   getNetSpecs,
@@ -34,7 +34,14 @@ function driveLine(drive: ParsedDrive): ReactNode {
   return (
     <span data-testid="volume-id">
       {drive.storage}:{drive.volume}
-      {drive.size ? `, ${drive.size}` : ''}
+      {drive.size ? (
+        // Formatted like every other byte count in the UI (formatBytes, via formatDriveSize --
+        // same helper the Summary tab's disk list uses), instead of PVE's raw config-file
+        // suffix (`32G`); the raw string stays available as a tooltip.
+        <span title={drive.size}>, {formatDriveSize(drive.size)}</span>
+      ) : (
+        ''
+      )}
     </span>
   );
 }
