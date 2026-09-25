@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-25
+
+### Fixed
+
+- Snapshots tab: a snapshot taken without RAM showed a stray "0" after its
+  name (PVE reports `vmstate` as `0`/`1`, and the RAM badge check rendered
+  the zero). The italic "NOW" row no longer clips its last letter.
+
+### Changed
+
+- README: new "How it's built" section, and the feature status and roadmap
+  now reflect 0.2 (rename/notes and snapshots are shipped writes).
+
 ## [0.2.1] - 2026-09-25
 
 ### Fixed
@@ -221,7 +234,8 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/C2Tech-sys/proxion/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/C2Tech-sys/proxion/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/C2Tech-sys/proxion/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/C2Tech-sys/proxion/compare/v0.1.1...v0.1.2

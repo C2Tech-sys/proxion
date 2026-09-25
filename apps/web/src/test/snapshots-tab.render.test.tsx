@@ -55,8 +55,8 @@ const SNAPSHOTS: Snapshot[] = [
   { name: 'pre-upgrade', description: 'before the upgrade', snaptime: 1700000000 },
 ];
 
-function renderTab() {
-  mockUseSnapshots.mockReturnValue({ data: SNAPSHOTS, isLoading: false, isError: false, error: null });
+function renderTab(snapshots: Snapshot[] = SNAPSHOTS) {
+  mockUseSnapshots.mockReturnValue({ data: snapshots, isLoading: false, isError: false, error: null });
   mockUseVmStatus.mockReturnValue({ data: { status: 'running', name: 'web-prod-01' } as Partial<ClusterResource> });
 
   const queryClient = createQueryClient();
@@ -141,5 +141,37 @@ describe('SnapshotsTab gating', () => {
 
     await screen.findByRole('button', { name: 'Actions for pre-upgrade' });
     expect(screen.queryByRole('button', { name: 'Actions for NOW' })).not.toBeInTheDocument();
+  });
+});
+
+/** PVE serialises `vmstate` as `0`/`1`. A `{vmstate && <Badge/>}` guard renders the literal "0"
+ * for every RAM-less snapshot (React prints falsy numbers), which is what shipped in 0.2.1. */
+describe('SnapshotsTab RAM badge', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('a snapshot with vmstate 0 shows neither a RAM badge nor a stray "0"', async () => {
+    mockUseAuthMe.mockReturnValue(authData('session'));
+    mockUsePermissions.mockReturnValue(permissionsData({ 'VM.Snapshot': true, 'VM.Snapshot.Rollback': true }));
+
+    renderTab([{ name: 'current' }, { name: 'no-ram', snaptime: 1700000000, vmstate: 0 }]);
+
+    // The row button's accessible name is exactly the snapshot name: no trailing "0".
+    expect(await screen.findByRole('button', { name: 'no-ram' })).toBeInTheDocument();
+    expect(screen.queryByText('0')).not.toBeInTheDocument();
+    expect(screen.queryByText('RAM')).not.toBeInTheDocument();
+  });
+
+  it('a snapshot with vmstate 1 shows the RAM badge', async () => {
+    mockUseAuthMe.mockReturnValue(authData('session'));
+    mockUsePermissions.mockReturnValue(permissionsData({ 'VM.Snapshot': true, 'VM.Snapshot.Rollback': true }));
+
+    renderTab([{ name: 'current' }, { name: 'with-ram', snaptime: 1700000000, vmstate: 1 }]);
+
+    // Wait on the row's actions menu (its name is unambiguous) rather than the row button, whose
+    // accessible name jsdom joins from inline spans without a separator.
+    await screen.findByRole('button', { name: 'Actions for with-ram' });
+    expect(screen.getByText('RAM')).toBeInTheDocument();
   });
 });

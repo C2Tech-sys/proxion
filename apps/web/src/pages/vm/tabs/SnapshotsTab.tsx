@@ -58,12 +58,14 @@ function SnapshotRow({
         )}
       >
         {isNow ? <CirclePlay className="size-3.5 shrink-0" /> : <Camera className="size-3.5 shrink-0" />}
-        <span className="truncate">{node.name}</span>
-        {node.snapshot?.vmstate && (
+        {/* Italic glyphs overhang their advance width; the padding keeps the "W" inside the overflow clip. */}
+        <span className={cn('truncate', isNow && 'pr-1')}>{node.name}</span>
+        {/* Ternary, not `&&`: PVE sends `vmstate: 0` for RAM-less snapshots and `0 && ...` renders a literal "0". */}
+        {node.snapshot?.vmstate ? (
           <Badge variant="outline" className="shrink-0">
             RAM
           </Badge>
-        )}
+        ) : null}
       </button>
       {!isNow &&
         (isPending ? (

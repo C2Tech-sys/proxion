@@ -18,10 +18,11 @@ terminal, and deep links back to the stock UI for everything else.
 
 It's a pnpm monorepo: a Vite/React frontend, a Fastify API/proxy server,
 and a generated Proxmox VE API client. The read-only PVE proxy
-(`/api/pve/*`) is permanently write-blocked; guest power actions, console
-thumbnails, and per-user preferences are the first slice of writes, each
-through its own allow-listed route -- see [Feature status](#feature-status)
-below.
+(`/api/pve/*`) is permanently write-blocked; the writes Proxion does
+perform -- guest power actions, rename/notes, snapshots, console thumbnails
+and per-user preferences -- each go through their own allow-listed route,
+checked against your real PVE privileges -- see
+[Feature status](#feature-status) below.
 
 ## Screenshots
 
@@ -115,10 +116,12 @@ pnpm install && pnpm demo
 
 ## Feature status
 
-Mostly still read-only: the one write this app performs is guest power
-actions (below), gated on a signed-in session and `VM.PowerMgmt`. Nothing
-else here can migrate, edit config, or otherwise change your cluster --
-`/api/pve/*` itself stays a read-only proxy.
+Reads go through a permanently read-only proxy. The writes this app
+performs -- guest power actions, rename/notes, and snapshot
+create/delete/rollback (below) -- each go through their own allow-listed
+route, gated on a signed-in session and the matching PVE privilege on that
+guest. Nothing else here can migrate, edit config, or otherwise change your
+cluster -- `/api/pve/*` itself stays a read-only proxy.
 
 | Area                                               | Status          | Notes                                                                                                                                                                  |
 | -------------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -141,7 +144,7 @@ else here can migrate, edit config, or otherwise change your cluster --
 | Preferences                                        | Works           | Theme, density, default Monitor range, console thumbnails on/off + refresh interval, inventory rail width, and your Summary panel order -- stored server-side per user, so they follow you across browsers. Read-only under the shared service token. |
 | Power actions                                      | Works (session sign-in only) | Start/Shut down/Reboot/Pause/Resume/Stop/Reset from the VM/CT object header (Start/Shut down/Reboot/Stop also in the inventory tree's context menu), each behind a confirmation dialog. Needs a signed-in session and `VM.PowerMgmt` on the guest -- the shared service token stays read-only, and so does the raw `/api/pve/*` proxy; this goes through one small, allow-listed server route instead. |
 | Rename / notes                                     | Works (session sign-in only) | Rename a VM/CT from the object header's "More" menu or the inventory tree's context menu; edit its notes (the PVE description field) inline from the Summary tab's Notes panel. Needs a signed-in session and `VM.Config.Options` on the guest -- a different privilege than power actions, checked independently; the shared service token stays read-only here too. |
-| Any other write action (migrate/snapshot/...)      | Not implemented | The proxy rejects non-`GET` requests to `/api/pve/*` outright; only guest power actions and rename/notes (above) have dedicated write routes so far.                    |
+| Any other write action (migrate/config edit/...)   | Not implemented | The proxy rejects non-`GET` requests to `/api/pve/*` outright; only guest power actions, rename/notes and snapshots (above) have dedicated write routes so far.         |
 
 ### Console thumbnails: host agent (optional)
 
@@ -255,15 +258,34 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 - **Phase 1**: read-only. Dashboard, inventory, object pages, monitoring
   graphs, task feed, console/terminal bridges. Done.
-- **Phase 1.5 (current)**: the first slice of writes -- guest power actions
+- **Phase 1.5**: the first slice of writes -- guest power actions
   (start/stop/shutdown/reboot/pause/resume), console thumbnails, and
   per-user preferences, all gated behind the caller's real PVE permissions;
   `/api/pve/*` itself stays a permanently read-only proxy. Done.
-- **Phase 2**: more actions -- migrate, snapshot create/rollback/delete --
-  each as its own allow-listed route, same pattern as guest power actions.
+- **Phase 2 (current)**: more actions, each as its own allow-listed route,
+  same pattern as guest power actions. Rename/notes, snapshot
+  create/rollback/delete and the cluster-wide Guests list shipped in 0.2;
+  migrate is next.
 - **Phase 3**: VMware-style extras -- console thumbnails in the inventory
   tree itself (today: dashboard and VM/CT Summary only), a built-in SSH
   client for nodes/guests, alarms/alerting, and a storage browser.
+
+## How it's built
+
+Proxion started as a tool for my own Proxmox cluster, and I run it there
+every day. I build it together with Claude (Anthropic's Claude Code): I set
+the direction, decide what ships, review the changes and test them against
+a real host; Claude writes a large share of the code. I'd rather say that
+up front than have you find it in the commit history.
+
+Every change goes through the same gates before it is tagged and published:
+a TypeScript typecheck across the workspace, ESLint with zero warnings, the
+unit and render test suites (over 800 tests, run against a fake PVE and
+fixture data, never a live host), and CI on GitHub. Releases build the
+multi-arch image from the tagged commit.
+
+Found a bug? Open an issue. Fixes land quickly, and each one gets a test so
+it stays fixed.
 
 ## Support the project
 

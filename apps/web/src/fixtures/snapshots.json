@@ -18,12 +18,13 @@
   ],
   "qemu-106": [
     { "name": "current" },
-    { "name": "fresh-install", "description": "Clean Windows 11 install, no domain join.", "snaptime": 1788000000 },
+    { "name": "fresh-install", "description": "Clean Windows 11 install, no domain join.", "snaptime": 1788000000, "vmstate": 0 },
     {
       "name": "domain-joined",
       "description": "Joined to lab.local domain, GPOs applied.",
       "parent": "fresh-install",
-      "snaptime": 1788500000
+      "snaptime": 1788500000,
+      "vmstate": 0
     }
   ],
   "lxc-200": [

@@ -179,7 +179,8 @@ export interface Snapshot {
   description?: string | undefined;
   parent?: string | undefined;
   snaptime?: number | undefined;
-  vmstate?: boolean | undefined;
+  /** PVE reports this as `0`/`1` in the snapshot list; the create route sends a boolean. Treat it as truthy/falsy only. */
+  vmstate?: boolean | 0 | 1 | undefined;
 }
 
 export type { StorageContentItem };
