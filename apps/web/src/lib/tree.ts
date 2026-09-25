@@ -120,6 +120,10 @@ export interface FlatSearchItem {
   node: string;
   vmid?: number | undefined;
   type?: GuestType | 'storage' | undefined;
+  /** The storage's own name (as distinct from `label`, which is display text) -- set only for
+   *  `kind === 'storage'`, so the command palette can link to `/storage/$node/$storage` without
+   *  assuming `label` is never re-purposed for display later. */
+  storage?: string | undefined;
 }
 
 /** Flattens cluster resources into a single searchable list for the command palette. */
@@ -146,6 +150,7 @@ export function toSearchItems(resources: ClusterResource[]): FlatSearchItem[] {
         sublabel: `Storage on ${r.node}`,
         node: r.node,
         type: 'storage',
+        storage: r.storage ?? '',
       });
     }
   }

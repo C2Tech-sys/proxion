@@ -261,9 +261,8 @@ function StorageRow({ storage, node }: { storage: ClusterResource; node: string 
 
   return (
     <Link
-      to="/node/$node"
-      params={{ node }}
-      search={{ tab: 'storage' }}
+      to="/storage/$node/$storage"
+      params={{ node, storage: storage.storage ?? '' }}
       className="grid w-full grid-cols-[14px_minmax(0,1fr)_4.5rem] items-center gap-x-1.5 rounded-md py-1 pr-1.5 pl-7 text-left text-xs outline-none hover:bg-accent/10 focus-visible:bg-accent/10"
     >
       <Icon className="size-3 text-muted-foreground" />
