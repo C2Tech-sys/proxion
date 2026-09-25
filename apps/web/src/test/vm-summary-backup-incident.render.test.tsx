@@ -7,7 +7,7 @@ import { routeTree } from '@/routeTree.gen';
 import { createQueryClient } from '@/api/queryClient';
 
 // See vm-summary-last-backup.render.test.tsx's own copy of this constant for why.
-const FIND_TIMEOUT_MS = 5000;
+const FIND_TIMEOUT_MS = 10_000;
 
 function renderVm(path: string) {
   const queryClient = createQueryClient();

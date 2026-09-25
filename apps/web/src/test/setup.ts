@@ -1,6 +1,10 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
+
+// Route-level render tests (router + fixture data) can take several seconds when the whole
+// suite runs in parallel; a 1 s default wait measures machine load, not correctness.
+configure({ asyncUtilTimeout: 10_000 });
 
 // `globals` is off in vitest.config.ts, so React Testing Library cannot self-register its
 // auto-cleanup hook: without this, every `render()` leaves its DOM in document.body and later

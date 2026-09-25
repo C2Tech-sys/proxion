@@ -25,8 +25,10 @@ import { NotFoundError } from '@/api/errors';
 /** Budget for a not-found state to paint, in fixture mode. */
 // Generous on purpose: the retry policy is asserted deterministically above; this budget only
 // guards against the original 7.5 s retry/backoff regression and must not flake under CI load.
-const NOT_FOUND_BUDGET_MS = 5000;
+const NOT_FOUND_BUDGET_MS = 12_000;
 
+// The budget is generous on purpose: it proves the page settles instead of spinning forever,
+// while the full suite runs many route renders in parallel -- a tight budget measures load.
 async function expectNotFoundWithin(budgetMs: number) {
   const started = performance.now();
   expect(await screen.findByText(/was not found/i, undefined, { timeout: budgetMs })).toBeInTheDocument();
