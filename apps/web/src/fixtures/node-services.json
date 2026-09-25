@@ -6,5 +6,13 @@
     { "service": "pve-cluster", "name": "pve-cluster", "desc": "The Proxmox VE cluster filesystem", "state": "running" },
     { "service": "corosync", "name": "corosync", "desc": "Corosync Cluster Engine", "state": "running" },
     { "service": "sshd", "name": "sshd", "desc": "OpenBSD Secure Shell server", "state": "running" }
+  ],
+  "pve2": [
+    { "service": "pveproxy", "name": "pveproxy", "desc": "PVE API Proxy Server", "state": "running" },
+    { "service": "pvedaemon", "name": "pvedaemon", "desc": "PVE API Daemon", "state": "running" },
+    { "service": "pvestatd", "name": "pvestatd", "desc": "PVE Status Daemon", "state": "running" },
+    { "service": "pve-cluster", "name": "pve-cluster", "desc": "The Proxmox VE cluster filesystem", "state": "running" },
+    { "service": "corosync", "name": "corosync", "desc": "Corosync Cluster Engine", "state": "running" },
+    { "service": "sshd", "name": "sshd", "desc": "OpenBSD Secure Shell server", "state": "running" }
   ]
 }

@@ -61,10 +61,19 @@ describe('GuestsPage (T25)', () => {
   it('filters by node via the URL search', async () => {
     renderGuests('/guests?node=pve1');
     const table = await screen.findByRole('table', {}, { timeout: FIND_TIMEOUT_MS });
-    // Every fixture guest is on pve1, so filtering by it keeps the full 21 -- combined with a
-    // bogus node it should show none.
-    await screen.findByText(/21 of 21 shown/, {}, { timeout: FIND_TIMEOUT_MS });
+    // T31 moved 3 of the 21 fixture guests (ci-runner-01/02, caddy-proxy) to the second fixture
+    // node `pve2`, so filtering by `pve1` now keeps the remaining 18, not the full 21.
+    await screen.findByText(/18 of 21 shown/, {}, { timeout: FIND_TIMEOUT_MS });
     expect(within(table).getByText('web-prod-01')).toBeInTheDocument();
+    expect(within(table).queryByText('caddy-proxy')).not.toBeInTheDocument();
+  });
+
+  it('filters by the second fixture node (pve2) via the URL search (T31)', async () => {
+    renderGuests('/guests?node=pve2');
+    const table = await screen.findByRole('table', {}, { timeout: FIND_TIMEOUT_MS });
+    await screen.findByText(/3 of 21 shown/, {}, { timeout: FIND_TIMEOUT_MS });
+    expect(within(table).getByText('caddy-proxy')).toBeInTheDocument();
+    expect(within(table).queryByText('web-prod-01')).not.toBeInTheDocument();
   });
 
   it('shows an empty state when the search matches nothing', async () => {

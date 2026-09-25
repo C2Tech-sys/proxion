@@ -17,10 +17,14 @@ describe('fixtureUpdateGuestConfig', () => {
   });
 
   it('renames an lxc guest: config.hostname (not name) updates', async () => {
-    const result = await fixtureUpdateGuestConfig('pve1', 'lxc', 200, { name: 'caddy-renamed' });
+    // vmid 200 (caddy-proxy) is one of T31's second-fixture-node (pve2) guests -- `getVmConfig`
+    // is keyed by vmid alone (node is only used by `setFixtureGuestConfig`'s own resource-row
+    // lookup below), but the node passed here has to be the guest's real one for that lookup to
+    // find it.
+    const result = await fixtureUpdateGuestConfig('pve2', 'lxc', 200, { name: 'caddy-renamed' });
     expect(result).toEqual({ ok: true, changed: ['name'] });
 
-    await expect(fixtureClient.getVmConfig('pve1', 'lxc', 200)).resolves.toMatchObject({
+    await expect(fixtureClient.getVmConfig('pve2', 'lxc', 200)).resolves.toMatchObject({
       hostname: 'caddy-renamed',
     });
     const resources = await fixtureClient.getClusterResources();
