@@ -60,7 +60,10 @@ export function CommandPalette() {
         search: { tab: 'summary' },
       });
     } else if (item.kind === 'storage') {
-      void navigate({ to: '/node/$node', params: { node: item.node }, search: { tab: 'storage' } });
+      void navigate({
+        to: '/storage/$node/$storage',
+        params: { node: item.node, storage: item.storage ?? item.label },
+      });
     } else {
       void navigate({ to: '/node/$node', params: { node: item.node }, search: { tab: 'summary' } });
     }

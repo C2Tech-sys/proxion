@@ -17,6 +17,7 @@ import { Route as ShellPreferencesRouteImport } from './routes/_shell/preference
 import { Route as ShellTasksRouteImport } from './routes/_shell/tasks'
 import { Route as ShellNodeRouteImport } from './routes/shell.$node'
 import { Route as ShellNodeNodeRouteImport } from './routes/_shell/node.$node'
+import { Route as ShellStorageNodeStorageRouteImport } from './routes/_shell/storage.$node.$storage'
 import { Route as ConsoleNodeTypeVmidRouteImport } from './routes/console.$node.$type.$vmid'
 import { Route as ShellVmNodeTypeVmidRouteImport } from './routes/_shell/vm.$node.$type.$vmid'
 
@@ -59,6 +60,11 @@ const ShellNodeNodeRoute = ShellNodeNodeRouteImport.update({
   path: '/node/$node',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellStorageNodeStorageRoute = ShellStorageNodeStorageRouteImport.update({
+  id: '/storage/$node/$storage',
+  path: '/storage/$node/$storage',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ConsoleNodeTypeVmidRoute = ConsoleNodeTypeVmidRouteImport.update({
   id: '/console/$node/$type/$vmid',
   path: '/console/$node/$type/$vmid',
@@ -78,6 +84,7 @@ export interface FileRoutesByFullPath {
   '/tasks': typeof ShellTasksRoute
   '/shell/$node': typeof ShellNodeRoute
   '/node/$node': typeof ShellNodeNodeRoute
+  '/storage/$node/$storage': typeof ShellStorageNodeStorageRoute
   '/console/$node/$type/$vmid': typeof ConsoleNodeTypeVmidRoute
   '/vm/$node/$type/$vmid': typeof ShellVmNodeTypeVmidRoute
 }
@@ -89,6 +96,7 @@ export interface FileRoutesByTo {
   '/shell/$node': typeof ShellNodeRoute
   '/': typeof ShellIndexRoute
   '/node/$node': typeof ShellNodeNodeRoute
+  '/storage/$node/$storage': typeof ShellStorageNodeStorageRoute
   '/console/$node/$type/$vmid': typeof ConsoleNodeTypeVmidRoute
   '/vm/$node/$type/$vmid': typeof ShellVmNodeTypeVmidRoute
 }
@@ -102,6 +110,7 @@ export interface FileRoutesById {
   '/shell/$node': typeof ShellNodeRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/node/$node': typeof ShellNodeNodeRoute
+  '/_shell/storage/$node/$storage': typeof ShellStorageNodeStorageRoute
   '/console/$node/$type/$vmid': typeof ConsoleNodeTypeVmidRoute
   '/_shell/vm/$node/$type/$vmid': typeof ShellVmNodeTypeVmidRoute
 }
@@ -115,6 +124,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/shell/$node'
     | '/node/$node'
+    | '/storage/$node/$storage'
     | '/console/$node/$type/$vmid'
     | '/vm/$node/$type/$vmid'
   fileRoutesByTo: FileRoutesByTo
@@ -126,6 +136,7 @@ export interface FileRouteTypes {
     | '/shell/$node'
     | '/'
     | '/node/$node'
+    | '/storage/$node/$storage'
     | '/console/$node/$type/$vmid'
     | '/vm/$node/$type/$vmid'
   id:
@@ -138,6 +149,7 @@ export interface FileRouteTypes {
     | '/shell/$node'
     | '/_shell/'
     | '/_shell/node/$node'
+    | '/_shell/storage/$node/$storage'
     | '/console/$node/$type/$vmid'
     | '/_shell/vm/$node/$type/$vmid'
   fileRoutesById: FileRoutesById
@@ -207,6 +219,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellNodeNodeRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/storage/$node/$storage': {
+      id: '/_shell/storage/$node/$storage'
+      path: '/storage/$node/$storage'
+      fullPath: '/storage/$node/$storage'
+      preLoaderRoute: typeof ShellStorageNodeStorageRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/console/$node/$type/$vmid': {
       id: '/console/$node/$type/$vmid'
       path: '/console/$node/$type/$vmid'
@@ -230,6 +249,7 @@ interface ShellRouteChildren {
   ShellTasksRoute: typeof ShellTasksRoute
   ShellIndexRoute: typeof ShellIndexRoute
   ShellNodeNodeRoute: typeof ShellNodeNodeRoute
+  ShellStorageNodeStorageRoute: typeof ShellStorageNodeStorageRoute
   ShellVmNodeTypeVmidRoute: typeof ShellVmNodeTypeVmidRoute
 }
 
@@ -239,6 +259,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellTasksRoute: ShellTasksRoute,
   ShellIndexRoute: ShellIndexRoute,
   ShellNodeNodeRoute: ShellNodeNodeRoute,
+  ShellStorageNodeStorageRoute: ShellStorageNodeStorageRoute,
   ShellVmNodeTypeVmidRoute: ShellVmNodeTypeVmidRoute,
 }
 

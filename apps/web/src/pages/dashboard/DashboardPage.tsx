@@ -153,10 +153,14 @@ function StoragePanel({ resources }: { resources: ClusterResource[] }) {
             <div className="flex items-center justify-between gap-2">
               {/* The storage id is an identifier, but sans not mono (T11) -- same face as the
                   "(node)" suffix. */}
-              <span className="truncate text-[13px]">
-                <span>{s.storage}</span>{' '}
+              <Link
+                to="/storage/$node/$storage"
+                params={{ node: s.node, storage: s.storage ?? '' }}
+                className="truncate text-[13px] hover:underline"
+              >
+                <span className="text-accent">{s.storage}</span>{' '}
                 <span className="text-muted-foreground">({s.node})</span>
-              </span>
+              </Link>
               <span className="shrink-0 text-xs text-muted-foreground">{s.plugintype}</span>
             </div>
             <div className="flex flex-wrap gap-1">

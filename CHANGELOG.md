@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Storage browser (`/storage/$node/$storage`): a vSphere-style datastore object page --
+  summary strip plus a searchable, sortable content browser -- with every existing storage
+  entry point (inventory tree, command palette, dashboard, node Storage tab) now linking to it.
+
 ## [0.2.2] - 2026-09-25
 
 ### Fixed
