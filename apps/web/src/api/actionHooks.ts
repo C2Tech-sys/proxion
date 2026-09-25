@@ -1,5 +1,8 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { toast } from 'sonner';
+
+import { isVmTab, type VmTab } from '@/pages/vm/tabs';
 
 import { USE_FIXTURES } from '@/api/client';
 import { CLUSTER_RESOURCES_QUERY_KEY, TASKS_QUERY_KEY } from '@/api/liveState';
@@ -9,6 +12,8 @@ import {
   createSnapshot,
   deleteSnapshot,
   rollbackSnapshot,
+  migrateGuest,
+  getMigratePrecheck,
   GuestActionError,
   type GuestAction,
   type GuestActionBody,
@@ -17,6 +22,7 @@ import {
   type DeleteSnapshotOptions,
   type RollbackSnapshotOptions,
   type SnapshotActionResult,
+  type MigrateGuestBody,
 } from '@/api/actions';
 import type { GuestType, PveTask } from '@/api/types';
 
@@ -200,6 +206,92 @@ export function useSnapshotAction() {
     onError: (error: unknown) => {
       toast.error(error instanceof GuestActionError ? error.message : 'The snapshot action could not be started.');
     },
+  });
+}
+
+export interface MigrateGuestVars {
+  node: string;
+  type: GuestType;
+  vmid: number;
+  /** The guest's display name, for the "Migrating <name> to <target>…" toast only -- never sent
+   * to the server. */
+  name: string;
+  body: MigrateGuestBody;
+}
+
+/**
+ * Requests one guest migrate (`src/api/actions.ts`). On success: a "Migrating <name> to
+ * <target>…" toast right away, then waits for the task to finish (`watchTaskCompletion` -- a
+ * no-op in fixture mode, where the in-memory move already happened synchronously inside
+ * `migrateGuest` itself) before invalidating this guest's status query (both its old and new
+ * node, since the node it lives under just changed) and the cluster-wide resources query,
+ * navigating to the guest's new URL (same `tab`), and toasting "Migrated to <target>". On error:
+ * a toast with the server's message, same convention as `useGuestAction`/`useSnapshotAction`.
+ */
+export function useMigrateGuest() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  // Not every surface that opens `MigrateGuestDialog` is itself the VM route (the inventory rail
+  // and `/guests` render it too) -- `strict: false` reads whatever the current route's search is
+  // without requiring this hook to be scoped to the VM route, and only `tab` (validated with the
+  // VM route's own `isVmTab`) is ever carried over to the post-migration navigate below.
+  const currentSearch = useSearch({ strict: false }) as { tab?: unknown };
+  const currentTab: VmTab = isVmTab(currentSearch.tab) ? currentSearch.tab : 'summary';
+
+  return useMutation({
+    mutationFn: (vars: MigrateGuestVars) => migrateGuest(vars.node, vars.type, vars.vmid, vars.body),
+    onSuccess: (result, vars) => {
+      toast.success(`Migrating ${vars.name} to ${vars.body.target}…`);
+
+      const finish = () => {
+        void queryClient.invalidateQueries({ queryKey: ['vm-status', vars.node, vars.type, vars.vmid] });
+        void queryClient.invalidateQueries({ queryKey: ['vm-status', vars.body.target, vars.type, vars.vmid] });
+        void queryClient.invalidateQueries({ queryKey: CLUSTER_RESOURCES_QUERY_KEY });
+        void navigate({
+          to: '/vm/$node/$type/$vmid',
+          params: { node: vars.body.target, type: vars.type, vmid: String(vars.vmid) },
+          search: { tab: currentTab },
+        });
+        toast.success(`Migrated to ${vars.body.target}`);
+      };
+
+      if (USE_FIXTURES) {
+        finish();
+      } else {
+        watchTaskCompletion(queryClient, result.upid, finish);
+      }
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof GuestActionError ? error.message : 'The migration could not be started.');
+    },
+  });
+}
+
+/**
+ * The guest's migrate precheck, keyed on `target` -- which is a valid key on its own:
+ * `MigrateGuestDialog` queries this once with `target: undefined` as soon as it opens (PVE's own
+ * precheck endpoint accepts an absent `target` too, and reports cluster-wide
+ * `allowedNodes`/`notAllowedNodes` either way -- see `migrateRoutes.ts`), so every node's
+ * eligibility for the picker is known before any target is chosen, then again with whichever
+ * node is picked, refining the guest-intrinsic (`running`) and target-specific (local disks/
+ * storage) detail. `placeholderData` keeps the last response visible while a newly-keyed query
+ * (e.g. the moment a target is first chosen) is in flight, so the picker's eligibility list never
+ * flickers back to "unknown" mid-choice. `enabled` is wired to the dialog's own `open` state --
+ * this component stays mounted, just hidden, between opens, and would otherwise fire a precheck
+ * request for every closed dialog on the page.
+ */
+export function useMigratePrecheck(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  target: string | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['migrate-precheck', node, type, vmid, target ?? null],
+    queryFn: () => getMigratePrecheck(node, type, vmid, target),
+    enabled,
+    placeholderData: (previousData) => previousData,
   });
 }
 

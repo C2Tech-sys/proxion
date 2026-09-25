@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { PveApiError, type PveClient } from '@proxion/pve-api';
 import { resolveIdentity } from '../pve/identity.js';
 import { registerSnapshotRoutes } from './snapshotRoutes.js';
+import { registerMigrateRoutes } from './migrateRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -387,4 +388,7 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // passed the already-built limiter rather than each getting its own via `app.rateLimit()`, for
   // the identical reason the power-action and config routes above share it.
   registerSnapshotRoutes(app, guestActionsRateLimit);
+
+  // Guest migrate (start + precheck) (`migrateRoutes.ts`) shares the same bucket, same rationale.
+  registerMigrateRoutes(app, guestActionsRateLimit);
 }

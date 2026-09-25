@@ -1,4 +1,10 @@
-import { setFixtureGuestConfig, setFixtureGuestStatus, setFixtureSnapshots } from '@/api/fixtures';
+import {
+  setFixtureGuestConfig,
+  setFixtureGuestNode,
+  setFixtureGuestStatus,
+  setFixtureSnapshots,
+  getFixtureMigratePrecheck,
+} from '@/api/fixtures';
 import type { GuestType } from '@/api/types';
 import type {
   CreateSnapshotBody,
@@ -6,6 +12,8 @@ import type {
   GuestActionResult,
   GuestConfigPatch,
   GuestConfigUpdateResult,
+  MigrateGuestBody,
+  MigratePrecheck,
   RollbackSnapshotOptions,
   SnapshotActionResult,
 } from '@/api/actions';
@@ -129,4 +137,30 @@ export async function fixtureRollbackSnapshot(
     setFixtureGuestStatus(node, type, vmid, 'running');
   }
   return delay({ upid: fakeUpidFor(node, vmid, 'rollback') });
+}
+
+/** Fixture-mode implementation of `migrateGuest` (see `src/api/actions.ts`): no real request,
+ * just a simulated delay and an in-memory move of the guest to `body.target`
+ * (`setFixtureGuestNode`), so the demo visibly reflects the migration. The rest of `body`
+ * (`online`/`withLocalDisks`/`restart`/`bwlimit`/`targetStorage`) has no fixture-visible effect. */
+export async function fixtureMigrateGuest(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  body: MigrateGuestBody,
+): Promise<GuestActionResult> {
+  setFixtureGuestNode(node, type, vmid, body.target);
+  return delay({ upid: fakeUpidFor(node, vmid, type === 'qemu' ? 'qmigrate' : 'vzmigrate') });
+}
+
+/** Fixture-mode implementation of `getMigratePrecheck` (see `src/api/actions.ts`): a synthetic,
+ * demo-friendly precheck computed from the in-memory fixture data (`fixtures.ts`'s
+ * `getFixtureMigratePrecheck`), with the same simulated latency every other fixture read uses. */
+export async function fixtureMigratePrecheck(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  target: string | undefined,
+): Promise<MigratePrecheck> {
+  return delay(getFixtureMigratePrecheck(node, type, vmid, target));
 }

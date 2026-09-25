@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Migrate a VM/CT to another cluster node from the object header's "More"
+  menu or the inventory tree's context menu: a target-node picker with a
+  live precheck (running state, local disks, local resources), online/
+  local-disks options for qemu, and automatic restart-mode migration for a
+  running lxc. Needs a signed-in session and `VM.Migrate` on the guest, same
+  allow-listed-write-route pattern as power actions, rename/notes and
+  snapshots.
 - Storage browser (`/storage/$node/$storage`): a vSphere-style datastore object page --
   summary strip plus a searchable, sortable content browser -- with every existing storage
   entry point (inventory tree, command palette, dashboard, node Storage tab) now linking to it.

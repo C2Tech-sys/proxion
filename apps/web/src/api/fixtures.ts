@@ -24,6 +24,7 @@ import type {
   StorageContentItem,
   TaskLogLine,
 } from '@/api/types';
+import type { MigratePrecheck } from '@/api/actions';
 import { computeAlerts } from '@proxion/core';
 import type { ApiClient, NodeTaskParams, ThumbnailCacheEntry } from '@/api/client-types';
 import { NotFoundError } from '@/api/errors';
@@ -357,6 +358,68 @@ export function setFixtureGuestConfig(
       resources[index] = { ...resources[index], name: patch.name } as ClusterResource;
     }
   }
+}
+
+/**
+ * Test/demo-only mutator: the ONE way `src/api/actionsFixture.ts`'s `fixtureMigrateGuest` moves a
+ * guest to its new node in the shared in-memory `resources` array, in place -- same convention as
+ * `setFixtureGuestStatus`/`setFixtureGuestConfig` above. A no-op if no matching guest exists (kept
+ * lenient, same as the other fixture mutators).
+ */
+export function setFixtureGuestNode(node: string, type: GuestType, vmid: number, target: string): void {
+  const index = resources.findIndex((r) => r.node === node && r.type === type && r.vmid === vmid);
+  if (index === -1) return;
+  resources[index] = { ...resources[index], node: target } as ClusterResource;
+}
+
+/** Demo-only: which qemu guests' migrate precheck reports a local disk, purely synthetic (not
+ * derived from any fixture json -- this app's fixture data has no per-guest storage/disk model)
+ * so the "Migrate local disks" checkbox has something to show in the demo. `web-prod-01` (vmid
+ * 100) is a running qemu guest, matching the ticket's "one running qemu guest" demo requirement. */
+const FIXTURE_LOCAL_DISK_VMIDS = new Set([100]);
+
+/**
+ * Test/demo-only: `src/api/actionsFixture.ts`'s `fixtureMigratePrecheck` reads this for a
+ * synthetic but demo-plausible migrate precheck -- computed from the shared in-memory `resources`
+ * (running state, other-node eligibility) plus the synthetic `FIXTURE_LOCAL_DISK_VMIDS` above.
+ * `target` is optional, mirroring the real precheck endpoint (and the server route -- see
+ * `migrateRoutes.ts`): every other node's eligibility is reported the same way whether or not one
+ * was given, matching real PVE's own precheck, which reports the whole cluster's candidates in
+ * one call, target or no.
+ */
+export function getFixtureMigratePrecheck(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  target: string | undefined,
+): MigratePrecheck {
+  const resource = resources.find((r) => r.node === node && r.type === type && r.vmid === vmid);
+  const running = resource?.status === 'running';
+  const hasLocalDisk = type === 'qemu' && FIXTURE_LOCAL_DISK_VMIDS.has(vmid);
+
+  const otherNodes = resources.filter((r) => r.type === 'node' && r.node !== node);
+  const allowedNodes: string[] = [];
+  const notAllowedNodes: MigratePrecheck['notAllowedNodes'] = {};
+  for (const n of otherNodes) {
+    if (n.status === 'online') {
+      allowedNodes.push(n.node);
+    } else {
+      notAllowedNodes[n.node] = { unavailableStorages: [], blockingHaResources: [] };
+    }
+  }
+  // `target` itself is only ever offered as a choice when it was already online (see
+  // `MigrateGuestDialog`'s own node picker) -- nothing extra to layer on for it here.
+  void target;
+
+  return {
+    running,
+    allowedNodes,
+    notAllowedNodes,
+    localDisks: hasLocalDisk
+      ? [{ volid: `local-lvm:vm-${vmid}-disk-0`, size: 34_359_738_368, cdrom: false, isUnused: false }]
+      : [],
+    localResources: [],
+  };
 }
 
 /** One snapshot create/delete/rollback, as `setFixtureSnapshots` applies it. Mirrors the three

@@ -54,6 +54,17 @@ export interface FakePve {
     status: number,
     message: string,
   ) => void;
+  /** Every migrate POST request PVE has received, in order (type + path + parsed form body). */
+  migrateCalls: Array<{ type: 'qemu' | 'lxc'; path: string; body: Record<string, string> }>;
+  /** Every migrate precheck GET request PVE has received, in order (type + full path, including
+   * any `?target=` query string PVE itself saw -- or its absence). */
+  migratePrecheckCalls: Array<{ type: 'qemu' | 'lxc'; path: string }>;
+  /** Makes the next matching `POST .../{type}/{vmid}/migrate` call fail with the given
+   * status/message. */
+  setMigrateError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string) => void;
+  /** Sets the `GET .../{type}/{vmid}/migrate` precheck response for a given (type, vmid) --
+   * whatever raw PVE-shaped object is given here is returned verbatim as `{ data: ... }`. */
+  setMigratePrecheck: (type: 'qemu' | 'lxc', vmid: number, data: unknown) => void;
   close: () => Promise<void>;
 }
 
@@ -308,6 +319,47 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   registerSnapshotRoutesForType('qemu');
   registerSnapshotRoutesForType('lxc');
 
+  // Guest migrate endpoints (`GET`/`POST .../{type}/{vmid}/migrate`), used by
+  // `src/actions/migrateRoutes.ts`. The GET (precheck) returns whatever `setMigratePrecheck` set
+  // for that (type, vmid), defaulting to an empty-but-valid shape; the POST records every call
+  // (type + path + parsed form body) and returns a fake UPID on success, same pattern as the
+  // power-action/config/snapshot routes above.
+  const migrateCalls: Array<{ type: 'qemu' | 'lxc'; path: string; body: Record<string, string> }> = [];
+  const migratePrecheckCalls: Array<{ type: 'qemu' | 'lxc'; path: string }> = [];
+  const migrateErrors = new Map<string, { status: number; message: string }>();
+  const migratePrechecks = new Map<string, unknown>();
+
+  function migrateKey(type: 'qemu' | 'lxc', vmid: number): string {
+    return `${type}:${vmid}`;
+  }
+
+  function defaultPrecheck(type: 'qemu' | 'lxc'): unknown {
+    return type === 'qemu'
+      ? { running: false, local_disks: [], local_resources: [] }
+      : { running: false };
+  }
+
+  function registerMigrateRoutesForType(type: 'qemu' | 'lxc') {
+    app.get(`/api2/json/nodes/:node/${type}/:vmid/migrate`, async (req, reply) => {
+      const { vmid } = req.params as { node: string; vmid: string };
+      migratePrecheckCalls.push({ type, path: req.url });
+      const data = migratePrechecks.get(migrateKey(type, Number(vmid))) ?? defaultPrecheck(type);
+      reply.send({ data });
+    });
+    app.post(`/api2/json/nodes/:node/${type}/:vmid/migrate`, async (req, reply) => {
+      const { vmid } = req.params as { node: string; vmid: string };
+      migrateCalls.push({ type, path: req.url, body: (req.body ?? {}) as Record<string, string> });
+      const failure = migrateErrors.get(migrateKey(type, Number(vmid)));
+      if (failure) {
+        reply.code(failure.status).send({ data: null, message: failure.message });
+        return;
+      }
+      reply.send({ data: `UPID:fakepve:00000001:00000000:00000000:${type === 'qemu' ? 'qmigrate' : 'vzmigrate'}:${vmid}:root@pam:` });
+    });
+  }
+  registerMigrateRoutesForType('qemu');
+  registerMigrateRoutesForType('lxc');
+
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
   return {
@@ -368,6 +420,18 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       message: string,
     ) => {
       snapshotErrors.set(snapshotErrorKey(op, type, vmid, snapname), { status, message });
+    },
+    get migrateCalls() {
+      return migrateCalls;
+    },
+    get migratePrecheckCalls() {
+      return migratePrecheckCalls;
+    },
+    setMigrateError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string) => {
+      migrateErrors.set(migrateKey(type, vmid), { status, message });
+    },
+    setMigratePrecheck: (type: 'qemu' | 'lxc', vmid: number, data: unknown) => {
+      migratePrechecks.set(migrateKey(type, vmid), data);
     },
     close: () => app.close(),
   };

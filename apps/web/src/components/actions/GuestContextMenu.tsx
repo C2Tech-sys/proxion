@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Copy, ExternalLink, Pencil, Power, RotateCw, Square, TvMinimal } from 'lucide-react';
+import { ArrowRightLeft, Copy, ExternalLink, Pencil, Power, RotateCw, Square, TvMinimal } from 'lucide-react';
 import { toast } from 'sonner';
 
 import {
@@ -13,7 +13,8 @@ import {
 import { GuestActionDialog } from '@/components/actions/GuestActionDialog';
 import { useGuestActionFlow } from '@/components/actions/useGuestActionFlow';
 import { RenameGuestDialog } from '@/components/actions/RenameGuestDialog';
-import { useAuthMe } from '@/api/hooks';
+import { MigrateGuestDialog } from '@/components/actions/MigrateGuestDialog';
+import { useAuthMe, useClusterResources } from '@/api/hooks';
 import { usePermissions } from '@/api/actionHooks';
 import { USE_FIXTURES } from '@/api/client';
 import type { GuestType } from '@/api/types';
@@ -60,6 +61,26 @@ function useCanConfigureGuest(vmid: number): { canRename: boolean; disabledReaso
   };
 }
 
+/** Same shape as `useCanRunGuestActions`/`useCanConfigureGuest`, gated on `VM.Migrate` and on the
+ * cluster actually having another node to migrate to -- a single-node cluster can never satisfy
+ * migrate regardless of privilege, so that's reported as its own disabled reason. */
+function useCanMigrateGuest(vmid: number, node: string): { canMigrate: boolean; disabledReason: string } {
+  const auth = useAuthMe();
+  const permissions = usePermissions(vmid);
+  const clusterResources = useClusterResources();
+  const isSessionMode = USE_FIXTURES || auth.data?.mode === 'session';
+  const hasMigrate = permissions.data?.can('VM.Migrate') === true;
+  const otherNodeCount = (clusterResources.data ?? []).filter((r) => r.type === 'node' && r.node !== node).length;
+  return {
+    canMigrate: isSessionMode && hasMigrate && otherNodeCount > 0,
+    disabledReason: !isSessionMode
+      ? 'Read-only: signed in with a service token'
+      : !hasMigrate
+        ? "You don't have VM.Migrate on this guest"
+        : 'No other node to migrate to',
+  };
+}
+
 export interface GuestContextMenuTarget {
   node: string;
   type: GuestType;
@@ -84,8 +105,10 @@ export interface GuestContextMenuProps {
 export function GuestContextMenu({ guest, children }: GuestContextMenuProps) {
   const { canWrite, disabledReason } = useCanRunGuestActions(guest.vmid);
   const { canRename, disabledReason: renameDisabledReason } = useCanConfigureGuest(guest.vmid);
+  const { canMigrate, disabledReason: migrateDisabledReason } = useCanMigrateGuest(guest.vmid, guest.node);
   const flow = useGuestActionFlow({ node: guest.node, type: guest.type, vmid: guest.vmid, name: guest.name });
   const [renameOpen, setRenameOpen] = useState(false);
+  const [migrateOpen, setMigrateOpen] = useState(false);
   const running = guest.status === 'running';
   const stopped = !running && guest.status !== 'paused';
 
@@ -123,6 +146,13 @@ export function GuestContextMenu({ guest, children }: GuestContextMenuProps) {
           onSelect={() => setRenameOpen(true)}
         >
           <Pencil /> Rename…
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!canMigrate}
+          title={canMigrate ? undefined : migrateDisabledReason}
+          onSelect={() => setMigrateOpen(true)}
+        >
+          <ArrowRightLeft /> Migrate…
         </ContextMenuItem>
         <ContextMenuSeparator />
         {stopped && (
@@ -177,6 +207,16 @@ export function GuestContextMenu({ guest, children }: GuestContextMenuProps) {
         type={guest.type}
         vmid={guest.vmid}
         currentName={guest.name}
+      />
+      <MigrateGuestDialog
+        key={migrateOpen ? 'migrate-open' : 'migrate-closed'}
+        open={migrateOpen}
+        onOpenChange={setMigrateOpen}
+        node={guest.node}
+        type={guest.type}
+        vmid={guest.vmid}
+        name={guest.name}
+        status={guest.status}
       />
     </ContextMenu>
   );
