@@ -31,5 +31,38 @@
       "mode": "efi",
       "secureboot": false
     }
+  },
+  "pve2": {
+    "cpu": 0.09,
+    "cpuinfo": {
+      "cpus": 16,
+      "sockets": 1,
+      "cores": 8,
+      "model": "AMD EPYC 7302P 16-Core Processor",
+      "mhz": "3000.000"
+    },
+    "memory": {
+      "total": 68719476736,
+      "used": 21474836480,
+      "free": 47244640256
+    },
+    "swap": {
+      "total": 4294967296,
+      "used": 0,
+      "free": 4294967296
+    },
+    "rootfs": {
+      "total": 107374182400,
+      "used": 33285996544,
+      "free": 74088185856
+    },
+    "uptime": 912400,
+    "loadavg": ["0.52", "0.61", "0.58"],
+    "pveversion": "pve-manager/8.3.0/lab",
+    "kversion": "Linux 6.8.12-4-pve",
+    "boot-info": {
+      "mode": "efi",
+      "secureboot": false
+    }
   }
 }

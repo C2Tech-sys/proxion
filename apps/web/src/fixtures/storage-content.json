@@ -122,5 +122,21 @@
       "protected": false,
       "verification": { "state": "ok", "upid": "UPID:pve1:00021C02:0A5B3010:6AAAA700:verifybackup:200:root@pam:" }
     }
+  ],
+  "pve2/local": [
+    {
+      "volid": "local:iso/debian-12.7.0-amd64-netinst.iso",
+      "content": "iso",
+      "format": "iso",
+      "size": 663748608,
+      "ctime": 1780000000
+    },
+    {
+      "volid": "local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst",
+      "content": "vztmpl",
+      "format": "tzst",
+      "size": 145752064,
+      "ctime": 1778100000
+    }
   ]
 }

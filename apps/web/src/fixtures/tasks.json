@@ -1495,5 +1495,41 @@
     "type": "vzdump",
     "id": "305",
     "user": "msp360@pve"
+  },
+  {
+    "upid": "UPID:pve2:0000C101:0A5C1000:0A5C1000:qmigrate:108:root@pam:",
+    "node": "pve2",
+    "pid": 49409,
+    "pstart": 172032,
+    "starttime": 1789566900,
+    "type": "qmigrate",
+    "id": "108",
+    "user": "root@pam",
+    "endtime": 1789566970,
+    "status": "OK"
+  },
+  {
+    "upid": "UPID:pve2:0000C110:0A5C2000:0A5C2000:vzdump:200:root@pam:",
+    "node": "pve2",
+    "pid": 49424,
+    "pstart": 172304,
+    "starttime": 1789566500,
+    "type": "vzdump",
+    "id": "200",
+    "user": "root@pam",
+    "endtime": 1789566800,
+    "status": "OK"
+  },
+  {
+    "upid": "UPID:pve2:0000C120:0A5C3000:0A5C3000:aptupdate:pve2:admin@pve:",
+    "node": "pve2",
+    "pid": 49440,
+    "pstart": 172576,
+    "starttime": 1789565800,
+    "type": "aptupdate",
+    "id": "pve2",
+    "user": "admin@pve",
+    "endtime": 1789565820,
+    "status": "OK"
   }
 ]

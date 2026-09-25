@@ -184,7 +184,7 @@
   {
     "id": "qemu/108",
     "type": "qemu",
-    "node": "pve1",
+    "node": "pve2",
     "vmid": 108,
     "name": "ci-runner-01",
     "status": "running",
@@ -205,7 +205,7 @@
   {
     "id": "qemu/109",
     "type": "qemu",
-    "node": "pve1",
+    "node": "pve2",
     "vmid": 109,
     "name": "ci-runner-02",
     "status": "stopped",
@@ -268,7 +268,7 @@
   {
     "id": "lxc/200",
     "type": "lxc",
-    "node": "pve1",
+    "node": "pve2",
     "vmid": 200,
     "name": "caddy-proxy",
     "status": "running",
@@ -501,5 +501,31 @@
     "status": "available",
     "disk": 3779571220480,
     "maxdisk": 4294967296000
+  },
+  {
+    "id": "node/pve2",
+    "type": "node",
+    "node": "pve2",
+    "status": "online",
+    "cpu": 0.09,
+    "maxcpu": 16,
+    "mem": 21474836480,
+    "maxmem": 68719476736,
+    "disk": 483183820800,
+    "maxdisk": 1924145348608,
+    "uptime": 912400,
+    "level": ""
+  },
+  {
+    "id": "storage/pve2/local",
+    "type": "storage",
+    "node": "pve2",
+    "storage": "local",
+    "plugintype": "dir",
+    "content": "iso,vztmpl,backup",
+    "shared": 0,
+    "status": "available",
+    "disk": 33285996544,
+    "maxdisk": 107374182400
   }
 ]
