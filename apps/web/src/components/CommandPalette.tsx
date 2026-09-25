@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { Box, Container, HardDrive, Server } from 'lucide-react';
+import { Box, Container, HardDrive, LayoutList, Server } from 'lucide-react';
 
 import {
   CommandDialog,
@@ -66,11 +66,22 @@ export function CommandPalette() {
     }
   }
 
+  function selectGuestsPage() {
+    setOpen(false);
+    void navigate({ to: '/guests' });
+  }
+
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
       <CommandInput placeholder="Search nodes, VMs, containers, storage&hellip;" />
       <CommandList>
         <CommandEmpty>No results.</CommandEmpty>
+        <CommandGroup heading="Pages">
+          <CommandItem value="Guests" onSelect={selectGuestsPage}>
+            <LayoutList /> Guests
+            <span className="ml-auto text-xs text-muted-foreground">Every VM &amp; CT</span>
+          </CommandItem>
+        </CommandGroup>
         {grouped.node.length > 0 && (
           <CommandGroup heading="Nodes">
             {grouped.node.map((item) => {

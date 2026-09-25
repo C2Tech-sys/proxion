@@ -337,6 +337,34 @@ async function gotoVmSummaryReordered(page: Page, base: string) {
   await page.waitForTimeout(300);
 }
 
+/** T25: the Guests page (cluster-wide VMs & Templates table). */
+async function gotoGuests(page: Page, base: string) {
+  await gotoWithRetry(page, `${base}/guests`, () => page.getByRole('heading', { name: 'Guests' }).waitFor());
+  await page.waitForTimeout(150);
+}
+
+/** T25: filtered (status=running, type=qemu) and sorted by memory descending. */
+async function gotoGuestsFiltered(page: Page, base: string) {
+  await gotoWithRetry(
+    page,
+    `${base}/guests?status=running&type=qemu&sort=mem&dir=desc`,
+    () => page.getByRole('heading', { name: 'Guests' }).waitFor(),
+  );
+  await page.getByRole('table').waitFor();
+  await page.waitForTimeout(150);
+}
+
+/** T25: the Guests table's row context menu -- the same shared `GuestContextMenu` the inventory
+ *  rail uses. */
+async function gotoGuestsContextMenu(page: Page, base: string) {
+  await gotoGuests(page, base);
+  const table = page.getByRole('table');
+  const nameCell = table.getByText('web-prod-01');
+  await nameCell.waitFor();
+  await nameCell.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Shut down' }).waitFor();
+}
+
 /** The screenshot cases this ticket needs. Other tickets append cases here. */
 export const SCREENSHOT_CASES: ScreenshotCase[] = [
   { name: 'dashboard', theme: 'dark', run: gotoDashboard },
@@ -386,6 +414,11 @@ export const SCREENSHOT_CASES: ScreenshotCase[] = [
   // T22: Summary tab arrange mode + a saved custom order.
   { name: 'vm-summary-arrange', theme: 'dark', run: gotoVmSummaryArrange },
   { name: 'vm-summary-reordered', theme: 'dark', run: gotoVmSummaryReordered },
+  // T25: the Guests page (cluster-wide VMs & Templates table).
+  { name: 'guests', theme: 'dark', run: gotoGuests },
+  { name: 'guests', theme: 'light', run: gotoGuests },
+  { name: 'guests-filtered', theme: 'dark', run: gotoGuestsFiltered },
+  { name: 'guests-context-menu', theme: 'dark', run: gotoGuestsContextMenu },
 ];
 
 /**

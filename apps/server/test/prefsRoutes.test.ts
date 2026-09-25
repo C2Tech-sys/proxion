@@ -199,6 +199,79 @@ describe('/api/prefs', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it('PATCH accepts a valid guestList.columns and preserves other previously-set fields', async () => {
+    await setup();
+    const cookie = await loginCookie();
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/prefs',
+      headers: { cookie },
+      payload: { theme: 'dark' },
+    });
+
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: '/api/prefs',
+      headers: { cookie },
+      payload: { guestList: { columns: ['cpu', 'mem', 'uptime'] } },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect(patch.json()).toMatchObject({
+      theme: 'dark',
+      guestList: { columns: ['cpu', 'mem', 'uptime'] },
+    });
+
+    const get = await app.inject({ method: 'GET', url: '/api/prefs', headers: { cookie } });
+    expect(get.json()).toMatchObject({
+      theme: 'dark',
+      guestList: { columns: ['cpu', 'mem', 'uptime'] },
+    });
+  });
+
+  it('PATCH with guestList: {} clears a previously-saved column selection', async () => {
+    await setup();
+    const cookie = await loginCookie();
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/prefs',
+      headers: { cookie },
+      payload: { guestList: { columns: ['cpu'] } },
+    });
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: '/api/prefs',
+      headers: { cookie },
+      payload: { guestList: {} },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect(patch.json().guestList).toEqual({});
+  });
+
+  it('PATCH with more than 16 guestList.columns entries is 400', async () => {
+    await setup();
+    const cookie = await loginCookie();
+    const tooMany = Array.from({ length: 17 }, (_, i) => `col-${i}`);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/prefs',
+      headers: { cookie },
+      payload: { guestList: { columns: tooMany } },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('PATCH with a non-string guestList.columns entry is 400', async () => {
+    await setup();
+    const cookie = await loginCookie();
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/prefs',
+      headers: { cookie },
+      payload: { guestList: { columns: ['cpu', 42] } },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('token mode: GET returns read-only defaults, PUT/PATCH are 403', async () => {
     await setup({
       PVE_TOKEN_ID: 'root@pam!proxion',

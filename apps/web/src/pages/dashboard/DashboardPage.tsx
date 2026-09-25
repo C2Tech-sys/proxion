@@ -298,12 +298,16 @@ export function DashboardPage() {
           <Panel title="Nodes">
             <StatBody icon={Server} primary={`${totals.nodesOnline} / ${totals.nodesTotal}`} secondary="online" />
           </Panel>
-          <Panel title="Virtual machines">
-            <StatBody icon={Box} primary={`${totals.vmsRunning}`} secondary={`running · ${totals.vmsStopped} stopped`} />
-          </Panel>
-          <Panel title="Containers">
-            <StatBody icon={Container} primary={`${totals.ctsRunning}`} secondary={`running · ${totals.ctsStopped} stopped`} />
-          </Panel>
+          <Link to="/guests" search={{ type: 'qemu' }} className="block outline-none">
+            <Panel title="Virtual machines" className="transition-colors hover:border-accent/40">
+              <StatBody icon={Box} primary={`${totals.vmsRunning}`} secondary={`running · ${totals.vmsStopped} stopped`} />
+            </Panel>
+          </Link>
+          <Link to="/guests" search={{ type: 'lxc' }} className="block outline-none">
+            <Panel title="Containers" className="transition-colors hover:border-accent/40">
+              <StatBody icon={Container} primary={`${totals.ctsRunning}`} secondary={`running · ${totals.ctsStopped} stopped`} />
+            </Panel>
+          </Link>
           <Panel title="Storage">
             <StatBody
               icon={HardDrive}

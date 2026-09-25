@@ -1,5 +1,5 @@
 import { useMemo, useState, type KeyboardEvent } from 'react';
-import { Link, useParams } from '@tanstack/react-router';
+import { Link, useLocation, useParams } from '@tanstack/react-router';
 import {
   ChevronDown,
   ChevronRight,
@@ -7,13 +7,9 @@ import {
   Database,
   ExternalLink,
   Folder,
-  Pencil,
-  Power,
-  RotateCw,
+  LayoutList,
   Server,
-  Square,
   Terminal,
-  TvMinimal,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -22,21 +18,26 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { StatusDot } from '@/components/StatusDot';
 import { TagChip } from '@/components/TagChip';
 import { EmptyState } from '@/components/EmptyState';
-import { GuestActionDialog } from '@/components/actions/GuestActionDialog';
-import { useGuestActionFlow } from '@/components/actions/useGuestActionFlow';
-import { RenameGuestDialog } from '@/components/actions/RenameGuestDialog';
-import { useAuthMe, useClusterResources } from '@/api/hooks';
-import { usePermissions } from '@/api/actionHooks';
-import { USE_FIXTURES } from '@/api/client';
+import { GuestContextMenu } from '@/components/actions/GuestContextMenu';
+import { useClusterResources } from '@/api/hooks';
 import { buildInventoryTree, filterTree, type GuestNode, type NodeNode } from '@/lib/tree';
 import { cn } from '@/lib/utils';
 import type { ClusterResource } from '@/api/types';
+
+/** Copies a value to the clipboard with a toast -- `NodeRow`'s own "Copy name" action. Kept
+ *  local (not shared with `GuestContextMenu.tsx`'s identical helper) so each file only exports
+ *  components (React Fast Refresh's lint rule). */
+function copyToClipboard(value: string, label: string) {
+  navigator.clipboard
+    ?.writeText(value)
+    .then(() => toast.success(`Copied ${label}`))
+    .catch(() => toast.error(`Could not copy ${label}`));
+}
 
 /**
  * Guest row layout -- "name first, whole chips only, fixed VMID gutter".
@@ -102,13 +103,6 @@ const COUNT_CHIP = cn(
   'text-[10px] leading-none whitespace-nowrap text-muted-foreground',
 );
 
-function copyToClipboard(value: string, label: string) {
-  navigator.clipboard
-    ?.writeText(value)
-    .then(() => toast.success(`Copied ${label}`))
-    .catch(() => toast.error(`Could not copy ${label}`));
-}
-
 /**
  * Tags for one guest row. Both the narrow and the wide arrangement are rendered and swapped by
  * the rail container query, so the choice costs no measurement and no layout thrash:
@@ -143,161 +137,36 @@ function GuestTags({ tags }: { tags: string[] }) {
   );
 }
 
-/** Whether the caller may run guest power actions at all: a signed-in session (or fixture/demo
- * mode, which has no real session concept -- see `ObjectHeader.tsx`'s own copy of this rule)
- * holding `VM.PowerMgmt` on this specific guest. */
-function useCanRunGuestActions(vmid: number): { canWrite: boolean; disabledReason: string } {
-  const auth = useAuthMe();
-  const permissions = usePermissions(vmid);
-  const isSessionMode = USE_FIXTURES || auth.data?.mode === 'session';
-  const hasPowerMgmt = permissions.data?.can('VM.PowerMgmt') === true;
-  return {
-    canWrite: isSessionMode && hasPowerMgmt,
-    disabledReason: !isSessionMode
-      ? 'Read-only: signed in with a service token'
-      : "You don't have VM.PowerMgmt on this guest",
-  };
-}
-
-/** Same shape as `useCanRunGuestActions`, gated on `VM.Config.Options` instead -- the privilege
- * "Rename…" needs, independent of `VM.PowerMgmt`. */
-function useCanConfigureGuest(vmid: number): { canRename: boolean; disabledReason: string } {
-  const auth = useAuthMe();
-  const permissions = usePermissions(vmid);
-  const isSessionMode = USE_FIXTURES || auth.data?.mode === 'session';
-  const hasConfigOptions = permissions.data?.can('VM.Config.Options') === true;
-  return {
-    canRename: isSessionMode && hasConfigOptions,
-    disabledReason: !isSessionMode
-      ? 'Read-only: signed in with a service token'
-      : "You don't have VM.Config.Options on this guest",
-  };
-}
-
 function GuestRow({ guest }: { guest: GuestNode }) {
   const params = useParams({ strict: false });
   const isActive = String(params.vmid) === String(guest.vmid) && params.node === guest.node;
-  const { canWrite, disabledReason } = useCanRunGuestActions(guest.vmid);
-  const { canRename, disabledReason: renameDisabledReason } = useCanConfigureGuest(guest.vmid);
-  const flow = useGuestActionFlow({ node: guest.node, type: guest.type, vmid: guest.vmid, name: guest.name });
-  const [renameOpen, setRenameOpen] = useState(false);
-  const running = guest.status === 'running';
-  const stopped = !running && guest.status !== 'paused';
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <Link
-          to="/vm/$node/$type/$vmid"
-          params={{ node: guest.node, type: guest.type, vmid: String(guest.vmid) }}
-          search={{ tab: 'summary' }}
-          className={cn(
-            GUEST_ROW_GRID,
-            'w-full rounded-md py-1 pr-1.5 pl-7 text-left text-sm outline-none',
-            'hover:bg-accent/10 focus-visible:bg-accent/10',
-            isActive && 'bg-accent/15 text-foreground',
-          )}
-        >
-          <StatusDot status={guest.status} template={guest.template} />
-          <span className="min-w-0 truncate" title={guest.name}>
-            {guest.name}
-          </span>
-          <GuestTags tags={guest.tags} />
-          <span
-            data-testid="guest-vmid"
-            className="text-right text-[11px] text-muted-foreground font-numeric"
-          >
-            {guest.vmid}
-          </span>
-        </Link>
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem asChild>
-          <Link
-            to="/vm/$node/$type/$vmid"
-            params={{ node: guest.node, type: guest.type, vmid: String(guest.vmid) }}
-            search={{ tab: 'summary' }}
-          >
-            <ExternalLink /> Open
-          </Link>
-        </ContextMenuItem>
-        <ContextMenuItem asChild>
-          <Link
-            to="/vm/$node/$type/$vmid"
-            params={{ node: guest.node, type: guest.type, vmid: String(guest.vmid) }}
-            search={{ tab: 'console' }}
-          >
-            <TvMinimal /> Open console
-          </Link>
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={() => copyToClipboard(String(guest.vmid), 'VMID')}>
-          <Copy /> Copy VMID
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={() => copyToClipboard(guest.name, 'name')}>
-          <Copy /> Copy name
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={!canRename}
-          title={canRename ? undefined : renameDisabledReason}
-          onSelect={() => setRenameOpen(true)}
-        >
-          <Pencil /> Rename…
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        {stopped && (
-          <ContextMenuItem
-            disabled={!canWrite}
-            title={canWrite ? undefined : disabledReason}
-            onSelect={() => flow.request('start')}
-          >
-            <Power /> Start
-          </ContextMenuItem>
+    <GuestContextMenu guest={guest}>
+      <Link
+        to="/vm/$node/$type/$vmid"
+        params={{ node: guest.node, type: guest.type, vmid: String(guest.vmid) }}
+        search={{ tab: 'summary' }}
+        className={cn(
+          GUEST_ROW_GRID,
+          'w-full rounded-md py-1 pr-1.5 pl-7 text-left text-sm outline-none',
+          'hover:bg-accent/10 focus-visible:bg-accent/10',
+          isActive && 'bg-accent/15 text-foreground',
         )}
-        {running && (
-          <>
-            <ContextMenuItem
-              disabled={!canWrite}
-              title={canWrite ? undefined : disabledReason}
-              onSelect={() => flow.request('shutdown')}
-            >
-              <Power /> Shut down
-            </ContextMenuItem>
-            <ContextMenuItem
-              disabled={!canWrite}
-              title={canWrite ? undefined : disabledReason}
-              onSelect={() => flow.request('reboot')}
-            >
-              <RotateCw /> Reboot
-            </ContextMenuItem>
-            <ContextMenuItem
-              variant="destructive"
-              disabled={!canWrite}
-              title={canWrite ? undefined : disabledReason}
-              onSelect={() => flow.request('stop')}
-            >
-              <Square /> Stop
-            </ContextMenuItem>
-          </>
-        )}
-      </ContextMenuContent>
-      <GuestActionDialog
-        key={flow.pendingAction ?? 'none'}
-        action={flow.pendingAction}
-        target={{ name: guest.name, vmid: guest.vmid, node: guest.node }}
-        isPending={flow.isPending}
-        onCancel={flow.cancel}
-        onConfirm={flow.confirm}
-      />
-      <RenameGuestDialog
-        key={renameOpen ? 'open' : 'closed'}
-        open={renameOpen}
-        onOpenChange={setRenameOpen}
-        node={guest.node}
-        type={guest.type}
-        vmid={guest.vmid}
-        currentName={guest.name}
-      />
-    </ContextMenu>
+      >
+        <StatusDot status={guest.status} template={guest.template} />
+        <span className="min-w-0 truncate" title={guest.name}>
+          {guest.name}
+        </span>
+        <GuestTags tags={guest.tags} />
+        <span
+          data-testid="guest-vmid"
+          className="text-right text-[11px] text-muted-foreground font-numeric"
+        >
+          {guest.vmid}
+        </span>
+      </Link>
+    </GuestContextMenu>
   );
 }
 
@@ -449,6 +318,31 @@ function StorageGroup({
   );
 }
 
+/**
+ * "Guests" nav entry, pinned above the Datacenter tree: a vSphere-style cluster-wide guest list
+ * at `/guests` (`pages/guests/GuestsPage.tsx`), one level up from any single node's guests. A
+ * plain `<Link>` -- keyboard-reachable and active-styled the same way `NodeRow`'s own name link
+ * is -- rather than a tree row, since it has no children to expand/collapse.
+ */
+function GuestsNavEntry() {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const isActive = pathname === '/guests';
+
+  return (
+    <Link
+      to="/guests"
+      className={cn(
+        'flex items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium outline-none',
+        'hover:bg-accent/10 focus-visible:bg-accent/10',
+        isActive && 'bg-accent/15 text-foreground',
+      )}
+    >
+      <LayoutList className="size-3.5 text-muted-foreground" />
+      Guests
+    </Link>
+  );
+}
+
 export function InventoryTree() {
   const { data: resources, isLoading } = useClusterResources();
   const [query, setQuery] = useState('');
@@ -472,6 +366,9 @@ export function InventoryTree() {
   return (
     // `@container` makes the rail itself the query container the guest rows adapt to.
     <div className="@container flex h-full flex-col">
+      <div className="border-b border-border p-2">
+        <GuestsNavEntry />
+      </div>
       <div className="border-b border-border p-2">
         <Input
           value={query}

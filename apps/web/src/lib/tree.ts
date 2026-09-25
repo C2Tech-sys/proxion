@@ -68,14 +68,30 @@ function guestResourceToNode(g: ClusterResource): GuestNode {
   };
 }
 
-/** Case-insensitive match against a guest's name, VMID, or tags. */
-function guestMatches(guest: GuestNode, query: string): boolean {
+/** The subset of a guest's fields the shared search matcher below needs -- narrower than
+ *  `GuestNode` so `pages/guests/guestList.ts`'s own row shape (more fields, no `kind`) satisfies
+ *  it too without an adapter. */
+export interface SearchableGuest {
+  name: string;
+  vmid: number;
+  tags: string[];
+  node: string;
+}
+
+/**
+ * Case-insensitive match against a guest's name, VMID, tags, or node -- the one matcher shared
+ * by the inventory rail's own filter box (`filterTree` below) and the Guests page's search box
+ * (`pages/guests/guestList.ts`), so "type the same thing, get the same guests" holds in both
+ * places.
+ */
+export function guestMatches(guest: SearchableGuest, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
   return (
     guest.name.toLowerCase().includes(q) ||
     String(guest.vmid).includes(q) ||
-    guest.tags.some((t) => t.toLowerCase().includes(q))
+    guest.tags.some((t) => t.toLowerCase().includes(q)) ||
+    guest.node.toLowerCase().includes(q)
   );
 }
 

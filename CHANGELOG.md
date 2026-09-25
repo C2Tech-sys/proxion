@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Guests page (`/guests`): a vSphere-style "VMs and Templates" view -- every guest across the
+  cluster in one cluster-wide, sortable, filterable table (search by name/VMID/tag/node, plus
+  status/type/node segmented filters), with URL-backed state so a search/filter/sort combination
+  is bookmarkable. A "Columns" dropdown persists which optional columns show per user
+  (`prefs.guestList.columns`). Right-click on a row offers the exact same actions as the
+  inventory rail's own context menu, now extracted into a shared `GuestContextMenu` component so
+  both surfaces stay identical. A new "Guests" entry sits above the rail's Datacenter tree, the
+  dashboard's "Virtual machines"/"Containers" tiles link straight into it pre-filtered, and it has
+  its own command-palette and breadcrumb entries.
+
 ### Fixed
 
 - A page no longer opens two (or three) `/api/events` SSE connections. Every live hook
