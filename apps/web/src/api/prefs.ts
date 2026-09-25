@@ -22,6 +22,15 @@ export interface SummaryLayoutPrefs {
   lxc?: string[];
 }
 
+/** Saved column visibility for the Guests page's table (`pages/guests/GuestsPage.tsx`). Mirrors
+ *  the server's generic shape (`apps/server/src/prefs/schema.ts`): an array of unique strings
+ *  (column ids), not validated against the column registry there -- same pattern as
+ *  `SummaryLayoutPrefs` above, so an id this client version doesn't (or no longer) recognize is
+ *  just dropped on read (see `pages/guests/guestList.ts`'s `resolveVisibleColumns`). */
+export interface GuestListPrefs {
+  columns?: string[];
+}
+
 export interface UserPrefs {
   version: 1;
   theme: Theme;
@@ -33,6 +42,8 @@ export interface UserPrefs {
   density: Density;
   /** `undefined` = no custom order saved for either guest type yet. */
   summaryLayout?: SummaryLayoutPrefs;
+  /** `undefined` = no saved column selection -- the Guests table shows every column. */
+  guestList?: GuestListPrefs;
 }
 
 export type PrefsPatch = Partial<UserPrefs>;

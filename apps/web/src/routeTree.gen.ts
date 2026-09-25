@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as ShellRouteImport } from './routes/_shell'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ShellIndexRouteImport } from './routes/_shell/index'
+import { Route as ShellGuestsRouteImport } from './routes/_shell/guests'
 import { Route as ShellPreferencesRouteImport } from './routes/_shell/preferences'
 import { Route as ShellTasksRouteImport } from './routes/_shell/tasks'
 import { Route as ShellNodeRouteImport } from './routes/shell.$node'
@@ -31,6 +32,11 @@ const LoginRoute = LoginRouteImport.update({
 const ShellIndexRoute = ShellIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellGuestsRoute = ShellGuestsRouteImport.update({
+  id: '/guests',
+  path: '/guests',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellPreferencesRoute = ShellPreferencesRouteImport.update({
@@ -67,6 +73,7 @@ const ShellVmNodeTypeVmidRoute = ShellVmNodeTypeVmidRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
   '/login': typeof LoginRoute
+  '/guests': typeof ShellGuestsRoute
   '/preferences': typeof ShellPreferencesRoute
   '/tasks': typeof ShellTasksRoute
   '/shell/$node': typeof ShellNodeRoute
@@ -76,6 +83,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/guests': typeof ShellGuestsRoute
   '/preferences': typeof ShellPreferencesRoute
   '/tasks': typeof ShellTasksRoute
   '/shell/$node': typeof ShellNodeRoute
@@ -88,6 +96,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_shell': typeof ShellRouteWithChildren
   '/login': typeof LoginRoute
+  '/_shell/guests': typeof ShellGuestsRoute
   '/_shell/preferences': typeof ShellPreferencesRoute
   '/_shell/tasks': typeof ShellTasksRoute
   '/shell/$node': typeof ShellNodeRoute
@@ -101,6 +110,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/guests'
     | '/preferences'
     | '/tasks'
     | '/shell/$node'
@@ -110,6 +120,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
+    | '/guests'
     | '/preferences'
     | '/tasks'
     | '/shell/$node'
@@ -121,6 +132,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_shell'
     | '/login'
+    | '/_shell/guests'
     | '/_shell/preferences'
     | '/_shell/tasks'
     | '/shell/$node'
@@ -158,6 +170,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof ShellIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/guests': {
+      id: '/_shell/guests'
+      path: '/guests'
+      fullPath: '/guests'
+      preLoaderRoute: typeof ShellGuestsRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/preferences': {
@@ -206,6 +225,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface ShellRouteChildren {
+  ShellGuestsRoute: typeof ShellGuestsRoute
   ShellPreferencesRoute: typeof ShellPreferencesRoute
   ShellTasksRoute: typeof ShellTasksRoute
   ShellIndexRoute: typeof ShellIndexRoute
@@ -214,6 +234,7 @@ interface ShellRouteChildren {
 }
 
 const ShellRouteChildren: ShellRouteChildren = {
+  ShellGuestsRoute: ShellGuestsRoute,
   ShellPreferencesRoute: ShellPreferencesRoute,
   ShellTasksRoute: ShellTasksRoute,
   ShellIndexRoute: ShellIndexRoute,

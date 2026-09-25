@@ -244,6 +244,50 @@ describe('PrefsStore', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('merge (PATCH) sets guestList.columns and preserves other fields', async () => {
+    const store = await makeStore();
+    await store.merge('peggy@pam', { theme: 'dark' });
+    const result = await store.merge('peggy@pam', {
+      guestList: { columns: ['cpu', 'mem', 'tags'] },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.prefs.guestList).toEqual({ columns: ['cpu', 'mem', 'tags'] });
+    expect(result.prefs.theme).toBe('dark');
+  });
+
+  it('merge (PATCH) with guestList: {} clears a previously-saved column selection', async () => {
+    const store = await makeStore();
+    await store.merge('quentin@pam', { guestList: { columns: ['cpu', 'mem'] } });
+    const result = await store.merge('quentin@pam', { guestList: {} });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.prefs.guestList).toEqual({});
+  });
+
+  it('merge (PATCH) rejects more than 16 guestList.columns entries (400-equivalent)', async () => {
+    const store = await makeStore();
+    const tooMany = Array.from({ length: 17 }, (_, i) => `col-${i}`);
+    const result = await store.merge('rachel@pam', { guestList: { columns: tooMany } });
+    expect(result.ok).toBe(false);
+  });
+
+  it('merge (PATCH) rejects a non-string guestList.columns entry (400-equivalent)', async () => {
+    const store = await makeStore();
+    const result = await store.merge('steve@pam', {
+      guestList: { columns: ['cpu', 42] },
+    } as unknown as Record<string, unknown>);
+    expect(result.ok).toBe(false);
+  });
+
+  it('merge (PATCH) rejects duplicate guestList.columns ids', async () => {
+    const store = await makeStore();
+    const result = await store.merge('tina@pam', {
+      guestList: { columns: ['cpu', 'cpu'] },
+    });
+    expect(result.ok).toBe(false);
+  });
+
   it('two different users never collide on the same file', async () => {
     const store = await makeStore();
     await store.replace('same@pam', { theme: 'dark' });

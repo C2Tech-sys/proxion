@@ -16,6 +16,9 @@ export const RAIL_WIDTH_MAX = 600;
 export const SUMMARY_LAYOUT_MAX_ENTRIES = 24;
 export const SUMMARY_LAYOUT_ID_MAX_LENGTH = 32;
 
+export const GUEST_LIST_COLUMNS_MAX_ENTRIES = 16;
+export const GUEST_LIST_COLUMN_ID_MAX_LENGTH = 32;
+
 /**
  * A saved Summary-tab panel order for one guest type. The server has no notion of *which* panel
  * ids are valid (that's `apps/web/src/pages/vm/summaryLayout.ts`'s `SUMMARY_PANELS` registry, a
@@ -33,6 +36,24 @@ const summaryLayoutIds = z
 const summaryLayoutSchema = z.object({
   qemu: summaryLayoutIds.optional(),
   lxc: summaryLayoutIds.optional(),
+});
+
+/**
+ * Saved column visibility for the Guests page's table (T25). Same generic, unvalidated-against-
+ * a-registry shape as `summaryLayoutSchema` above -- the server has no notion of which column
+ * ids are valid (that's `apps/web/src/pages/guests/guestList.ts`'s `GUEST_COLUMNS`, client-only
+ * and free to grow/shrink across releases); it only checks "an array of short, unique strings,
+ * at most 16 entries" and stores whatever the client sends. `columns: undefined`/omitted means
+ * "no saved selection" (the client then shows every column); `{}` (no `columns` key) is how a
+ * client clears back to that state -- same round-trip `summaryLayout: {}` gives `qemu`/`lxc`.
+ */
+const guestListColumnIds = z
+  .array(z.string().min(1).max(GUEST_LIST_COLUMN_ID_MAX_LENGTH))
+  .max(GUEST_LIST_COLUMNS_MAX_ENTRIES)
+  .refine((ids) => new Set(ids).size === ids.length, { message: 'guestList.columns ids must be unique' });
+
+const guestListSchema = z.object({
+  columns: guestListColumnIds.optional(),
 });
 
 /**
@@ -55,6 +76,7 @@ const fields = {
   railWidth: z.number().int().min(RAIL_WIDTH_MIN).max(RAIL_WIDTH_MAX),
   density: z.enum(densityValues),
   summaryLayout: summaryLayoutSchema,
+  guestList: guestListSchema,
 };
 
 /**
@@ -79,6 +101,7 @@ export const userPrefsSchema = z.object({
   railWidth: fields.railWidth.optional(),
   density: fields.density.default('comfortable'),
   summaryLayout: fields.summaryLayout.optional(),
+  guestList: fields.guestList.optional(),
 });
 
 export type UserPrefs = z.infer<typeof userPrefsSchema>;
