@@ -13,6 +13,8 @@ export default tseslint.config(
       '**/coverage/**',
       '**/.vite/**',
       '**/.claude/**',
+      // Local tooling scratch (the `remember` plugin writes .ts files here; git ignores it too).
+      '**/.remember/**',
       '**/.foreman/**',
       'apps/web/src/routeTree.gen.ts',
       'packages/pve-api/schema/**',

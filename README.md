@@ -20,8 +20,8 @@ It's a pnpm monorepo: a Vite/React frontend, a Fastify API/proxy server,
 and a generated Proxmox VE API client. The read-only PVE proxy
 (`/api/pve/*`) is permanently write-blocked; the writes Proxion does
 perform -- guest power actions, rename/notes, snapshots, migrate, node
-reboot/shutdown, console thumbnails and per-user preferences -- each go
-through their own allow-listed route,
+reboot/shutdown, storage uploads and deletes, console thumbnails and
+per-user preferences -- each go through their own allow-listed route,
 checked against your real PVE privileges -- see
 [Feature status](#feature-status) below.
 

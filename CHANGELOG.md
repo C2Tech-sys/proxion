@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-28
+
 ### Added
 
 - Storage browser: upload an ISO image, container template, or import file from your browser
@@ -267,7 +269,8 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/C2Tech-sys/proxion/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/C2Tech-sys/proxion/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/C2Tech-sys/proxion/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/C2Tech-sys/proxion/compare/v0.2.0...v0.2.1
