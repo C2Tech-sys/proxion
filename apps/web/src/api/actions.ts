@@ -425,48 +425,101 @@ export function uploadToStorage(node: string, storage: string, options: UploadTo
   }
 
   return new Promise<GuestActionResult>((resolve, reject) => {
-    const formData = new FormData();
-    formData.append('content', options.content);
-    formData.append('filename', options.filename);
-    formData.append('file', options.file, options.filename);
-
-    const xhr = new XMLHttpRequest();
-    const query = `content=${encodeURIComponent(options.content)}&filename=${encodeURIComponent(options.filename)}`;
-    xhr.open('POST', `/api/actions/storage/${node}/${storage}/upload?${query}`);
-
-    xhr.upload.onprogress = (event) => {
-      options.onProgress?.(event.loaded, event.lengthComputable ? event.total : options.file.size);
-    };
-
-    xhr.onload = () => {
-      if (xhr.status === 202) {
-        try {
-          resolve(JSON.parse(xhr.responseText) as GuestActionResult);
-        } catch {
-          reject(new GuestActionError(xhr.status, 'Invalid server response'));
-        }
-        return;
-      }
-      let errorBody: GuestActionErrorBody | undefined;
-      try {
-        errorBody = JSON.parse(xhr.responseText) as GuestActionErrorBody;
-      } catch {
-        errorBody = undefined;
-      }
-      reject(new GuestActionError(xhr.status, describeError(xhr.status, xhr.statusText, errorBody)));
-    };
-    xhr.onerror = () => reject(new GuestActionError(0, 'Proxmox VE is unreachable'));
-    xhr.onabort = () => reject(new GuestActionError(0, 'Upload cancelled'));
-
-    if (options.signal) {
-      if (options.signal.aborted) {
-        reject(new GuestActionError(0, 'Upload cancelled'));
-        return;
-      }
-      options.signal.addEventListener('abort', () => xhr.abort());
+    if (options.signal?.aborted) {
+      reject(new GuestActionError(0, 'Upload cancelled'));
+      return;
     }
 
-    xhr.send(formData);
+    let xhr: XMLHttpRequest | undefined;
+    let settled = false;
+
+    // Aborts the in-flight XHR once it exists; if the abort lands before the slice-read below has
+    // even resolved (no XHR yet), settle the rejection directly instead of waiting for a request
+    // that will never be sent.
+    options.signal?.addEventListener('abort', () => {
+      if (xhr) {
+        xhr.abort();
+      } else if (!settled) {
+        settled = true;
+        reject(new GuestActionError(0, 'Upload cancelled'));
+      }
+    });
+
+    // Reads the first 64 KiB of the file *before* ever opening the XHR. A `File` whose bytes the
+    // browser can no longer actually read (a cloud-sync placeholder that was never fully
+    // downloaded, or a file that changed/disappeared on disk after being selected) throws here --
+    // without this check, the browser fails the XHR itself before it ever leaves the tab
+    // (`xhr.onerror`, status 0), which used to be reported as "Proxmox VE is unreachable": wrong,
+    // since Proxmox never saw the request at all.
+    options.file
+      .slice(0, 65536)
+      .arrayBuffer()
+      .then(() => {
+        if (settled) return;
+
+        const formData = new FormData();
+        formData.append('content', options.content);
+        formData.append('filename', options.filename);
+        formData.append('file', options.file, options.filename);
+
+        xhr = new XMLHttpRequest();
+        // Explicit, not relied-on-as-default: a large upload over a slow link must never be cut
+        // off by a client-side timeout.
+        xhr.timeout = 0;
+        const query = `content=${encodeURIComponent(options.content)}&filename=${encodeURIComponent(options.filename)}`;
+        xhr.open('POST', `/api/actions/storage/${node}/${storage}/upload?${query}`);
+
+        xhr.upload.onprogress = (event) => {
+          options.onProgress?.(event.loaded, event.lengthComputable ? event.total : options.file.size);
+        };
+
+        xhr.onload = () => {
+          settled = true;
+          if (xhr!.status === 202) {
+            try {
+              resolve(JSON.parse(xhr!.responseText) as GuestActionResult);
+            } catch {
+              reject(new GuestActionError(xhr!.status, 'Invalid server response'));
+            }
+            return;
+          }
+          let errorBody: GuestActionErrorBody | undefined;
+          try {
+            errorBody = JSON.parse(xhr!.responseText) as GuestActionErrorBody;
+          } catch {
+            errorBody = undefined;
+          }
+          reject(new GuestActionError(xhr!.status, describeError(xhr!.status, xhr!.statusText, errorBody)));
+        };
+        // A status-0 `onerror` means the request never reached the network at all (blocked by a
+        // proxy, a browser-side upload limit, or the connection dying mid-flight) -- it says
+        // nothing about whether Proxmox itself is reachable, so the message no longer blames it.
+        xhr.onerror = () => {
+          settled = true;
+          reject(
+            new GuestActionError(
+              0,
+              'The upload never reached Proxion. Check that the file is readable and that any proxy in front of Proxion allows large uploads.',
+            ),
+          );
+        };
+        xhr.onabort = () => {
+          settled = true;
+          reject(new GuestActionError(0, 'Upload cancelled'));
+        };
+
+        xhr.send(formData);
+      })
+      .catch(() => {
+        if (settled) return;
+        settled = true;
+        reject(
+          new GuestActionError(
+            0,
+            'The browser could not read this file. If it lives in a cloud-synced folder, make sure it is fully downloaded, then try again.',
+          ),
+        );
+      });
   });
 }
 

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Storage upload / download-from-URL now validate the filename's extension against the chosen
+  content type (iso -> `.iso`/`.img`, vztmpl -> `.tar.gz`/`.tar.xz`/`.tar.zst`, import ->
+  `.ova`/`.qcow2`/`.raw`/`.vmdk`) before ever contacting Proxmox, and any Proxmox-side parameter
+  rejection now surfaces its per-field detail (e.g. `filename: value does not match the regex
+  pattern`) instead of just "Parameter verification failed."
+- A storage upload that never reaches Proxion (an unreadable file, or a proxy/browser upload
+  limit) no longer shows a misleading "Proxmox VE is unreachable" toast -- the message now says
+  the upload never left the browser.
+- Uploads to a Proxmox host with a self-signed certificate failed with 502: the new streaming path
+  did not use the fingerprint-pinned connector the rest of the client uses. It does now, with a
+  regression test against a local HTTPS server.
+
 ## [0.4.0] - 2026-09-28
 
 ### Added

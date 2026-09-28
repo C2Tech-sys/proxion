@@ -1,6 +1,6 @@
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { PveClient } from '@proxion/pve-api';
+import { PveApiError, type PveClient } from '@proxion/pve-api';
 import { SESSION_COOKIE } from '../auth/session.js';
 
 /**
@@ -45,6 +45,23 @@ const CONTROL_CHARS_RE = /[\x00-\x1f\x7f]/g;
 export function sanitizeMessage(message: string): string {
   const stripped = message.replace(CONTROL_CHARS_RE, '').trim();
   return stripped.length > MAX_MESSAGE_LENGTH ? `${stripped.slice(0, MAX_MESSAGE_LENGTH)}…` : stripped;
+}
+
+/**
+ * Appends a `PveApiError`'s per-field `errors` map (if any) to its own message, for every route's
+ * `sendPveError` to run *before* `sanitizeMessage` (T34). PVE's top-level `message` alone is often
+ * near-useless on its own -- e.g. "Parameter verification failed." for a bad filename extension --
+ * while the `errors` map (`{ filename: "value does not match the regex pattern" }`, from PVE's own
+ * `{data, errors, message}` envelope, see `packages/pve-api/src/http.ts`) is what actually tells
+ * the caller what to fix. Formats as `"<message> <field>: <detail>; <field2>: <detail2>"`; a
+ * message with no `errors` map is returned unchanged.
+ */
+export function formatPveErrorMessage(error: PveApiError): string {
+  if (!error.errors || Object.keys(error.errors).length === 0) return error.message;
+  const details = Object.entries(error.errors)
+    .map(([field, detail]) => `${field}: ${detail}`)
+    .join('; ');
+  return `${error.message} ${details}`;
 }
 
 /** Rate-limit key: per session when there is one (the signed cookie value is already unique per

@@ -18,18 +18,25 @@ export function tlsOptionsFromConfig(config: Config): PveTlsOptions | undefined 
  * instance whenever `tls` options are passed, and has no `close()` -- so a
  * naive `pveForRequest()` that constructs a fresh `PveHttp` per request (or
  * per credential) would leak one connection pool per call. Instead, this is
- * called exactly once at boot; every `PveHttp` is then built with `tls:
- * undefined` and a custom `fetch` (see `dispatcherFetch`) that injects this
- * shared dispatcher, so `PveHttp` never builds its own.
+ * called exactly once at boot; every `PveHttp` is then built with this same
+ * `Agent` passed as its own `dispatcher` option (`buildPveClient`, in
+ * `client.ts`), so it never builds one of its own. (T34: this used to be
+ * injected via a custom `fetch` instead -- see `dispatcherFetch`'s own doc
+ * comment for why that broke `PveHttp.stream()`, used by storage uploads,
+ * even though `dispatcherFetch` itself is still exactly right for the two
+ * plain-`fetch()` callers below, `ticketClient.ts` and `pveProxy.ts`, which
+ * never go through `PveHttp` at all.)
  */
 export function createPveDispatcher(config: Config): Agent | undefined {
   return createTlsAgent(tlsOptionsFromConfig(config));
 }
 
 /**
- * A `fetch` (matching `PveHttpOptions.fetch`'s shape) that always routes
- * through the given shared dispatcher, so `PveHttp` -- constructed with no
- * `tls` option -- never builds (and leaks) an `Agent` of its own.
+ * A plain `fetch` that always routes through the given shared dispatcher -- for callers that make
+ * their own `fetch()` calls directly (`ticketClient.ts`'s login round-trip, `pveProxy.ts`'s
+ * pass-through proxy), never for building a `PveHttp` (see `client.ts`'s `buildPveClient`, which
+ * passes the same dispatcher via `PveHttpOptions.dispatcher` instead -- T34: `PveHttp.stream()`
+ * bypasses `fetch` entirely and cannot see a dispatcher hidden inside one of these).
  */
 export function dispatcherFetch(dispatcher: Agent | undefined): typeof undiciFetch {
   return ((url: string | URL, init: RequestInit = {}) =>

@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { PveApiError, type PveClient } from '@proxion/pve-api';
 import { resolveIdentity } from '../pve/identity.js';
-import { hasPrivilege, hasStoragePrivilege, sanitizeMessage } from './shared.js';
+import { formatPveErrorMessage, hasPrivilege, hasStoragePrivilege, sanitizeMessage } from './shared.js';
 
 /**
  * Storage upload / download-from-URL / delete (T32) -- three more allow-listed writes this
@@ -35,6 +35,32 @@ const filenameSchema = z
   .max(255)
   .regex(FILENAME_RE)
   .refine((value) => !value.includes('..'), { message: 'filename must not contain ".."' });
+
+/**
+ * Per-content-type extension rules Proxmox VE itself enforces server-side (`PVE::Storage`): iso ->
+ * `\.(iso|img)$`, vztmpl -> `\.tar\.([gx]z|zst)$`, import -> `\.(ova|qcow2|raw|vmdk)$`. Enforced
+ * here too (T34) so a mismatched filename/content-type combination -- e.g. "download from URL"
+ * with content type ISO and a filename with no extension -- 400s with a specific, actionable
+ * message *before* ever reaching PVE, instead of surfacing only PVE's generic "Parameter
+ * verification failed." KEEP THIS IDENTICAL to the web client's own copy
+ * (`apps/web/src/lib/storageFilename.ts`).
+ */
+const EXTENSION_PATTERNS: Record<z.infer<typeof uploadContentSchema>, RegExp> = {
+  iso: /\.(iso|img)$/,
+  vztmpl: /\.tar\.([gx]z|zst)$/,
+  import: /\.(ova|qcow2|raw|vmdk)$/,
+};
+
+const EXTENSION_MESSAGES: Record<z.infer<typeof uploadContentSchema>, string> = {
+  iso: 'ISO images must end in .iso or .img',
+  vztmpl: 'Container templates must end in .tar.gz, .tar.xz or .tar.zst',
+  import: 'Import files must end in .ova, .qcow2, .raw or .vmdk',
+};
+
+/** Returns the extension-rule error text for `filename` under `content`, or `null` when it's fine. */
+function validateFilenameExtension(content: z.infer<typeof uploadContentSchema>, filename: string): string | null {
+  return EXTENSION_PATTERNS[content].test(filename) ? null : EXTENSION_MESSAGES[content];
+}
 
 const CHECKSUM_ALGORITHMS = z.enum(['md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512']);
 
@@ -98,7 +124,7 @@ function sendPveError(reply: FastifyReply, error: unknown): boolean {
     if (error.status >= 500) {
       reply.code(502).send({ error: 'pve-unreachable' });
     } else {
-      reply.code(error.status).send({ error: 'pve-rejected', message: sanitizeMessage(error.message) });
+      reply.code(error.status).send({ error: 'pve-rejected', message: sanitizeMessage(formatPveErrorMessage(error)) });
     }
     return true;
   }
@@ -147,6 +173,11 @@ export function registerStorageRoutes(
         const filename = filenameSchema.safeParse(query.filename);
         if (!content.success || !filename.success) {
           reply.code(400).send({ error: 'Invalid content/filename' });
+          return;
+        }
+        const extensionError = validateFilenameExtension(content.data, filename.data);
+        if (extensionError) {
+          reply.code(400).send({ error: 'invalid-filename', message: extensionError });
           return;
         }
 
@@ -266,6 +297,11 @@ export function registerStorageRoutes(
       const body = downloadUrlBodySchema.safeParse(req.body ?? {});
       if (!body.success) {
         reply.code(400).send({ error: 'Invalid request body' });
+        return;
+      }
+      const extensionError = validateFilenameExtension(body.data.content, body.data.filename);
+      if (extensionError) {
+        reply.code(400).send({ error: 'invalid-filename', message: extensionError });
         return;
       }
 
