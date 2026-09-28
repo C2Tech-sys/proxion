@@ -4,10 +4,13 @@ import {
   setFixtureGuestStatus,
   setFixtureSnapshots,
   getFixtureMigratePrecheck,
+  addFixtureStorageContent,
+  removeFixtureStorageContent,
 } from '@/api/fixtures';
 import type { GuestType } from '@/api/types';
 import type {
   CreateSnapshotBody,
+  DownloadUrlToStorageBody,
   GuestAction,
   GuestActionResult,
   GuestConfigPatch,
@@ -18,7 +21,10 @@ import type {
   NodeActionResult,
   RollbackSnapshotOptions,
   SnapshotActionResult,
+  UploadToStorageOptions,
+  UrlMetadataResult,
 } from '@/api/actions';
+import { GuestActionError } from '@/api/actions';
 
 /** Matches the real route's own simulated latency budget closely enough to feel real, without
  * being long enough to make the demo feel slow. */
@@ -178,4 +184,109 @@ export async function fixtureNodeAction(
   void node;
   void command;
   return delay({ ok: true });
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** How many progress ticks `fixtureUploadToStorage` reports, and the delay between each --
+ * `TICKS * TICK_DELAY_MS` is the ~1.5s total the ticket calls for. */
+const UPLOAD_PROGRESS_TICKS = 5;
+const UPLOAD_PROGRESS_TICK_MS = 300;
+
+/** Fixture-mode implementation of `uploadToStorage` (see `src/api/actions.ts`): no real request --
+ * reports `onProgress` in `UPLOAD_PROGRESS_TICKS` even steps over ~1.5s (so the dialog's progress
+ * bar has something to animate), then adds the uploaded file to the in-memory fixture storage
+ * content (`addFixtureStorageContent`) under a real-PVE-shaped volid (`<storage>:<content>/<filename>`).
+ * `signal` is honoured between ticks, same as a real upload's own cancel button would expect.
+ */
+export async function fixtureUploadToStorage(
+  node: string,
+  storage: string,
+  options: UploadToStorageOptions,
+): Promise<GuestActionResult> {
+  const total = options.file.size;
+  for (let tick = 1; tick <= UPLOAD_PROGRESS_TICKS; tick += 1) {
+    await wait(UPLOAD_PROGRESS_TICK_MS);
+    if (options.signal?.aborted) {
+      throw new GuestActionError(0, 'Upload cancelled');
+    }
+    options.onProgress?.(Math.round((total * tick) / UPLOAD_PROGRESS_TICKS), total);
+  }
+
+  addFixtureStorageContent(node, storage, {
+    volid: `${storage}:${options.content}/${options.filename}`,
+    content: options.content,
+    size: total,
+    ctime: Math.floor(Date.now() / 1000),
+  });
+
+  return { upid: fakeUpidFor(node, 0, 'imgcopy') };
+}
+
+/** How long `fixtureDownloadUrlToStorage` simulates PVE's own download taking. */
+const DOWNLOAD_URL_DELAY_MS = 1000;
+
+/** A plausible fixture size for a downloaded-from-URL volume -- close to a real installer ISO's
+ * size, so the demo's storage content browser doesn't show an implausible "0 B" or tiny row. */
+const FIXTURE_DOWNLOAD_SIZE_BYTES = 734_003_200;
+
+/** Fixture-mode implementation of `downloadUrlToStorage` (see `src/api/actions.ts`): no real
+ * request, just a simulated delay (~1s) and an in-memory add to the fixture storage content, same
+ * convention as `fixtureUploadToStorage` above. `checksum`/`checksumAlgorithm`/
+ * `verifyCertificates` have no fixture-visible effect. */
+export async function fixtureDownloadUrlToStorage(
+  node: string,
+  storage: string,
+  body: DownloadUrlToStorageBody,
+): Promise<GuestActionResult> {
+  await wait(DOWNLOAD_URL_DELAY_MS);
+
+  addFixtureStorageContent(node, storage, {
+    volid: `${storage}:${body.content}/${body.filename}`,
+    content: body.content,
+    size: FIXTURE_DOWNLOAD_SIZE_BYTES,
+    ctime: Math.floor(Date.now() / 1000),
+  });
+
+  return { upid: fakeUpidFor(node, 0, 'download') };
+}
+
+/** Fixture-mode implementation of `queryUrlMetadata` (see `src/api/actions.ts`): no real request --
+ * derives a filename from the URL's own path (falling back to `undefined`, same as PVE itself
+ * would report for a URL with no useful path) and reports the same plausible size
+ * `fixtureDownloadUrlToStorage` adds, so "Query URL" and the eventual download agree. */
+export async function fixtureQueryUrlMetadata(
+  node: string,
+  url: string,
+  verifyCertificates: boolean,
+): Promise<UrlMetadataResult> {
+  void node;
+  void verifyCertificates;
+  let filename: string | undefined;
+  try {
+    const segments = new URL(url).pathname.split('/').filter(Boolean);
+    filename = segments[segments.length - 1];
+  } catch {
+    filename = undefined;
+  }
+  return delay({
+    ...(filename !== undefined ? { filename } : {}),
+    size: FIXTURE_DOWNLOAD_SIZE_BYTES,
+    mimetype: 'application/octet-stream',
+  });
+}
+
+/** Fixture-mode implementation of `deleteStorageContent` (see `src/api/actions.ts`): no real
+ * request, just a simulated delay and an in-memory removal from the fixture storage content
+ * (`removeFixtureStorageContent`). `vmid` has no fixture-visible effect (there's no privilege model
+ * to satisfy in fixture mode). */
+export async function fixtureDeleteStorageContent(
+  node: string,
+  storage: string,
+  volid: string,
+): Promise<GuestActionResult> {
+  removeFixtureStorageContent(node, storage, volid);
+  return delay({ upid: fakeUpidFor(node, 0, 'imgdel') });
 }

@@ -1,13 +1,24 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowDown, ArrowUp, ShieldCheck } from 'lucide-react';
+import { ArrowDown, ArrowUp, MoreHorizontal, ShieldCheck } from 'lucide-react';
 
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState } from '@/components/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useClusterResources, useStorageContent } from '@/api/hooks';
+import { DeleteVolumeDialog } from '@/components/storage/DeleteVolumeDialog';
+import { useAuthMe, useClusterResources, useStorageContent } from '@/api/hooks';
+import { useStoragePermissions } from '@/api/actionHooks';
+import { USE_FIXTURES } from '@/api/client';
 import { errorMessage } from '@/api/errors';
 import { formatBytes, formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -23,7 +34,7 @@ import {
   type StorageContentType,
   type StorageSortKey,
 } from '@/lib/storageList';
-import type { BackupContentItem } from '@/api/types';
+import type { BackupContentItem, StorageContentItem } from '@/api/types';
 
 const VERIFICATION_VARIANT: Record<string, 'default' | 'destructive' | 'secondary'> = {
   ok: 'default',
@@ -94,6 +105,25 @@ export function StorageContentBrowser({ node, storage, mode, state, onStateChang
   const { data: items, isLoading, isError, error } = useStorageContent(node, storage);
   const { data: resources } = useClusterResources();
   const [localState, setLocalState] = useState<StorageBrowserState>(DEFAULT_STORAGE_BROWSER_STATE);
+  const [deleteTarget, setDeleteTarget] = useState<StorageContentItem | null>(null);
+
+  // Delete (T32 addendum) is page-mode only (the node Storage tab's compact row is a summary, not
+  // a place to take a destructive action from) -- gated the same disabled-with-tooltip way
+  // `StorageActions`/`NodePowerMenu` gate their own actions, on whichever of
+  // `Datastore.Allocate`/`Datastore.AllocateSpace` the delete route's own carve-out accepts (see
+  // `apps/server/src/actions/storageRoutes.ts`).
+  const auth = useAuthMe();
+  const permissions = useStoragePermissions(storage);
+  const showDeleteAction = mode === 'page';
+  const isSessionMode = USE_FIXTURES || auth.data?.mode === 'session';
+  const canDelete =
+    permissions.data?.can('Datastore.Allocate') === true || permissions.data?.can('Datastore.AllocateSpace') === true;
+  const deleteEnabled = isSessionMode && canDelete;
+  const deleteDisabledReason = !isSessionMode
+    ? 'Read-only: signed in with a service token'
+    : !canDelete
+      ? "You don't have Datastore.Allocate on this storage"
+      : undefined;
 
   const current = mode === 'page' && state ? state : localState;
 
@@ -183,6 +213,7 @@ export function StorageContentBrowser({ node, storage, mode, state, onStateChang
                   </>
                 )}
                 <TableHead>Notes</TableHead>
+                {showDeleteAction && <TableHead className="w-8" />}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -190,6 +221,9 @@ export function StorageContentBrowser({ node, storage, mode, state, onStateChang
                 const owner = item.vmid !== undefined ? vmidIndex.get(item.vmid) : undefined;
                 const backup = item as BackupContentItem;
                 const typeLabel = CONTENT_TYPE_LABELS[item.content as StorageContentType] ?? item.content;
+                const isProtectedBackup = backup.protected === true;
+                const rowDeleteEnabled = deleteEnabled && !isProtectedBackup;
+                const rowDeleteReason = isProtectedBackup ? 'Protected backup' : deleteDisabledReason;
                 return (
                   <TableRow key={item.volid}>
                     <TableCell className="max-w-xs truncate" title={item.volid} data-testid="storage-volume-id">
@@ -234,12 +268,63 @@ export function StorageContentBrowser({ node, storage, mode, state, onStateChang
                     <TableCell className="max-w-xs truncate text-muted-foreground" title={item.notes}>
                       {item.notes ?? '-'}
                     </TableCell>
+                    {showDeleteAction && (
+                      <TableCell className="w-8">
+                        <DropdownMenu>
+                          {rowDeleteEnabled ? (
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="size-7" aria-label={`Actions for ${stripStoragePrefix(item.volid)}`}>
+                                <MoreHorizontal className="size-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                          ) : (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span tabIndex={0} className="inline-flex rounded-md focus-visible:ring-[3px] focus-visible:ring-ring/50">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="pointer-events-none size-7"
+                                    disabled
+                                    aria-disabled="true"
+                                    tabIndex={-1}
+                                    aria-label={`Actions for ${stripStoragePrefix(item.volid)}`}
+                                    title={rowDeleteReason}
+                                  >
+                                    <MoreHorizontal className="size-4" />
+                                  </Button>
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>{rowDeleteReason}</TooltipContent>
+                            </Tooltip>
+                          )}
+                          {rowDeleteEnabled && (
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem variant="destructive" onSelect={() => setDeleteTarget(item)}>
+                                Delete…
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          )}
+                        </DropdownMenu>
+                      </TableCell>
+                    )}
                   </TableRow>
                 );
               })}
             </TableBody>
           </Table>
         </div>
+      )}
+
+      {showDeleteAction && (
+        <DeleteVolumeDialog
+          node={node}
+          storage={storage}
+          item={deleteTarget}
+          onOpenChange={(open) => {
+            if (!open) setDeleteTarget(null);
+          }}
+        />
       )}
     </div>
   );

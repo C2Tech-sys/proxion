@@ -9,6 +9,7 @@ import { TagChip } from '@/components/TagChip';
 import { EmptyState } from '@/components/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StorageContentBrowser } from '@/components/storage/StorageContentBrowser';
+import { StorageActions } from '@/components/storage/StorageActions';
 import { useClusterResources } from '@/api/hooks';
 import { errorMessage } from '@/api/errors';
 import { formatBytes, formatPercent } from '@/lib/format';
@@ -115,6 +116,7 @@ export function StoragePage() {
         name={storage}
         status={resource.status}
         node={node}
+        extra={<StorageActions node={node} storage={storage} contentTypes={contentTypes} />}
       />
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">

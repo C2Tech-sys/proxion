@@ -8,6 +8,10 @@ import {
   fixtureMigrateGuest,
   fixtureMigratePrecheck,
   fixtureNodeAction,
+  fixtureUploadToStorage,
+  fixtureDownloadUrlToStorage,
+  fixtureQueryUrlMetadata,
+  fixtureDeleteStorageContent,
 } from '@/api/actionsFixture';
 import type { GuestType } from '@/api/types';
 
@@ -385,6 +389,186 @@ export async function nodeAction(node: string, command: NodeActionCommand): Prom
 
   if (res.status === 202) {
     return (await res.json()) as NodeActionResult;
+  }
+  return throwSnapshotError(res);
+}
+
+/** The storage content types a file upload / download-from-URL can target -- matches the
+ * server's own allow-list (`apps/server/src/actions/storageRoutes.ts`). */
+export type StorageUploadContent = 'iso' | 'vztmpl' | 'import';
+
+export interface UploadToStorageOptions {
+  file: File;
+  content: StorageUploadContent;
+  filename: string;
+  /** Called with `(bytesSent, totalBytes)` as the upload progresses -- only the browser's
+   * `XMLHttpRequest` (used here instead of `fetch`) reports upload progress at all. */
+  onProgress?: (sent: number, total: number) => void;
+  /** Aborts the in-flight upload (the dialog's own Cancel button) via the same `AbortController`
+   * convention every other cancellable request in this app uses. */
+  signal?: AbortSignal;
+}
+
+/**
+ * Uploads a file (ISO, container template, or import file) to a storage. Real mode: `POST
+ * /api/actions/storage/:node/:storage/upload?content=&filename=`, the browser's own
+ * `multipart/form-data` body (fields `content`, `filename`, `file`, in that order) streamed
+ * through unchanged -- see the server README's "Storage browser" section. Built with
+ * `XMLHttpRequest` rather than `fetch`: only `XMLHttpRequest` reports upload progress
+ * (`xhr.upload.onprogress`), which the upload dialog's progress bar needs. Fixture mode: simulates
+ * progress ticks over ~1.5s then adds the item to the in-memory fixture storage content
+ * (`actionsFixture.ts` / `fixtures.ts`'s `addFixtureStorageContent`).
+ */
+export function uploadToStorage(node: string, storage: string, options: UploadToStorageOptions): Promise<GuestActionResult> {
+  if (USE_FIXTURES) {
+    return fixtureUploadToStorage(node, storage, options);
+  }
+
+  return new Promise<GuestActionResult>((resolve, reject) => {
+    const formData = new FormData();
+    formData.append('content', options.content);
+    formData.append('filename', options.filename);
+    formData.append('file', options.file, options.filename);
+
+    const xhr = new XMLHttpRequest();
+    const query = `content=${encodeURIComponent(options.content)}&filename=${encodeURIComponent(options.filename)}`;
+    xhr.open('POST', `/api/actions/storage/${node}/${storage}/upload?${query}`);
+
+    xhr.upload.onprogress = (event) => {
+      options.onProgress?.(event.loaded, event.lengthComputable ? event.total : options.file.size);
+    };
+
+    xhr.onload = () => {
+      if (xhr.status === 202) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as GuestActionResult);
+        } catch {
+          reject(new GuestActionError(xhr.status, 'Invalid server response'));
+        }
+        return;
+      }
+      let errorBody: GuestActionErrorBody | undefined;
+      try {
+        errorBody = JSON.parse(xhr.responseText) as GuestActionErrorBody;
+      } catch {
+        errorBody = undefined;
+      }
+      reject(new GuestActionError(xhr.status, describeError(xhr.status, xhr.statusText, errorBody)));
+    };
+    xhr.onerror = () => reject(new GuestActionError(0, 'Proxmox VE is unreachable'));
+    xhr.onabort = () => reject(new GuestActionError(0, 'Upload cancelled'));
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        reject(new GuestActionError(0, 'Upload cancelled'));
+        return;
+      }
+      options.signal.addEventListener('abort', () => xhr.abort());
+    }
+
+    xhr.send(formData);
+  });
+}
+
+/** Body for `downloadUrlToStorage`. Matches the server's own body contract for
+ * `POST /api/actions/storage/:node/:storage/download-url`. */
+export interface DownloadUrlToStorageBody {
+  url: string;
+  content: StorageUploadContent;
+  filename: string;
+  checksum?: string;
+  checksumAlgorithm?: 'md5' | 'sha1' | 'sha224' | 'sha256' | 'sha384' | 'sha512';
+  verifyCertificates?: boolean;
+}
+
+/**
+ * Requests one "download from URL" onto a storage (Proxmox itself fetches `body.url`; there is no
+ * client-side download here -- see the server README's "Storage browser" section for why). Real
+ * mode: `POST /api/actions/storage/:node/:storage/download-url`. Fixture mode: simulates the
+ * request (~1s) and adds the item to the in-memory fixture storage content, same as
+ * `uploadToStorage`.
+ */
+export async function downloadUrlToStorage(
+  node: string,
+  storage: string,
+  body: DownloadUrlToStorageBody,
+): Promise<GuestActionResult> {
+  if (USE_FIXTURES) {
+    return fixtureDownloadUrlToStorage(node, storage, body);
+  }
+
+  const res = await fetch(`/api/actions/storage/${node}/${storage}/download-url`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 202) {
+    return (await res.json()) as GuestActionResult;
+  }
+  return throwSnapshotError(res);
+}
+
+/** `queryUrlMetadata`'s result -- matches the server's own response shape
+ * (`GET /api/actions/storage/:node/query-url-metadata`), all fields optional since PVE itself
+ * reports only what the remote server's response headers gave it. */
+export interface UrlMetadataResult {
+  filename?: string;
+  size?: number;
+  mimetype?: string;
+}
+
+/**
+ * Queries a URL's metadata (filename/size/mimetype) via PVE, without downloading it -- used by the
+ * download-from-URL dialog's "Query URL" button to pre-fill the filename/size fields. Real mode:
+ * `GET /api/actions/storage/:node/query-url-metadata`. Fixture mode: derives a filename from the
+ * URL's own path and reports a plausible size (`actionsFixture.ts`).
+ */
+export async function queryUrlMetadata(node: string, url: string, verifyCertificates: boolean): Promise<UrlMetadataResult> {
+  if (USE_FIXTURES) {
+    return fixtureQueryUrlMetadata(node, url, verifyCertificates);
+  }
+
+  const query = `url=${encodeURIComponent(url)}&verifyCertificates=${verifyCertificates ? 'true' : 'false'}`;
+  const res = await fetch(`/api/actions/storage/${node}/query-url-metadata?${query}`);
+  if (res.ok) {
+    return (await res.json()) as UrlMetadataResult;
+  }
+  return throwSnapshotError(res);
+}
+
+export interface DeleteStorageContentOptions {
+  /** The volume's owner vmid, when it has one (e.g. a backup) -- forwarded as `?vmid=`, letting
+   * the server's `Datastore.AllocateSpace` + `VM.Backup` carve-out apply for a caller who lacks
+   * the full `Datastore.Allocate` privilege on the storage. `undefined` (explicit or omitted) for
+   * a volume with no owner -- `useStorageDelete` always passes this key, so both spellings must be
+   * accepted under `exactOptionalPropertyTypes`. */
+  vmid?: number | undefined;
+}
+
+/**
+ * Requests one storage content delete. Real mode:
+ * `DELETE /api/actions/storage/:node/:storage/content/:volid` (`?vmid=` when given -- see the
+ * server README's "Storage browser" section). Fixture mode: simulates the request and removes the
+ * item from the in-memory fixture storage content (`fixtures.ts`'s `removeFixtureStorageContent`).
+ */
+export async function deleteStorageContent(
+  node: string,
+  storage: string,
+  volid: string,
+  options?: DeleteStorageContentOptions,
+): Promise<GuestActionResult> {
+  if (USE_FIXTURES) {
+    return fixtureDeleteStorageContent(node, storage, volid);
+  }
+
+  const query = options?.vmid !== undefined ? `?vmid=${options.vmid}` : '';
+  const res = await fetch(`/api/actions/storage/${node}/${storage}/content/${encodeURIComponent(volid)}${query}`, {
+    method: 'DELETE',
+  });
+
+  if (res.status === 202) {
+    return (await res.json()) as GuestActionResult;
   }
   return throwSnapshotError(res);
 }

@@ -1,4 +1,12 @@
-import { Headers, fetch as undiciFetch, type Dispatcher, type RequestInit, type Response } from 'undici';
+import type { Readable } from 'node:stream';
+import {
+  Headers,
+  fetch as undiciFetch,
+  getGlobalDispatcher,
+  type Dispatcher,
+  type RequestInit,
+  type Response,
+} from 'undici';
 import { PveApiError, PveTlsError } from './errors.js';
 import { createTlsAgent, type PveTlsOptions } from './tls.js';
 
@@ -46,6 +54,39 @@ interface PveEnvelope {
   errors?: Record<string, string>;
   message?: string;
 }
+
+/**
+ * A body PVE will accept for `PveHttp.stream()`: exactly what undici's low-level
+ * `Dispatcher.request()` itself accepts as a streamable body -- a Node.js `Readable` (an inbound
+ * HTTP request, e.g. Fastify's `req.raw`, is one) or an already-buffered `Buffer` -- never a value
+ * this module reads into memory itself. The caller (an HTTP route handler forwarding a browser
+ * upload) is expected to pass the *raw* incoming stream straight through, so the bytes are never
+ * buffered twice.
+ */
+export type PveStreamBody = Readable | Buffer | null;
+
+export interface PveStreamOptions {
+  /** Forwarded as-is (after `applyAuth` adds the auth header(s)) -- callers set at least
+   * `content-type` here, since a streamed body's exact framing (e.g. a multipart boundary) is
+   * this call's caller's responsibility, not this transport's. */
+  headers?: Record<string, string>;
+  /** The request body -- streamed to PVE, never buffered by this method (see `PveStreamBody`). */
+  body: PveStreamBody;
+  /** Sent as the `content-length` header; also the number undici uses to know when the request
+   * body is complete. Callers must know this upfront (e.g. from the inbound request's own
+   * `content-length`) -- `PveHttp.stream()` never buffers the body to compute it. */
+  contentLength: number;
+  /** Aborts the in-flight request to PVE when triggered (e.g. the original client disconnected
+   * mid-upload) -- propagated straight to undici's own `Dispatcher.request()` `signal` option. */
+  signal?: AbortSignal;
+}
+
+/**
+ * Floor for `stream()`'s per-call `headersTimeout`/`bodyTimeout` -- long enough for a many-GB ISO
+ * upload over a slow link to never trip undici's much shorter default (5 minutes), regardless of
+ * whether this instance's own dispatcher (if any) was built with a shorter one.
+ */
+const STREAM_TIMEOUT_MS = 60 * 60 * 1000;
 
 const METHODS_WITH_BODY = new Set(['POST', 'PUT']);
 // PVE path params aren't always identifier-shaped: `{route-map-id}`,
@@ -206,6 +247,16 @@ export class PveHttp {
 
   private async handleResponse<T>(response: Response): Promise<T> {
     const text = await response.text();
+    return this.interpretEnvelope<T>(response.status, text, response.statusText);
+  }
+
+  /**
+   * Shared by `handleResponse` (the `fetch`-based `request()` path) and `stream()` (the
+   * dispatcher-based streaming path, which has no `Response` object to read a body/statusText
+   * from) -- parses PVE's `{data, errors, message}` envelope and either returns `data` or raises
+   * `PveApiError`, identically either way.
+   */
+  private interpretEnvelope<T>(status: number, text: string, statusText?: string): T {
     let envelope: PveEnvelope | undefined;
     if (text.length > 0) {
       try {
@@ -215,18 +266,82 @@ export class PveHttp {
       }
     }
 
-    if (!response.ok) {
+    if (status < 200 || status >= 300) {
       throw new PveApiError({
-        status: response.status,
-        // `||`, not `??`: an empty-string reason phrase (a real possibility --
-        // some servers/proxies send a blank HTTP status line reason) should
-        // also fall through to the generic message, not surface as "".
-        message:
-          envelope?.message || response.statusText || `Proxmox VE API request failed with status ${response.status}`,
+        status,
+        // `||`, not `??`: an empty-string reason phrase (a real possibility -- some
+        // servers/proxies send a blank HTTP status line reason) should also fall through to the
+        // generic message, not surface as "".
+        message: envelope?.message || statusText || `Proxmox VE API request failed with status ${status}`,
         ...(envelope?.errors ? { errors: envelope.errors } : {}),
       });
     }
 
     return (envelope?.data as T | undefined) ?? (undefined as T);
+  }
+
+  /**
+   * Streams a request body straight to PVE without ever buffering it in this process -- for
+   * uploads too large to hold in memory (a many-GB ISO). Deliberately bypasses `fetch()`/
+   * `request()` above: undici's `fetch()` has no per-call way to raise `headersTimeout`/
+   * `bodyTimeout` past whatever the dispatcher itself was built with (a real risk here -- an
+   * `Agent` built with no explicit timeout, or the global default dispatcher, times out at 5
+   * minutes, far too short for a large upload over a slow link), so this drives the dispatcher's
+   * own low-level `request()` directly, which *does* accept per-call timeouts. That also means
+   * this path never follows redirects (undici's `Dispatcher.request()` doesn't, unlike `fetch()`
+   * with its default `redirect: 'follow'`) -- exactly what a same-origin PVE upload needs.
+   *
+   * Auth is applied exactly like `request()` (`applyAuth`), so a caller's ticket/CSRF token or
+   * API token never has to leave this package. `params` substitutes the path template's `{node}`/
+   * `{storage}`-style placeholders (see `substitutePathParams`) -- there is no query/body
+   * parameter serialization here, unlike `request()`: every other field PVE's upload/download-url
+   * endpoints need travels inside `opts.body` (the caller's own already-framed request body) or is
+   * a path parameter, so nothing else needs appending.
+   */
+  async stream<T = unknown>(
+    method: string,
+    pathTemplate: string,
+    params: PveParams,
+    opts: PveStreamOptions,
+  ): Promise<T> {
+    const { path: resolvedPath } = substitutePathParams(pathTemplate, params);
+    const url = new URL(`${this.baseUrl}/api2/json${resolvedPath}`);
+
+    const headers = new Headers(opts.headers);
+    this.applyAuth(headers);
+    headers.set('content-length', String(opts.contentLength));
+    const headerRecord: Record<string, string> = {};
+    headers.forEach((value, key) => {
+      headerRecord[key] = value;
+    });
+
+    const dispatcher = this.dispatcher ?? getGlobalDispatcher();
+
+    const requestOptions: Dispatcher.RequestOptions = {
+      origin: url.origin,
+      path: `${url.pathname}${url.search}`,
+      method: method.toUpperCase() as Dispatcher.HttpMethod,
+      headers: headerRecord,
+      headersTimeout: STREAM_TIMEOUT_MS,
+      bodyTimeout: STREAM_TIMEOUT_MS,
+      ...(opts.body !== null ? { body: opts.body } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    };
+
+    let response: Dispatcher.ResponseData;
+    try {
+      response = await dispatcher.request(requestOptions);
+    } catch (error) {
+      if (error instanceof Error && error.cause instanceof PveTlsError) throw error.cause;
+      throw error;
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of response.body) {
+      chunks.push(chunk as Buffer);
+    }
+    const text = Buffer.concat(chunks).toString('utf8');
+
+    return this.interpretEnvelope<T>(response.statusCode, text);
   }
 }

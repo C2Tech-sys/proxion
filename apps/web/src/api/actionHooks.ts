@@ -15,6 +15,9 @@ import {
   migrateGuest,
   getMigratePrecheck,
   nodeAction,
+  uploadToStorage,
+  downloadUrlToStorage,
+  deleteStorageContent,
   GuestActionError,
   type GuestAction,
   type GuestActionBody,
@@ -25,6 +28,8 @@ import {
   type SnapshotActionResult,
   type MigrateGuestBody,
   type NodeActionCommand,
+  type StorageUploadContent,
+  type DownloadUrlToStorageBody,
 } from '@/api/actions';
 import type { GuestType, PveTask } from '@/api/types';
 
@@ -394,5 +399,147 @@ export function useNodePermissions(node: string) {
     enabled: !USE_FIXTURES && Boolean(node),
     staleTime: 5 * 60 * 1000,
     ...(USE_FIXTURES ? { initialData: ALL_PRIVILEGES } : {}),
+  });
+}
+
+/**
+ * The caller's PVE permissions on one storage (`GET /access/permissions?path=/storage/{storage}`,
+ * through the existing read-only `/api/pve/*` proxy) -- same shape and rationale as
+ * `usePermissions`/`useNodePermissions` above, scoped to `/storage/{storage}` for the storage
+ * page's Upload/Download-from-URL buttons (`Datastore.AllocateTemplate`) (T32). Fixture mode never
+ * makes the request -- the demo always reports every privilege as granted, same as the other two.
+ */
+export function useStoragePermissions(storage: string) {
+  const storagePath = `/storage/${storage}`;
+
+  return useQuery({
+    queryKey: ['storage-permissions', storage],
+    queryFn: async (): Promise<GuestPermissions> => {
+      const res = await fetch(`/api/pve/access/permissions?path=${encodeURIComponent(storagePath)}`);
+      if (!res.ok) throw new Error(`Failed to load permissions for storage ${storage}: ${res.status}`);
+      const envelope = (await res.json()) as { data?: unknown };
+      const scoped = scopedPermissions(envelope.data, storagePath);
+      return { can: (privilege: string) => Boolean(scoped[privilege]) };
+    },
+    enabled: !USE_FIXTURES && Boolean(storage),
+    staleTime: 5 * 60 * 1000,
+    ...(USE_FIXTURES ? { initialData: ALL_PRIVILEGES } : {}),
+  });
+}
+
+export interface StorageUploadVars {
+  node: string;
+  storage: string;
+  file: File;
+  content: StorageUploadContent;
+  filename: string;
+  onProgress?: (sent: number, total: number) => void;
+  signal?: AbortSignal;
+}
+
+/**
+ * Requests one storage upload (`src/api/actions.ts`). On success: a "Upload started: <filename>"
+ * toast right away, then waits for the task to finish (`watchTaskCompletion` -- a no-op in fixture
+ * mode, where `uploadToStorage`'s own simulated progress ticks have already completed by the time
+ * this runs, same convention `useMigrateGuest` uses) before invalidating this storage's own
+ * `['storage-content', ...]` query and toasting "<filename> is ready". On error: a toast with the
+ * server's message.
+ */
+export function useStorageUpload() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (vars: StorageUploadVars) =>
+      uploadToStorage(vars.node, vars.storage, {
+        file: vars.file,
+        content: vars.content,
+        filename: vars.filename,
+        ...(vars.onProgress !== undefined ? { onProgress: vars.onProgress } : {}),
+        ...(vars.signal !== undefined ? { signal: vars.signal } : {}),
+      }),
+    onSuccess: (result, vars) => {
+      toast.success(`Upload started: ${vars.filename}`);
+      const finish = () => {
+        void queryClient.invalidateQueries({ queryKey: ['storage-content', vars.node, vars.storage] });
+        toast.success(`${vars.filename} is ready`);
+      };
+      if (USE_FIXTURES) finish();
+      else watchTaskCompletion(queryClient, result.upid, finish);
+    },
+    onError: (error: unknown, vars) => {
+      toast.error(error instanceof GuestActionError ? error.message : `${vars.filename} could not be uploaded.`);
+    },
+  });
+}
+
+export interface StorageDownloadUrlVars {
+  node: string;
+  storage: string;
+  body: DownloadUrlToStorageBody;
+}
+
+/**
+ * Requests one "download from URL" onto a storage (`src/api/actions.ts`). Same toast/invalidation
+ * convention as `useStorageUpload` above: "Download started: <filename>" right away, then
+ * "<filename> is ready" once the task finishes (or immediately in fixture mode).
+ */
+export function useStorageDownloadUrl() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (vars: StorageDownloadUrlVars) => downloadUrlToStorage(vars.node, vars.storage, vars.body),
+    onSuccess: (result, vars) => {
+      toast.success(`Download started: ${vars.body.filename}`);
+      const finish = () => {
+        void queryClient.invalidateQueries({ queryKey: ['storage-content', vars.node, vars.storage] });
+        toast.success(`${vars.body.filename} is ready`);
+      };
+      if (USE_FIXTURES) finish();
+      else watchTaskCompletion(queryClient, result.upid, finish);
+    },
+    onError: (error: unknown, vars) => {
+      toast.error(error instanceof GuestActionError ? error.message : `${vars.body.filename} could not be downloaded.`);
+    },
+  });
+}
+
+export interface StorageDeleteVars {
+  node: string;
+  storage: string;
+  volid: string;
+  /** The volume's owner vmid, when it has one -- forwarded so the server's
+   * `Datastore.AllocateSpace` + `VM.Backup` carve-out can apply (see `deleteStorageContent`). */
+  vmid?: number;
+  /** A short display name for the toast (e.g. the volid with its storage prefix stripped) --
+   * never sent to the server. */
+  name: string;
+}
+
+/**
+ * Requests one storage content delete (`src/api/actions.ts`, T32 addendum). On success: a
+ * "Deleting <name>…" toast right away, then waits for the task to finish (`watchTaskCompletion` --
+ * a no-op in fixture mode, same convention as `useStorageUpload`/`useStorageDownloadUrl`) before
+ * invalidating this storage's own `['storage-content', ...]` query and toasting "<name> deleted".
+ * On error: a toast with the server's message (PVE's own refusal for a protected/in-use volume
+ * surfaces here verbatim).
+ */
+export function useStorageDelete() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (vars: StorageDeleteVars) =>
+      deleteStorageContent(vars.node, vars.storage, vars.volid, { vmid: vars.vmid }),
+    onSuccess: (result, vars) => {
+      toast.success(`Deleting ${vars.name}…`);
+      const finish = () => {
+        void queryClient.invalidateQueries({ queryKey: ['storage-content', vars.node, vars.storage] });
+        toast.success(`${vars.name} deleted`);
+      };
+      if (USE_FIXTURES) finish();
+      else watchTaskCompletion(queryClient, result.upid, finish);
+    },
+    onError: (error: unknown, vars) => {
+      toast.error(error instanceof GuestActionError ? error.message : `${vars.name} could not be deleted.`);
+    },
   });
 }

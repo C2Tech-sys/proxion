@@ -372,6 +372,32 @@ export function setFixtureGuestNode(node: string, type: GuestType, vmid: number,
   resources[index] = { ...resources[index], node: target } as ClusterResource;
 }
 
+/**
+ * Test/demo-only mutator (T32): appends one item to the shared in-memory `storageContent` map's
+ * `<node>/<storage>` array, in place, creating that array if this is its first item -- same
+ * convention as the other fixture mutators above. Used by the storage-upload and
+ * download-from-URL fixture flows (`src/api/actionsFixture.ts`) to simulate the new volume showing
+ * up in `getStorageContent` without a real backend.
+ */
+export function addFixtureStorageContent(node: string, storage: string, item: StorageContentItem): void {
+  const key = `${node}/${storage}`;
+  (storageContent[key] ??= []).push(item);
+}
+
+/**
+ * Test/demo-only mutator (T32 addendum): removes one item (by `volid`) from the shared in-memory
+ * `storageContent` map's `<node>/<storage>` array, in place -- the delete counterpart to
+ * `addFixtureStorageContent` above. A no-op if no matching storage/volid exists (kept lenient,
+ * same as the other fixture mutators).
+ */
+export function removeFixtureStorageContent(node: string, storage: string, volid: string): void {
+  const key = `${node}/${storage}`;
+  const items = storageContent[key];
+  if (!items) return;
+  const index = items.findIndex((item) => item.volid === volid);
+  if (index !== -1) items.splice(index, 1);
+}
+
 /** Demo-only: which qemu guests' migrate precheck reports a local disk, purely synthetic (not
  * derived from any fixture json -- this app's fixture data has no per-guest storage/disk model)
  * so the "Migrate local disks" checkbox has something to show in the demo. `web-prod-01` (vmid

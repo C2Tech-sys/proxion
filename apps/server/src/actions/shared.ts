@@ -75,3 +75,14 @@ export async function hasNodePrivilege(client: PveClient, node: string, privileg
   const scoped = (perms[nodePath] as Record<string, unknown> | undefined) ?? perms;
   return Boolean(scoped[privilege]);
 }
+
+/** Same as `hasNodePrivilege`, but for a storage-scoped privilege on `/storage/{storage}` (e.g.
+ * `Datastore.AllocateTemplate`, `Datastore.Allocate`, `Datastore.AllocateSpace`) -- used by
+ * `storageRoutes.ts` (T32). Additive next to `hasPrivilege`/`hasNodePrivilege` rather than a
+ * generalisation of either, same rationale as `hasNodePrivilege`'s own doc comment. */
+export async function hasStoragePrivilege(client: PveClient, storage: string, privilege: string): Promise<boolean> {
+  const storagePath = `/storage/${storage}`;
+  const perms = (await client.get('/access/permissions', { path: storagePath })) as Record<string, unknown>;
+  const scoped = (perms[storagePath] as Record<string, unknown> | undefined) ?? perms;
+  return Boolean(scoped[privilege]);
+}
