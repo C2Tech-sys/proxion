@@ -15,14 +15,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useStorageDownloadUrl } from '@/api/actionHooks';
 import { queryUrlMetadata, GuestActionError, type StorageUploadContent } from '@/api/actions';
+import { validateStorageFilename } from '@/lib/storageFilename';
 import { formatBytes } from '@/lib/format';
-
-/** Same regex/rejection the server enforces (`storageRoutes.ts`'s `filenameSchema`) -- see
- * `UploadDialog.tsx`'s identical copy for why this lives inline rather than shared. */
-const FILENAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.+-]{0,254}$/;
-function isValidFilename(value: string): boolean {
-  return value.length > 0 && value.length <= 255 && FILENAME_RE.test(value) && !value.includes('..');
-}
 
 /** Same http(s)-only rule the server enforces (`storageRoutes.ts`'s `urlSchema`). */
 function isValidUrl(value: string): boolean {
@@ -71,7 +65,9 @@ export function DownloadUrlDialog({ node, storage, availableContentTypes, open, 
   const mutation = useStorageDownloadUrl();
 
   const urlValid = isValidUrl(url);
-  const filenameValid = filename.length === 0 || isValidFilename(filename);
+  // Re-validated whenever `content` changes too, same rationale as `UploadDialog.tsx` (T34).
+  const filenameError = filename.length > 0 ? validateStorageFilename(content, filename) : null;
+  const filenameValid = filenameError === null;
   const checksumPairValid = (checksum.length === 0) === (checksumAlgorithm === '');
   const canSubmit = urlValid && filename.length > 0 && filenameValid && checksumPairValid && !mutation.isPending;
 
@@ -193,7 +189,7 @@ export function DownloadUrlDialog({ node, storage, availableContentTypes, open, 
               disabled={mutation.isPending}
               aria-invalid={!filenameValid}
             />
-            {!filenameValid && <span className="text-xs text-destructive">Invalid filename.</span>}
+            {filenameError && <span className="text-xs text-destructive">{filenameError}</span>}
           </div>
 
           <div className="grid grid-cols-2 gap-2">

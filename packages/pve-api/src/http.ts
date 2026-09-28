@@ -45,7 +45,17 @@ export interface PveHttpOptions {
    * itself from `tls` is closed.
    */
   dispatcher?: Dispatcher;
-  /** Override the fetch implementation (used in tests). Defaults to undici's own `fetch`. */
+  /**
+   * Override the fetch implementation (used in tests). Defaults to undici's own `fetch`.
+   *
+   * NOTE (T34): `stream()` bypasses `fetch` entirely (see its own doc comment) and resolves its
+   * dispatcher only from `tls`/`dispatcher` above -- never from this option. A caller that needs
+   * one dispatcher shared across many `PveHttp` instances (a server holding one per session, say)
+   * must pass it as `dispatcher`, not smuggle it into a custom `fetch` here: `request()` would work
+   * either way, but `stream()` would silently fall back to undici's *global* dispatcher, which
+   * fails outright against a self-signed certificate `dispatcher`/`tls` would have pinned past.
+   * This is exactly the bug a previous version of `apps/server`'s `buildPveClient` had.
+   */
   fetch?: typeof undiciFetch;
 }
 
@@ -297,6 +307,14 @@ export class PveHttp {
    * parameter serialization here, unlike `request()`: every other field PVE's upload/download-url
    * endpoints need travels inside `opts.body` (the caller's own already-framed request body) or is
    * a path parameter, so nothing else needs appending.
+   *
+   * Dispatcher resolution (T34): `this.dispatcher ?? getGlobalDispatcher()` -- the *same*
+   * `this.dispatcher` field `request()` conditionally attaches to its own `fetch` call, built once
+   * in the constructor from `tls`/`dispatcher`. That field is `undefined` only when this instance
+   * was given neither -- the "no TLS options at all" configuration, where falling back to undici's
+   * global dispatcher matches `request()`'s own default `fetch` behaviour exactly. See
+   * `PveHttpOptions.fetch`'s doc comment for the one configuration this can't see: a dispatcher
+   * hidden inside a custom `fetch` instead of passed as `dispatcher`.
    */
   async stream<T = unknown>(
     method: string,

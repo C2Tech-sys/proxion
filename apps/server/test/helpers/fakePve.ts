@@ -94,12 +94,14 @@ export interface FakePve {
   }>;
   /** Makes the next `POST .../storage/{storage}/upload` call fail with the given status/message
    * (checked before the body is even read, mirroring a real early PVE-side rejection e.g. a bad
-   * file extension). */
-  setUploadError: (storage: string, status: number, message: string) => void;
+   * file extension). `errors` optionally simulates PVE's own per-field `errors` map (T34), e.g.
+   * `{ filename: "value does not match the regex pattern" }`. */
+  setUploadError: (storage: string, status: number, message: string, errors?: Record<string, string>) => void;
   /** Every `POST .../storage/{storage}/download-url` request PVE has received, in order (path +
    * parsed form body, PVE's own field names e.g. `checksum-algorithm`/`verify-certificates`). */
   downloadUrlCalls: Array<{ path: string; body: Record<string, string> }>;
-  setDownloadUrlError: (storage: string, status: number, message: string) => void;
+  /** `errors` optionally simulates PVE's own per-field `errors` map (T34), same as `setUploadError`. */
+  setDownloadUrlError: (storage: string, status: number, message: string, errors?: Record<string, string>) => void;
   /** Every `GET .../query-url-metadata` request PVE has received, in order (full path incl. query
    * string). */
   queryUrlMetadataCalls: Array<{ path: string }>;
@@ -471,13 +473,15 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     bytes: number;
     headers: Record<string, string | string[] | undefined>;
   }> = [];
-  const uploadErrors = new Map<string, { status: number; message: string }>();
+  const uploadErrors = new Map<string, { status: number; message: string; errors?: Record<string, string> }>();
 
   app.post('/api2/json/nodes/:node/storage/:storage/upload', async (req, reply) => {
     const { storage } = req.params as { node: string; storage: string };
     const failure = uploadErrors.get(storage);
     if (failure) {
-      reply.code(failure.status).send({ data: null, message: failure.message });
+      reply
+        .code(failure.status)
+        .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
       return;
     }
     let bytes = 0;
@@ -498,14 +502,16 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
 
   // Storage download-url (`POST /nodes/{node}/storage/{storage}/download-url`).
   const downloadUrlCalls: Array<{ path: string; body: Record<string, string> }> = [];
-  const downloadUrlErrors = new Map<string, { status: number; message: string }>();
+  const downloadUrlErrors = new Map<string, { status: number; message: string; errors?: Record<string, string> }>();
 
   app.post('/api2/json/nodes/:node/storage/:storage/download-url', async (req, reply) => {
     const { storage } = req.params as { node: string; storage: string };
     downloadUrlCalls.push({ path: req.url, body: (req.body ?? {}) as Record<string, string> });
     const failure = downloadUrlErrors.get(storage);
     if (failure) {
-      reply.code(failure.status).send({ data: null, message: failure.message });
+      reply
+        .code(failure.status)
+        .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
       return;
     }
     reply.send({ data: 'UPID:fakepve:00000001:00000000:00000000:download:0:root@pam:' });
@@ -624,14 +630,14 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     get uploadCalls() {
       return uploadCalls;
     },
-    setUploadError: (storage: string, status: number, message: string) => {
-      uploadErrors.set(storage, { status, message });
+    setUploadError: (storage: string, status: number, message: string, errors?: Record<string, string>) => {
+      uploadErrors.set(storage, { status, message, ...(errors ? { errors } : {}) });
     },
     get downloadUrlCalls() {
       return downloadUrlCalls;
     },
-    setDownloadUrlError: (storage: string, status: number, message: string) => {
-      downloadUrlErrors.set(storage, { status, message });
+    setDownloadUrlError: (storage: string, status: number, message: string, errors?: Record<string, string>) => {
+      downloadUrlErrors.set(storage, { status, message, ...(errors ? { errors } : {}) });
     },
     get queryUrlMetadataCalls() {
       return queryUrlMetadataCalls;

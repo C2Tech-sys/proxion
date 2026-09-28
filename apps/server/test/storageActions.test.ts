@@ -147,6 +147,86 @@ describe('storage action routes', () => {
       expect(fakePve.uploadCalls).toHaveLength(0);
     });
 
+    it('400s an extension that does not match the content type, without ever calling PVE (T34)', async () => {
+      const cookie = await setupSession();
+      fakePve.setStoragePermissions('local', { 'Datastore.AllocateTemplate': true });
+
+      const isoOk = await uploadRequest(
+        'pve1',
+        'local',
+        'content=iso&filename=debian.iso',
+        buildMultipartBody({ content: 'iso', filename: 'debian.iso' }, Buffer.from('x')),
+        { cookie },
+      );
+      expect(isoOk.statusCode).not.toBe(400);
+
+      const isoImgOk = await uploadRequest(
+        'pve1',
+        'local',
+        'content=iso&filename=debian.img',
+        buildMultipartBody({ content: 'iso', filename: 'debian.img' }, Buffer.from('x')),
+        { cookie },
+      );
+      expect(isoImgOk.statusCode).not.toBe(400);
+
+      const isoBad = await uploadRequest(
+        'pve1',
+        'local',
+        'content=iso&filename=debian.txt',
+        buildMultipartBody({ content: 'iso', filename: 'debian.txt' }, Buffer.from('x')),
+        { cookie },
+      );
+      expect(isoBad.statusCode).toBe(400);
+      expect(isoBad.json()).toEqual({ error: 'invalid-filename', message: 'ISO images must end in .iso or .img' });
+
+      const vztmplOk = await uploadRequest(
+        'pve1',
+        'local',
+        'content=vztmpl&filename=debian.tar.zst',
+        buildMultipartBody({ content: 'vztmpl', filename: 'debian.tar.zst' }, Buffer.from('x')),
+        { cookie },
+      );
+      expect(vztmplOk.statusCode).not.toBe(400);
+
+      const vztmplBad = await uploadRequest(
+        'pve1',
+        'local',
+        'content=vztmpl&filename=debian.zip',
+        buildMultipartBody({ content: 'vztmpl', filename: 'debian.zip' }, Buffer.from('x')),
+        { cookie },
+      );
+      expect(vztmplBad.statusCode).toBe(400);
+      expect(vztmplBad.json()).toEqual({
+        error: 'invalid-filename',
+        message: 'Container templates must end in .tar.gz, .tar.xz or .tar.zst',
+      });
+
+      const importOk = await uploadRequest(
+        'pve1',
+        'local',
+        'content=import&filename=appliance.ova',
+        buildMultipartBody({ content: 'import', filename: 'appliance.ova' }, Buffer.from('x')),
+        { cookie },
+      );
+      expect(importOk.statusCode).not.toBe(400);
+
+      const importBad = await uploadRequest(
+        'pve1',
+        'local',
+        'content=import&filename=appliance.iso',
+        buildMultipartBody({ content: 'import', filename: 'appliance.iso' }, Buffer.from('x')),
+        { cookie },
+      );
+      expect(importBad.statusCode).toBe(400);
+      expect(importBad.json()).toEqual({
+        error: 'invalid-filename',
+        message: 'Import files must end in .ova, .qcow2, .raw or .vmdk',
+      });
+
+      // Only the four accepted-extension requests above ever reached PVE.
+      expect(fakePve.uploadCalls).toHaveLength(4);
+    });
+
     it('411s when Content-Length is missing', async () => {
       const cookie = await setupSession();
       fakePve.setStoragePermissions('local', { 'Datastore.AllocateTemplate': true });
@@ -335,6 +415,105 @@ describe('storage action routes', () => {
       expect(res.statusCode).toBe(400);
     });
 
+    it('400s an extension that does not match the content type, without ever calling PVE (T34)', async () => {
+      const cookie = await setupSession();
+      fakePve.setStoragePermissions('local', { 'Datastore.AllocateTemplate': true });
+
+      const isoOk = await downloadUrlRequest(
+        'pve1',
+        'local',
+        { url: 'https://example.com/debian.iso', content: 'iso', filename: 'debian.iso' },
+        cookie,
+      );
+      expect(isoOk.statusCode).not.toBe(400);
+
+      const isoImgOk = await downloadUrlRequest(
+        'pve1',
+        'local',
+        { url: 'https://example.com/debian.img', content: 'iso', filename: 'debian.img' },
+        cookie,
+      );
+      expect(isoImgOk.statusCode).not.toBe(400);
+
+      // The production bug this ticket fixes: "download from URL", content type ISO, a filename
+      // with no extension at all (e.g. "bookworm").
+      const isoNoExtension = await downloadUrlRequest(
+        'pve1',
+        'local',
+        { url: 'https://example.com/bookworm', content: 'iso', filename: 'bookworm' },
+        cookie,
+      );
+      expect(isoNoExtension.statusCode).toBe(400);
+      expect(isoNoExtension.json()).toEqual({ error: 'invalid-filename', message: 'ISO images must end in .iso or .img' });
+
+      const vztmplOk = await downloadUrlRequest(
+        'pve1',
+        'local',
+        { url: 'https://example.com/debian.tar.zst', content: 'vztmpl', filename: 'debian.tar.zst' },
+        cookie,
+      );
+      expect(vztmplOk.statusCode).not.toBe(400);
+
+      const vztmplBad = await downloadUrlRequest(
+        'pve1',
+        'local',
+        { url: 'https://example.com/debian.zip', content: 'vztmpl', filename: 'debian.zip' },
+        cookie,
+      );
+      expect(vztmplBad.statusCode).toBe(400);
+      expect(vztmplBad.json()).toEqual({
+        error: 'invalid-filename',
+        message: 'Container templates must end in .tar.gz, .tar.xz or .tar.zst',
+      });
+
+      const importOk = await downloadUrlRequest(
+        'pve1',
+        'local',
+        { url: 'https://example.com/appliance.ova', content: 'import', filename: 'appliance.ova' },
+        cookie,
+      );
+      expect(importOk.statusCode).not.toBe(400);
+
+      const importBad = await downloadUrlRequest(
+        'pve1',
+        'local',
+        { url: 'https://example.com/appliance.iso', content: 'import', filename: 'appliance.iso' },
+        cookie,
+      );
+      expect(importBad.statusCode).toBe(400);
+      expect(importBad.json()).toEqual({
+        error: 'invalid-filename',
+        message: 'Import files must end in .ova, .qcow2, .raw or .vmdk',
+      });
+
+      // Only the four accepted-extension requests above ever reached PVE.
+      expect(fakePve.downloadUrlCalls).toHaveLength(4);
+    });
+
+    it('surfaces PVE\'s per-field "errors" map appended to the message (T34)', async () => {
+      const cookie = await setupSession();
+      fakePve.setStoragePermissions('local', { 'Datastore.AllocateTemplate': true });
+      // A filename that passes this server's own extension check (so the request actually reaches
+      // PVE) but that the fake PVE itself rejects with a field-level detail, same envelope shape
+      // real PVE uses (`{ message, errors }`).
+      fakePve.setDownloadUrlError('local', 400, 'Parameter verification failed.', {
+        filename: 'value does not match the regex pattern',
+      });
+
+      const res = await downloadUrlRequest(
+        'pve1',
+        'local',
+        { url: 'https://example.com/debian.iso', content: 'iso', filename: 'debian.iso' },
+        cookie,
+      );
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({
+        error: 'pve-rejected',
+        message: 'Parameter verification failed. filename: value does not match the regex pattern',
+      });
+    });
+
     it('maps checksum/checksumAlgorithm/verifyCertificates to PVE field names', async () => {
       const cookie = await setupSession();
       fakePve.setStoragePermissions('local', { 'Datastore.AllocateTemplate': true });
@@ -368,12 +547,15 @@ describe('storage action routes', () => {
     it('surfaces a PVE rejection via sendPveError', async () => {
       const cookie = await setupSession();
       fakePve.setStoragePermissions('local', { 'Datastore.AllocateTemplate': true });
+      // A filename that passes this server's own extension check (T34 added that check *before*
+      // any PVE call) -- what's under test here is a PVE-side rejection for some other reason,
+      // surfaced verbatim via `sendPveError`.
       fakePve.setDownloadUrlError('local', 400, 'unsupported file extension');
 
       const res = await downloadUrlRequest(
         'pve1',
         'local',
-        { url: 'https://example.com/debian.exe', content: 'iso', filename: 'debian.exe' },
+        { url: 'https://example.com/debian.iso', content: 'iso', filename: 'debian.iso' },
         cookie,
       );
 

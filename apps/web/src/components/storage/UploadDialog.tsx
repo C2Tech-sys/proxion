@@ -14,17 +14,9 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useStorageUpload } from '@/api/actionHooks';
 import { GuestActionError, type StorageUploadContent } from '@/api/actions';
+import { validateStorageFilename } from '@/lib/storageFilename';
 import { formatBytes } from '@/lib/format';
 import { cn } from '@/lib/utils';
-
-/** Same regex/length/`..`-rejection the server enforces (`apps/server/src/actions/storageRoutes.ts`'s
- * `filenameSchema`) -- inline validation here is a UX nicety only; the server is what actually
- * protects itself. KEEP THIS IDENTICAL to the server's own `FILENAME_RE`. */
-const FILENAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.+-]{0,254}$/;
-
-function isValidFilename(value: string): boolean {
-  return value.length > 0 && value.length <= 255 && FILENAME_RE.test(value) && !value.includes('..');
-}
 
 const CONTENT_LABELS: Record<StorageUploadContent, string> = {
   iso: 'ISO image',
@@ -65,7 +57,12 @@ export function UploadDialog({ node, storage, availableContentTypes, open, onOpe
   const abortControllerRef = useRef<AbortController | null>(null);
   const mutation = useStorageUpload();
 
-  const filenameValid = filename.length === 0 || isValidFilename(filename);
+  // Re-validated whenever `content` changes too (this is a plain function of both, not memoized
+  // state) -- if the content type changes and the current filename no longer fits (e.g. an ISO
+  // filename after switching to "Import"), the error shows immediately rather than the filename
+  // being silently edited or the mismatch only surfacing once PVE rejects it (T34).
+  const filenameError = filename.length > 0 ? validateStorageFilename(content, filename) : null;
+  const filenameValid = filenameError === null;
   const canSubmit = file !== null && filename.length > 0 && filenameValid && !mutation.isPending;
 
   function reset() {
@@ -185,12 +182,7 @@ export function UploadDialog({ node, storage, availableContentTypes, open, onOpe
               disabled={mutation.isPending}
               aria-invalid={!filenameValid}
             />
-            {!filenameValid && (
-              <span className="text-xs text-destructive">
-                Filename must start with a letter or digit and contain only letters, digits, `_`, `.`, `+`, `-`
-                (no `..`).
-              </span>
-            )}
+            {filenameError && <span className="text-xs text-destructive">{filenameError}</span>}
           </div>
 
           {progress && (
