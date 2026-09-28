@@ -167,11 +167,14 @@ export function registerStorageRoutes(
           reply.code(411).send({ error: 'length-required' });
           return;
         }
-        const contentLength = Number(contentLengthHeader);
-        if (!Number.isFinite(contentLength) || contentLength < 0) {
-          reply.code(400).send({ error: 'Invalid Content-Length' });
+        // Strictly digits-only (no sign, no decimal point, no exponent, no leading/trailing
+        // whitespace) -- `Number(...)` alone would accept `"5.5"` (finite, non-negative) and
+        // forward a fractional byte count to PVE as a `content-length` header.
+        if (!/^\d+$/.test(contentLengthHeader) || !Number.isSafeInteger(Number(contentLengthHeader))) {
+          reply.code(400).send({ error: 'invalid-content-length' });
           return;
         }
+        const contentLength = Number(contentLengthHeader);
         const maxBytes = app.proxionConfig.PROXION_UPLOAD_MAX_BYTES;
         if (contentLength > maxBytes) {
           reply.code(413).send({ error: 'payload-too-large', maxBytes });
@@ -387,9 +390,14 @@ export function registerStorageRoutes(
       const routeParams = req.params as Record<string, string>;
       const node = nodeNameSchema.safeParse(routeParams.node);
       const storage = storageIdSchema.safeParse(routeParams.storage);
-      const volid = volidSchema.safeParse(
-        routeParams.volid !== undefined ? decodeURIComponent(routeParams.volid) : undefined,
-      );
+      // `routeParams.volid` is already decoded -- Fastify (via its underlying router) decodes
+      // every route param once before handlers ever see it, same as `:node`/`:storage` above.
+      // Decoding it *again* here would double-decode a validly-encoded volid (e.g. a literal `%`
+      // in a filename, sent as `%2525`) and throws `URIError: URI malformed` on a merely
+      // percent-shaped-looking segment (e.g. `%25` on its own) before validation or auth ever
+      // runs -- an unauthenticated 500 with an internal error message. Validate the raw param as
+      // Fastify delivered it instead.
+      const volid = volidSchema.safeParse(routeParams.volid);
       if (!node.success || !storage.success || !volid.success) {
         reply.code(400).send({ error: 'Invalid node/storage/volid' });
         return;

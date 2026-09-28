@@ -70,11 +70,12 @@ describe('storage action routes', () => {
     storage: string,
     query: string,
     body: Buffer | Readable,
-    options: { cookie?: string; contentLength?: number } = {},
+    options: { cookie?: string; contentLength?: number | string; extraHeaders?: Record<string, string> } = {},
   ) {
     const headers: Record<string, string> = { 'content-type': `multipart/form-data; boundary=${BOUNDARY}` };
     if (options.cookie !== undefined) headers.cookie = options.cookie;
     if (options.contentLength !== undefined) headers['content-length'] = String(options.contentLength);
+    if (options.extraHeaders) Object.assign(headers, options.extraHeaders);
     const injectOptions: InjectOptions = {
       method: 'POST',
       url: `/api/actions/storage/${node}/${storage}/upload?${query}`,
@@ -172,6 +173,34 @@ describe('storage action routes', () => {
       expect(fakePve.uploadCalls).toHaveLength(0);
     });
 
+    it('400s a fractional Content-Length ("5.5"), without ever calling PVE', async () => {
+      const cookie = await setupSession();
+      const body = buildMultipartBody({ content: 'iso', filename: 'a.iso' }, Buffer.from('x'));
+
+      const res = await uploadRequest('pve1', 'local', 'content=iso&filename=a.iso', body, {
+        cookie,
+        contentLength: '5.5',
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({ error: 'invalid-content-length' });
+      expect(fakePve.uploadCalls).toHaveLength(0);
+    });
+
+    it('400s a non-numeric Content-Length ("abc"), without ever calling PVE', async () => {
+      const cookie = await setupSession();
+      const body = buildMultipartBody({ content: 'iso', filename: 'a.iso' }, Buffer.from('x'));
+
+      const res = await uploadRequest('pve1', 'local', 'content=iso&filename=a.iso', body, {
+        cookie,
+        contentLength: 'abc',
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({ error: 'invalid-content-length' });
+      expect(fakePve.uploadCalls).toHaveLength(0);
+    });
+
     it('forwards a 3MB multipart body byte-exact, with the same Content-Type, and returns 202 {upid}', async () => {
       const cookie = await setupSession();
       fakePve.setStoragePermissions('local', { 'Datastore.AllocateTemplate': true });
@@ -184,6 +213,47 @@ describe('storage action routes', () => {
       expect(fakePve.uploadCalls).toHaveLength(1);
       expect(fakePve.uploadCalls[0]!.contentType).toBe(`multipart/form-data; boundary=${BOUNDARY}`);
       expect(fakePve.uploadCalls[0]!.bytes).toBe(body.length);
+    });
+
+    it('forwards only the content-type/content-length/PVE-auth headers to PVE -- never the browser\'s own auth, proxy, or origin headers, and never the Proxion session cookie', async () => {
+      const cookie = await setupSession();
+      fakePve.setStoragePermissions('local', { 'Datastore.AllocateTemplate': true });
+      const body = buildMultipartBody({ content: 'iso', filename: 'a.iso' }, Buffer.alloc(1024, 1));
+
+      const res = await uploadRequest('pve1', 'local', 'content=iso&filename=a.iso', body, {
+        cookie,
+        extraHeaders: {
+          authorization: 'Bearer x',
+          'x-forwarded-for': '1.2.3.4',
+          'x-forwarded-proto': 'https',
+          origin: 'https://evil.example.com',
+          referer: 'https://evil.example.com/',
+          'x-test-leak': '1',
+        },
+      });
+
+      expect(res.statusCode).toBe(202);
+      expect(fakePve.uploadCalls).toHaveLength(1);
+      const forwarded = fakePve.uploadCalls[0]!.headers;
+
+      // What PVE *should* see: the exact content-type (boundary intact), the exact byte count as
+      // content-length, and the session's own PVE auth (a `PVEAuthCookie=...` cookie plus the
+      // CSRF header) -- never the browser's session cookie by name.
+      expect(forwarded['content-type']).toBe(`multipart/form-data; boundary=${BOUNDARY}`);
+      expect(forwarded['content-length']).toBe(String(body.length));
+      expect(String(forwarded.cookie)).toMatch(/^PVEAuthCookie=/);
+      expect(String(forwarded.cookie)).not.toContain('proxion.sid');
+      expect(forwarded.csrfpreventiontoken).toBeTruthy();
+
+      // What PVE should never see: any of the browser's own auth/proxy/origin headers, or an
+      // arbitrary custom header -- `uploadStream`'s own `headers` option only ever sets
+      // `content-type` (see `storageRoutes.ts`), so none of these are ever copied through.
+      expect(forwarded.authorization).toBeUndefined();
+      expect(forwarded['x-forwarded-for']).toBeUndefined();
+      expect(forwarded['x-forwarded-proto']).toBeUndefined();
+      expect(forwarded.origin).toBeUndefined();
+      expect(forwarded.referer).toBeUndefined();
+      expect(forwarded['x-test-leak']).toBeUndefined();
     });
 
     it('a client abort mid-upload does not crash the server', async () => {
@@ -356,6 +426,34 @@ describe('storage action routes', () => {
       const cookie = await setupSession();
       fakePve.setStoragePermissions('local', { 'Datastore.Allocate': true });
       const res = await deleteContentRequest('pve1', 'local', 'other:iso/x.iso', undefined, cookie);
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('400s (never 500) a raw "%25" volid segment -- Fastify already decodes route params once, so a second decode of the resulting bare "%" used to throw URIError before validation/auth ever ran', async () => {
+      const cookie = await setupSession();
+      // Built by hand, not `deleteContentRequest` (which itself `encodeURIComponent`s its `volid`
+      // argument) -- the wire path segment must be the literal three characters `%25`, which
+      // Fastify's own single decode turns into a bare `%` for `routeParams.volid`.
+      const res = await app.inject({
+        method: 'DELETE',
+        url: '/api/actions/storage/pve1/local/content/%25',
+        headers: { cookie },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('400s (never 500) a volid containing a stray "%" once decoded', async () => {
+      const cookie = await setupSession();
+      // Wire segment `local%3Afoo%2525bar` -- Fastify's single decode turns `%3A` into `:` and
+      // `%25` into `%`, leaving the literal (non-escape) substring `25` untouched, so
+      // `routeParams.volid` is `local:foo%25bar` -- a decoded value containing a bare `%` that
+      // `volidSchema` rejects (no `%` in its allowed character class), same as any other
+      // malformed volid.
+      const res = await app.inject({
+        method: 'DELETE',
+        url: '/api/actions/storage/pve1/local/content/local%3Afoo%2525bar',
+        headers: { cookie },
+      });
       expect(res.statusCode).toBe(400);
     });
 

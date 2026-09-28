@@ -79,11 +79,19 @@ export interface FakePve {
   setStoragePermissions: (storage: string, privs: Record<string, boolean>) => void;
   /** Every `POST .../storage/{storage}/upload` request PVE has received, in order: the resolved
    * path, the exact `content-type` header seen (boundary intact), the query string PVE itself saw
-   * (`content`/`filename`, if this fake ever needs to assert them), and the exact byte count of
-   * the body PVE received -- read directly off the raw request stream, never buffered further, so
-   * a large-body test doesn't defeat its own point by holding the whole body in memory a second
-   * time here. */
-  uploadCalls: Array<{ path: string; contentType: string | undefined; query: Record<string, string>; bytes: number }>;
+   * (`content`/`filename`, if this fake ever needs to assert them), the exact byte count of the
+   * body PVE received -- read directly off the raw request stream, never buffered further, so a
+   * large-body test doesn't defeat its own point by holding the whole body in memory a second time
+   * here -- and the full incoming header map, lower-cased the same way Node's own HTTP parser
+   * already lower-cases every header name, for asserting exactly which headers this server
+   * forwards (and which it never does -- see `storageActions.test.ts`'s header-forwarding test). */
+  uploadCalls: Array<{
+    path: string;
+    contentType: string | undefined;
+    query: Record<string, string>;
+    bytes: number;
+    headers: Record<string, string | string[] | undefined>;
+  }>;
   /** Makes the next `POST .../storage/{storage}/upload` call fail with the given status/message
    * (checked before the body is even read, mirroring a real early PVE-side rejection e.g. a bad
    * file extension). */
@@ -456,7 +464,13 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     done(null, payload);
   });
 
-  const uploadCalls: Array<{ path: string; contentType: string | undefined; query: Record<string, string>; bytes: number }> = [];
+  const uploadCalls: Array<{
+    path: string;
+    contentType: string | undefined;
+    query: Record<string, string>;
+    bytes: number;
+    headers: Record<string, string | string[] | undefined>;
+  }> = [];
   const uploadErrors = new Map<string, { status: number; message: string }>();
 
   app.post('/api2/json/nodes/:node/storage/:storage/upload', async (req, reply) => {
@@ -475,6 +489,9 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       contentType: req.headers['content-type'],
       query: (req.query ?? {}) as Record<string, string>,
       bytes,
+      // `{ ...req.headers }` -- a plain copy, since Fastify's own `req.headers` is a live object
+      // reused across requests by the underlying Node HTTP server.
+      headers: { ...req.headers },
     });
     reply.send({ data: 'UPID:fakepve:00000001:00000000:00000000:imgcopy:0:root@pam:' });
   });
