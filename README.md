@@ -114,6 +114,10 @@ pnpm install && pnpm demo
   HTTP behind something else that terminates TLS.
 - The optional per-node [host agent](agent/README.md) avoids a `vncproxy`
   task-log entry for every console thumbnail capture.
+- Storage uploads stream through the Proxion container itself, so any reverse
+  proxy in front of it must allow large request bodies (Caddy does by
+  default); see `PROXION_UPLOAD_MAX_BYTES` below to cap the largest upload
+  this server will forward to PVE.
 
 ## Feature status
 
@@ -148,7 +152,8 @@ change your cluster -- `/api/pve/*` itself stays a read-only proxy.
 | Rename / notes                                     | Works (session sign-in only) | Rename a VM/CT from the object header's "More" menu or the inventory tree's context menu; edit its notes (the PVE description field) inline from the Summary tab's Notes panel. Needs a signed-in session and `VM.Config.Options` on the guest -- a different privilege than power actions, checked independently; the shared service token stays read-only here too. |
 | Migrate                                            | Works (session sign-in only) | Move a VM/CT to another cluster node from the object header's "More" menu or the inventory tree's context menu: a target-node picker (offline nodes and PVE's `not_allowed_nodes` disabled with the reason) plus the migrate precheck (running state, local disks, local resources), online/local-disks options for qemu, automatic restart-mode for a running lxc. Needs a signed-in session, `VM.Migrate` on the guest, and another node in the cluster -- the shared service token stays read-only here too. |
 | Node power                                         | Works (session sign-in only) | Reboot/Shut down a cluster node from a "Power" dropdown on the node page header, behind a confirmation dialog showing the running guests on that node and requiring the node name to be typed to confirm. Needs a signed-in session and `Sys.PowerMgmt` on the node -- the shared service token stays read-only here too. |
-| Any other write action (config edit/...)           | Not implemented | The proxy rejects non-`GET` requests to `/api/pve/*` outright; only guest power actions, rename/notes, snapshots, migrate and node power (above) have dedicated write routes so far.         |
+| Storage upload / download from URL / delete        | Works (session sign-in only) | Upload an ISO image, container template, or import file from your browser, or have Proxmox itself download one from a URL, onto a storage that supports it -- from the storage page header. Delete a volume from its own row menu in the content browser. Needs a signed-in session and `Datastore.AllocateTemplate` on the storage for upload/download-from-URL, and `Datastore.Allocate` (or `Datastore.AllocateSpace` plus `VM.Backup` on that guest, for deleting your own backup) for delete -- the shared service token stays read-only here too. Proxmox has no API to download a stored volume back to your browser, so "download" here is only Proxmox's own fetch-by-URL. |
+| Any other write action (config edit/...)           | Not implemented | The proxy rejects non-`GET` requests to `/api/pve/*` outright; only guest power actions, rename/notes, snapshots, migrate, node power and storage upload/download-from-URL/delete (above) have dedicated write routes so far. |
 
 ### Console thumbnails: host agent (optional)
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Storage browser: upload an ISO image, container template, or import file from your browser
+  onto a storage, have Proxmox itself download one from a URL, and delete a volume from its own
+  row menu. Uploads stream straight through to PVE with a progress bar; needs a signed-in session
+  and `Datastore.AllocateTemplate` (upload/download-from-URL) or `Datastore.Allocate` /
+  `Datastore.AllocateSpace` + `VM.Backup` (delete) on the storage, same allow-listed-write-route
+  pattern as power actions, rename/notes, snapshots, migrate and node power.
+
 ## [0.3.0] - 2026-09-25
 
 ### Added

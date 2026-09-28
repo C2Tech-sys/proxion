@@ -1,6 +1,6 @@
 import type { RequestInit } from 'undici';
 import type { EndpointsTable } from './generated/endpoints.js';
-import { PveHttp, type PveParams } from './http.js';
+import { PveHttp, type PveParams, type PveStreamOptions } from './http.js';
 
 /**
  * True iff every property of `T` is optional, i.e. `{}` is a valid `T` (so the
@@ -70,5 +70,17 @@ export class PveClient {
   /** Untyped escape hatch: any method, any path, any params. */
   raw(method: string, path: string, params?: PveParams, init?: RequestInit): Promise<unknown> {
     return this.http.request(method, path, params ?? {}, init);
+  }
+
+  /**
+   * Streams a request body straight to PVE without buffering it in this process -- see
+   * `PveHttp.stream()`. Untyped (`path`/`params`/return are not checked against
+   * `EndpointsTable`, unlike `get`/`post`/`put`/`delete` above): PVE's upload/download-url
+   * endpoints aren't meaningfully described by the generated per-field param table anyway, since
+   * everything but the path params travels inside `opts.body` as an already-framed request body
+   * (e.g. a browser's multipart upload, forwarded byte-for-byte).
+   */
+  uploadStream(path: string, params: PveParams, opts: PveStreamOptions): Promise<unknown> {
+    return this.http.stream('POST', path, params, opts);
   }
 }

@@ -73,6 +73,34 @@ export interface FakePve {
   nodeStatusCalls: Array<{ node: string; body: Record<string, string> }>;
   /** Makes the next matching `POST .../nodes/{node}/status` call fail with the given status/message. */
   setNodeStatusError: (node: string, status: number, message: string) => void;
+  /** Sets exactly which privileges `/access/permissions?path=/storage/{storage}` reports --
+   * additive next to `setVmPermissions`/`setNodePermissions`, same shape/rationale, used by
+   * `storageActions.test.ts` (T32). No defaults: absent a call, a storage grants nothing. */
+  setStoragePermissions: (storage: string, privs: Record<string, boolean>) => void;
+  /** Every `POST .../storage/{storage}/upload` request PVE has received, in order: the resolved
+   * path, the exact `content-type` header seen (boundary intact), the query string PVE itself saw
+   * (`content`/`filename`, if this fake ever needs to assert them), and the exact byte count of
+   * the body PVE received -- read directly off the raw request stream, never buffered further, so
+   * a large-body test doesn't defeat its own point by holding the whole body in memory a second
+   * time here. */
+  uploadCalls: Array<{ path: string; contentType: string | undefined; query: Record<string, string>; bytes: number }>;
+  /** Makes the next `POST .../storage/{storage}/upload` call fail with the given status/message
+   * (checked before the body is even read, mirroring a real early PVE-side rejection e.g. a bad
+   * file extension). */
+  setUploadError: (storage: string, status: number, message: string) => void;
+  /** Every `POST .../storage/{storage}/download-url` request PVE has received, in order (path +
+   * parsed form body, PVE's own field names e.g. `checksum-algorithm`/`verify-certificates`). */
+  downloadUrlCalls: Array<{ path: string; body: Record<string, string> }>;
+  setDownloadUrlError: (storage: string, status: number, message: string) => void;
+  /** Every `GET .../query-url-metadata` request PVE has received, in order (full path incl. query
+   * string). */
+  queryUrlMetadataCalls: Array<{ path: string }>;
+  /** Sets the `GET /nodes/{node}/query-url-metadata` response for the next call(s). */
+  setQueryUrlMetadata: (data: { filename?: string; size?: number; mimetype?: string }) => void;
+  /** Every `DELETE .../storage/{storage}/content/{volume}` request PVE has received, in order
+   * (storage + decoded volume id). */
+  deleteContentCalls: Array<{ storage: string; volume: string }>;
+  setDeleteContentError: (storage: string, volume: string, status: number, message: string) => void;
   close: () => Promise<void>;
 }
 
@@ -190,14 +218,17 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   const consolePermissionByVmid = new Map<number, boolean>();
   const extraPermsByVmid = new Map<number, Record<string, boolean>>();
   const extraPermsByNode = new Map<string, Record<string, boolean>>();
+  const extraPermsByStorage = new Map<string, Record<string, boolean>>();
   const statusByGuest = new Map<string, 'running' | 'stopped'>();
 
   app.get('/api2/json/access/permissions', async (req, reply) => {
     const query = req.query as { path?: string };
     const vmMatch = query.path?.match(/^\/vms\/(\d+)$/);
     const nodeMatch = query.path?.match(/^\/nodes\/(.+)$/);
+    const storageMatch = query.path?.match(/^\/storage\/(.+)$/);
     const vmid = vmMatch ? Number(vmMatch[1]) : undefined;
     const node = nodeMatch ? nodeMatch[1] : undefined;
+    const storage = storageMatch ? storageMatch[1] : undefined;
     const allowed = vmid === undefined ? true : (consolePermissionByVmid.get(vmid) ?? true);
     // Real PVE nests the result under the requested path, e.g.
     // `{ "/vms/113": { "VM.Console": 1, ... } }` -- not a flat map.
@@ -211,6 +242,19 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
         if (grant) base[priv] = 1;
         else delete base[priv];
       }
+    }
+    // Storage-scoped path (`/storage/{storage}`): same "no defaults" convention as the node path
+    // below -- absent a `setStoragePermissions` call, a storage grants nothing.
+    if (storage !== undefined) {
+      const storageOverrides = extraPermsByStorage.get(storage);
+      const storageBase: Record<string, number> = {};
+      if (storageOverrides) {
+        for (const [priv, grant] of Object.entries(storageOverrides)) {
+          if (grant) storageBase[priv] = 1;
+        }
+      }
+      reply.send({ data: { [path]: storageBase } });
+      return;
     }
     // Node-scoped path (`/nodes/{node}`): no defaults at all -- absent a `setNodePermissions`
     // call, a node grants nothing (unlike the vm path's `VM.Console`/`VM.Audit` defaults, which
@@ -403,6 +447,78 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     reply.send({ data: null });
   });
 
+  // Storage upload (`POST /nodes/{node}/storage/{storage}/upload`), used by
+  // `src/actions/storageRoutes.ts` (T32). Fastify has no multipart parser by default either, so
+  // this fake registers the same "hand over the raw stream" content-type parser production does,
+  // then reads the body only to count its bytes (never buffering it) -- proving the server forwarded
+  // it byte-exact without this fake needing to actually parse multipart itself.
+  app.addContentTypeParser('multipart/form-data', (_req, payload, done) => {
+    done(null, payload);
+  });
+
+  const uploadCalls: Array<{ path: string; contentType: string | undefined; query: Record<string, string>; bytes: number }> = [];
+  const uploadErrors = new Map<string, { status: number; message: string }>();
+
+  app.post('/api2/json/nodes/:node/storage/:storage/upload', async (req, reply) => {
+    const { storage } = req.params as { node: string; storage: string };
+    const failure = uploadErrors.get(storage);
+    if (failure) {
+      reply.code(failure.status).send({ data: null, message: failure.message });
+      return;
+    }
+    let bytes = 0;
+    for await (const chunk of req.body as AsyncIterable<Buffer>) {
+      bytes += (chunk as Buffer).length;
+    }
+    uploadCalls.push({
+      path: req.url,
+      contentType: req.headers['content-type'],
+      query: (req.query ?? {}) as Record<string, string>,
+      bytes,
+    });
+    reply.send({ data: 'UPID:fakepve:00000001:00000000:00000000:imgcopy:0:root@pam:' });
+  });
+
+  // Storage download-url (`POST /nodes/{node}/storage/{storage}/download-url`).
+  const downloadUrlCalls: Array<{ path: string; body: Record<string, string> }> = [];
+  const downloadUrlErrors = new Map<string, { status: number; message: string }>();
+
+  app.post('/api2/json/nodes/:node/storage/:storage/download-url', async (req, reply) => {
+    const { storage } = req.params as { node: string; storage: string };
+    downloadUrlCalls.push({ path: req.url, body: (req.body ?? {}) as Record<string, string> });
+    const failure = downloadUrlErrors.get(storage);
+    if (failure) {
+      reply.code(failure.status).send({ data: null, message: failure.message });
+      return;
+    }
+    reply.send({ data: 'UPID:fakepve:00000001:00000000:00000000:download:0:root@pam:' });
+  });
+
+  // Query URL metadata (`GET /nodes/{node}/query-url-metadata`) -- node-scoped, no storage.
+  const queryUrlMetadataCalls: Array<{ path: string }> = [];
+  let queryUrlMetadataResult: { filename?: string; size?: number; mimetype?: string } = {};
+
+  app.get('/api2/json/nodes/:node/query-url-metadata', async (req, reply) => {
+    queryUrlMetadataCalls.push({ path: req.url });
+    reply.send({ data: queryUrlMetadataResult });
+  });
+
+  // Storage content delete (`DELETE /nodes/{node}/storage/{storage}/content/{volume}`).
+  const deleteContentCalls: Array<{ storage: string; volume: string }> = [];
+  const deleteContentErrors = new Map<string, { status: number; message: string }>();
+
+  app.delete('/api2/json/nodes/:node/storage/:storage/content/:volume', async (req, reply) => {
+    const { storage, volume } = req.params as { node: string; storage: string; volume: string };
+    const decodedVolume = decodeURIComponent(volume);
+    deleteContentCalls.push({ storage, volume: decodedVolume });
+    const failure = deleteContentErrors.get(`${storage}:${decodedVolume}`);
+    if (failure) {
+      reply.code(failure.status).send({ data: null, message: failure.message });
+      return;
+    }
+    reply.send({ data: 'UPID:fakepve:00000001:00000000:00000000:imgdel:0:root@pam:' });
+  });
+
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
   return {
@@ -484,6 +600,33 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     },
     setNodeStatusError: (node: string, status: number, message: string) => {
       nodeStatusErrors.set(node, { status, message });
+    },
+    setStoragePermissions: (storage: string, privs: Record<string, boolean>) => {
+      extraPermsByStorage.set(storage, privs);
+    },
+    get uploadCalls() {
+      return uploadCalls;
+    },
+    setUploadError: (storage: string, status: number, message: string) => {
+      uploadErrors.set(storage, { status, message });
+    },
+    get downloadUrlCalls() {
+      return downloadUrlCalls;
+    },
+    setDownloadUrlError: (storage: string, status: number, message: string) => {
+      downloadUrlErrors.set(storage, { status, message });
+    },
+    get queryUrlMetadataCalls() {
+      return queryUrlMetadataCalls;
+    },
+    setQueryUrlMetadata: (data: { filename?: string; size?: number; mimetype?: string }) => {
+      queryUrlMetadataResult = data;
+    },
+    get deleteContentCalls() {
+      return deleteContentCalls;
+    },
+    setDeleteContentError: (storage: string, volume: string, status: number, message: string) => {
+      deleteContentErrors.set(`${storage}:${volume}`, { status, message });
     },
     close: () => app.close(),
   };

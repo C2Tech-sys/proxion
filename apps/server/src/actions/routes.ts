@@ -5,6 +5,7 @@ import { resolveIdentity } from '../pve/identity.js';
 import { registerSnapshotRoutes } from './snapshotRoutes.js';
 import { registerMigrateRoutes } from './migrateRoutes.js';
 import { registerNodeRoutes } from './nodeRoutes.js';
+import { registerStorageRoutes } from './storageRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -395,4 +396,8 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
 
   // Node power actions (reboot/shutdown) (`nodeRoutes.ts`) share the same bucket, same rationale.
   registerNodeRoutes(app, guestActionsRateLimit);
+
+  // Storage upload / download-from-URL / delete (`storageRoutes.ts`) share the same bucket, same
+  // rationale.
+  registerStorageRoutes(app, guestActionsRateLimit);
 }

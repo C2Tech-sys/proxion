@@ -99,6 +99,14 @@ const envSchema = z
     // this to `/app/data`. Created on startup (see `prefs/store.ts`'s `PrefsStore.create`),
     // which also fails startup with a clear message if the path exists but isn't writable.
     PROXION_DATA_DIR: z.string().min(1).default('./data'),
+
+    // Largest request body the storage-upload route (T32) will accept, checked against the
+    // browser's own `content-length` before this server ever streams a byte to PVE (see
+    // `actions/storageRoutes.ts`). Default (32 GiB) comfortably covers a full DVD/BD-sized ISO;
+    // raise it for larger install media, or lower it to bound worst-case upload duration/bandwidth
+    // on a constrained link. Uploads are always streamed through, never buffered, so this bounds
+    // request duration/bandwidth, not this process's memory.
+    PROXION_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(32 * 1024 * 1024 * 1024),
   })
   .superRefine((config, ctx) => {
     const hasId = Boolean(config.PVE_TOKEN_ID);

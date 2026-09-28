@@ -1,5 +1,12 @@
 export { PveClient } from './client.js';
-export { PveHttp, type Credentials, type PveHttpOptions, type PveParams } from './http.js';
+export {
+  PveHttp,
+  type Credentials,
+  type PveHttpOptions,
+  type PveParams,
+  type PveStreamBody,
+  type PveStreamOptions,
+} from './http.js';
 export { PveApiError, PveTlsError } from './errors.js';
 export {
   normalizeFingerprint,
