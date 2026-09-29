@@ -5,6 +5,7 @@ import { RouterProvider, createMemoryHistory, createRouter } from '@tanstack/rea
 
 import { routeTree } from '@/routeTree.gen';
 import { createQueryClient } from '@/api/queryClient';
+import { APP_VERSION } from '@/version';
 
 /** Generous on purpose -- see tab-range-preservation.render.test.tsx for why. */
 const FIND_TIMEOUT_MS = 5000;
@@ -70,5 +71,37 @@ describe('TopBar user menu "Preferences" item', () => {
     expect(
       await screen.findByRole('heading', { name: 'Preferences' }, { timeout: FIND_TIMEOUT_MS }),
     ).toBeInTheDocument();
+  });
+
+  // T38: the menu's non-interactive footer line names the running build.
+  it('shows "Proxion v<bundle version>" as a non-interactive footer line', async () => {
+    const queryClient = createQueryClient();
+    const router = createRouter({
+      routeTree,
+      history: createMemoryHistory({ initialEntries: ['/'] }),
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    const userMenuButton = await screen.findByRole(
+      'button',
+      { name: 'User menu' },
+      { timeout: FIND_TIMEOUT_MS },
+    );
+    fireEvent.pointerDown(userMenuButton, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.pointerUp(userMenuButton, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(userMenuButton);
+
+    const versionLine = await screen.findByText(
+      `Proxion v${APP_VERSION}`,
+      {},
+      { timeout: FIND_TIMEOUT_MS },
+    );
+    // Not a menu item -- clicking it must not be a selectable action.
+    expect(screen.queryByRole('menuitem', { name: versionLine.textContent ?? '' })).toBeNull();
   });
 });

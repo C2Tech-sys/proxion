@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The running build's version now shows in the user menu (and on the login
+  page), and an already-open tab that falls behind a newer server build
+  shows an update banner offering a reload.
+
 ## [0.4.3] - 2026-09-29
 
 ### Fixed

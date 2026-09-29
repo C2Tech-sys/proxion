@@ -32,6 +32,27 @@ export function useAuthMe() {
   });
 }
 
+/**
+ * The running server's own build version (`GET /api/health`), polled so an already-open tab
+ * notices when the server it's talking to has been redeployed to a newer build -- see
+ * `UpdateAvailableBanner` and the TopBar user menu's version line (T38). `retry: false` and a 60s
+ * poll: a single failed check (e.g. a deploy's brief restart window) shouldn't flash a false
+ * "update available", it should just wait for the next tick. `staleTime` well under the poll
+ * interval keeps a focus refetch (react-query's default, intentionally left on) from being
+ * suppressed as "still fresh" -- switching back to a tab that missed the last poll notices a
+ * deploy without waiting out the full interval. Fixture mode's `getHealth()` always echoes the
+ * bundle's own version (see fixtures.ts), so this never disagrees with `__APP_VERSION__` there.
+ */
+export function useServerVersion() {
+  return useQuery({
+    queryKey: ['server-health'],
+    queryFn: () => api.getHealth(),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: false,
+  });
+}
+
 /** Per-user proxy poll interval, used only once `/api/state` has confirmed the shared poller is unavailable (no service token configured). */
 const FALLBACK_POLL_MS = 5000;
 
