@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Storage uploads are now tracked app-wide instead of in the upload dialog's own state: closing
+  the dialog ("Continue in background"), navigating away, or a shell remount no longer loses
+  track of an in-progress upload -- a compact indicator next to the storage page's Upload button
+  keeps showing its progress, with Cancel and Dismiss, until it finishes.
+
 ## [0.4.3] - 2026-09-29
 
 ### Fixed

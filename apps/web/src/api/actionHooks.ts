@@ -15,7 +15,6 @@ import {
   migrateGuest,
   getMigratePrecheck,
   nodeAction,
-  uploadToStorage,
   downloadUrlToStorage,
   deleteStorageContent,
   GuestActionError,
@@ -28,7 +27,6 @@ import {
   type SnapshotActionResult,
   type MigrateGuestBody,
   type NodeActionCommand,
-  type StorageUploadContent,
   type DownloadUrlToStorageBody,
 } from '@/api/actions';
 import type { GuestType, PveTask } from '@/api/types';
@@ -427,50 +425,12 @@ export function useStoragePermissions(storage: string) {
   });
 }
 
-export interface StorageUploadVars {
-  node: string;
-  storage: string;
-  file: File;
-  content: StorageUploadContent;
-  filename: string;
-  onProgress?: (sent: number, total: number) => void;
-  signal?: AbortSignal;
-}
-
-/**
- * Requests one storage upload (`src/api/actions.ts`). On success: a "Upload started: <filename>"
- * toast right away, then waits for the task to finish (`watchTaskCompletion` -- a no-op in fixture
- * mode, where `uploadToStorage`'s own simulated progress ticks have already completed by the time
- * this runs, same convention `useMigrateGuest` uses) before invalidating this storage's own
- * `['storage-content', ...]` query and toasting "<filename> is ready". On error: a toast with the
- * server's message.
- */
-export function useStorageUpload() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (vars: StorageUploadVars) =>
-      uploadToStorage(vars.node, vars.storage, {
-        file: vars.file,
-        content: vars.content,
-        filename: vars.filename,
-        ...(vars.onProgress !== undefined ? { onProgress: vars.onProgress } : {}),
-        ...(vars.signal !== undefined ? { signal: vars.signal } : {}),
-      }),
-    onSuccess: (result, vars) => {
-      toast.success(`Upload started: ${vars.filename}`);
-      const finish = () => {
-        void queryClient.invalidateQueries({ queryKey: ['storage-content', vars.node, vars.storage] });
-        toast.success(`${vars.filename} is ready`);
-      };
-      if (USE_FIXTURES) finish();
-      else watchTaskCompletion(queryClient, result.upid, finish);
-    },
-    onError: (error: unknown, vars) => {
-      toast.error(error instanceof GuestActionError ? error.message : `${vars.filename} could not be uploaded.`);
-    },
-  });
-}
+// Storage uploads (T32) moved to `useUploadStore` (`src/store/uploadStore.ts`, T39): tracked
+// app-wide instead of in a `useMutation`/dialog-local `useState`, so an in-progress upload survives
+// the dialog that started it unmounting or closing. `useStorageUpload` used to live here as a thin
+// `useMutation` wrapper around `uploadToStorage`; nothing outside `UploadDialog` ever called it, and
+// `UploadDialog` now calls `useUploadStore.getState().start()` directly, so it was removed rather
+// than kept as a second, now-redundant toast/invalidate code path.
 
 export interface StorageDownloadUrlVars {
   node: string;
