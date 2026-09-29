@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-29
+
 ### Fixed
 
 - Storage upload never reached Proxmox's storage: pveproxy expects the file part to be named
@@ -293,7 +295,8 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/C2Tech-sys/proxion/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/C2Tech-sys/proxion/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/C2Tech-sys/proxion/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/C2Tech-sys/proxion/compare/v0.2.2...v0.3.0
