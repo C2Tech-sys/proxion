@@ -26,11 +26,12 @@ import type {
 } from '@/api/types';
 import type { MigratePrecheck } from '@/api/actions';
 import { computeAlerts } from '@proxion/core';
-import type { ApiClient, NodeTaskParams, ThumbnailCacheEntry } from '@/api/client-types';
+import type { ApiClient, HealthResponse, NodeTaskParams, ThumbnailCacheEntry } from '@/api/client-types';
 import { NotFoundError } from '@/api/errors';
 import { RRD_STEP_SECONDS, rebaseRrdTimestamps } from '@/lib/rrd';
 import { taskStatusState } from '@/lib/status';
 import { generateThumbnailPlaceholder } from '@/fixtures/thumbnails';
+import { APP_VERSION } from '@/version';
 
 const resources = resourcesFixture as ClusterResource[];
 const tasks = tasksFixture as PveTask[];
@@ -265,6 +266,12 @@ export const fixtureClient: ApiClient = {
   },
   async logout() {
     throw new Error('BACKEND_NOT_CONNECTED');
+  },
+  // The demo has no real backend to fall behind -- always reports the bundle's OWN version, so
+  // `useServerVersion()`'s comparison never disagrees with `__APP_VERSION__` and the
+  // `UpdateAvailableBanner` never shows in fixture mode (see T38).
+  async getHealth(): Promise<HealthResponse> {
+    return delay({ ok: true, name: 'proxion', version: APP_VERSION });
   },
   console: {
     async vnc() {

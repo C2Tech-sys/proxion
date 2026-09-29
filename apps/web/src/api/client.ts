@@ -17,6 +17,7 @@ import type {
   AuthIdentity,
   ConsoleTermTicket,
   ConsoleVncTicket,
+  HealthResponse,
   NodeTaskParams,
   ThumbnailStatus,
 } from '@/api/client-types';
@@ -198,6 +199,9 @@ export const httpClient: ApiClient = {
   },
   async logout() {
     await request('/api/auth/logout', { method: 'POST' });
+  },
+  getHealth() {
+    return request<HealthResponse>('/api/health');
   },
   console: {
     vnc(node, type, vmid) {

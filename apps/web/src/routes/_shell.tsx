@@ -4,6 +4,7 @@ import type { ImperativePanelHandle } from 'react-resizable-panels';
 
 import { TopBar } from '@/components/TopBar';
 import { DemoBanner } from '@/components/DemoBanner';
+import { UpdateAvailableBanner } from '@/components/UpdateAvailableBanner';
 import { InventoryTree } from '@/components/InventoryTree';
 import { TasksDrawer } from '@/components/TasksDrawer';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
@@ -189,6 +190,7 @@ function ShellLayout() {
     <div className="flex h-svh flex-col" data-density={prefs?.density ?? 'comfortable'}>
       <TopBar />
       <DemoBanner />
+      <UpdateAvailableBanner />
       <div className="min-h-0 flex-1">
         <ResizablePanelGroup direction="horizontal">
           <ResizablePanel

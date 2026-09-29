@@ -118,6 +118,9 @@ pnpm install && pnpm demo
   proxy in front of it must allow large request bodies (Caddy does by
   default); see `PROXION_UPLOAD_MAX_BYTES` below to cap the largest upload
   this server will forward to PVE.
+- After a deploy, a tab left open from before the update shows a banner
+  offering a reload once it notices the server is running a newer build
+  than the tab itself.
 
 ## Feature status
 

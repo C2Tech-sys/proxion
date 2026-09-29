@@ -59,6 +59,18 @@ export interface AuthIdentity {
   mode: 'session' | 'token';
 }
 
+/**
+ * `GET /api/health`'s 200 shape (our own endpoint -- no PVE envelope; see
+ * `apps/server/src/routes/health.ts`/`version.ts`). `version` is bumped in lockstep with the web
+ * bundle's own `__APP_VERSION__` on every release (see `apps/web/vite.config.ts`), so an open
+ * tab can compare the two to notice it's running a stale bundle (T38's `UpdateAvailableBanner`).
+ */
+export interface HealthResponse {
+  ok: boolean;
+  name: string;
+  version: string;
+}
+
 /** Shared shape implemented by both the fixture client and the real HTTP client. */
 export interface ApiClient {
   getClusterResources(): Promise<ClusterResource[]>;
@@ -105,6 +117,10 @@ export interface ApiClient {
   getAuthMe(): Promise<AuthIdentity | null>;
   /** POST /api/auth/logout -- ends the current session. A no-op identity (e.g. token mode) never calls this; the UI disables Logout there instead. */
   logout(): Promise<void>;
+  /** GET /api/health -- the running server's own build version (see `HealthResponse`), used to
+   *  detect a stale open tab (T38). Fixture mode reports the bundle's own version so the demo
+   *  never shows the update banner. */
+  getHealth(): Promise<HealthResponse>;
   console: {
     /** Requests a one-shot VNC ticket (websocket path + single-use password) for a guest. */
     vnc(node: string, type: GuestType, vmid: number): Promise<ConsoleVncTicket>;

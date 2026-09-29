@@ -23,13 +23,20 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Logo } from '@/components/Logo';
-import { useClusterResources, useTasks, useAuthMe, AUTH_ME_QUERY_KEY } from '@/api/hooks';
+import {
+  useClusterResources,
+  useTasks,
+  useAuthMe,
+  useServerVersion,
+  AUTH_ME_QUERY_KEY,
+} from '@/api/hooks';
 import { useThemePreferenceSync } from '@/api/prefsHooks';
 import { api } from '@/api/client';
 import { errorMessage } from '@/api/errors';
 import { useUiStore } from '@/store/ui';
 import { cn } from '@/lib/utils';
 import { APP_NAME, SUPPORT_URL } from '@/lib/app';
+import { APP_VERSION } from '@/version';
 
 function useClusterHealth() {
   const { data: resources } = useClusterResources();
@@ -61,7 +68,15 @@ export function TopBar() {
   const location = useLocation();
   const onTasksRoute = location.pathname === '/tasks';
   const { data: auth } = useAuthMe();
+  const { data: serverHealth } = useServerVersion();
   const queryClient = useQueryClient();
+  // Only appended once the server has actually answered with a version -- an unknown server
+  // version (still loading, or the health check failed) says nothing about staleness, so the
+  // footer line sticks to the bundle's own version alone until there's something to compare.
+  const versionLine =
+    serverHealth?.version && serverHealth.version !== APP_VERSION
+      ? `Proxion v${APP_VERSION} · server v${serverHealth.version}`
+      : `Proxion v${APP_VERSION}`;
 
   // Toggle, not a plain link: on `/tasks` it acts like a "back" button (to wherever the user
   // came from in-app, or `/` if there is nowhere to go back to); everywhere else it's forward
@@ -215,6 +230,10 @@ export function TopBar() {
           >
             Logout
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {/* Non-interactive footer (T38): `DropdownMenuLabel` already renders as muted text and
+              takes no `onSelect`, so it can't be activated like the items above it. */}
+          <DropdownMenuLabel className="font-numeric font-normal">{versionLine}</DropdownMenuLabel>
         </DropdownMenuContent>
       </DropdownMenu>
     </header>

@@ -9,6 +9,7 @@ import { USE_FIXTURES, api } from '@/api/client';
 import { AUTH_ME_QUERY_KEY } from '@/api/hooks';
 import { Logo } from '@/components/Logo';
 import { APP_NAME } from '@/lib/app';
+import { APP_VERSION } from '@/version';
 
 export const Route = createFileRoute('/login')({
   // The route the visitor actually asked for, carried here by the `_shell` auth gate
@@ -106,6 +107,10 @@ function LoginPage() {
         <Button type="submit" disabled={submitting}>
           {submitting ? 'Signing in…' : 'Sign in'}
         </Button>
+
+        <p className="text-center font-numeric text-xs text-muted-foreground">
+          Proxion v{APP_VERSION}
+        </p>
       </form>
     </main>
   );
