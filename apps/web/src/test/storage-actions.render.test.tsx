@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 
 import { StorageActions } from '@/components/storage/StorageActions';
@@ -7,6 +7,7 @@ import { StorageContentBrowser } from '@/components/storage/StorageContentBrowse
 import { Toaster } from '@/components/ui/sonner';
 import { createQueryClient } from '@/api/queryClient';
 import { DEFAULT_STORAGE_BROWSER_STATE } from '@/lib/storageList';
+import { __resetUploadStoreForTests } from '@/store/uploadStore';
 import type { AuthIdentity } from '@/api/client-types';
 import type { GuestPermissions } from '@/api/actionHooks';
 import type { StorageContentItem } from '@/api/types';
@@ -105,6 +106,13 @@ function renderBrowser(items: StorageContentItem[]) {
   );
 }
 
+// `useUploadStore` (T39) is a module-level singleton, not tied to any one test's `QueryClient` or
+// rendered tree -- without this, an upload tracked by one test would still be there (uploading, or
+// mid-auto-removal-timer) when the next test's `StorageActions` mounts and reads the same store.
+afterEach(() => {
+  __resetUploadStoreForTests();
+});
+
 function openRowMenu(name: string) {
   const trigger = screen.getByRole('button', { name: `Actions for ${name}` });
   fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
@@ -200,8 +208,11 @@ describe('UploadDialog', () => {
       ),
     );
 
-    // The progress bar reflects the mocked function's own `onProgress` call.
-    await waitFor(() => expect(screen.getByText(/50%/)).toBeInTheDocument());
+    // The progress bar reflects the mocked function's own `onProgress` call -- scoped to the
+    // dialog itself (`getByRole('dialog')`) since `UploadsIndicator` (T39), rendered alongside it
+    // in `StorageActions`, now shows this exact same upload's own "· 50%" text at the same time.
+    const dialog = screen.getByRole('dialog');
+    await waitFor(() => expect(within(dialog).getByText(/50%/)).toBeInTheDocument());
 
     resolveUpload?.({ upid: 'UPID:test:00000001::::imgcopy::root@pam:' });
     await waitFor(() => expect(screen.queryByText('Upload to local')).not.toBeInTheDocument());
@@ -263,6 +274,57 @@ describe('UploadDialog survives a background auth refetch (T36)', () => {
 
     expect(screen.getByText('Upload to local')).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Content type' })).toHaveTextContent('CT template');
+  });
+});
+
+describe('UploadsIndicator survives a StorageActions remount (T39)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('keeps showing an in-flight upload\'s filename/percent after StorageActions unmounts and remounts, and Cancel aborts it', async () => {
+    mockUseAuthMe.mockReturnValue(authData('session'));
+    mockUseStoragePermissions.mockReturnValue(permissionsData(true));
+
+    let capturedSignal: AbortSignal | undefined;
+    mockUploadToStorage.mockImplementation(
+      (_node: string, _storage: string, options: { onProgress?: (s: number, t: number) => void; signal?: AbortSignal }) => {
+        capturedSignal = options.signal;
+        options.onProgress?.(42, 100);
+        return new Promise(() => {}); // stays pending for the whole test -- never settles
+      },
+    );
+
+    const queryClient = createQueryClient();
+    const tree = (
+      <QueryClientProvider client={queryClient}>
+        <StorageActions node="pve1" storage="local" contentTypes={['iso', 'vztmpl', 'backup']} />
+        <Toaster />
+      </QueryClientProvider>
+    );
+    const { unmount } = render(tree);
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Upload$/ }));
+    const fileInput = screen.getByLabelText('File') as HTMLInputElement;
+    const file = new File(['x'.repeat(100)], 'debian-12.iso', { type: 'application/octet-stream' });
+    selectFile(fileInput, file);
+    await waitFor(() => expect((screen.getByLabelText('Filename') as HTMLInputElement).value).toBe('debian-12.iso'));
+    fireEvent.click(screen.getByRole('button', { name: 'Upload' }));
+    await waitFor(() => expect(mockUploadToStorage).toHaveBeenCalled());
+
+    // The whole `StorageActions` tree unmounts (e.g. the T36 shell-remount bug this ticket exists
+    // for) -- the upload itself lives in `useUploadStore`, a module-level singleton untouched by
+    // this, so it must still be there, still `uploading`, once a fresh tree mounts in its place.
+    unmount();
+    render(tree);
+
+    expect(await screen.findByText(/Uploading debian-12\.iso/)).toBeInTheDocument();
+    expect(screen.getByText(/42%/)).toBeInTheDocument();
+
+    // Named after the file (not just "Cancel") so two simultaneous uploads' Cancel buttons stay
+    // unambiguous to assistive tech and to this query alike.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel upload of debian-12.iso' }));
+    expect(capturedSignal?.aborted).toBe(true);
   });
 });
 

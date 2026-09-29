@@ -4,6 +4,7 @@ import { CloudDownload, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { UploadDialog } from '@/components/storage/UploadDialog';
+import { UploadsIndicator } from '@/components/storage/UploadsIndicator';
 import { DownloadUrlDialog } from '@/components/storage/DownloadUrlDialog';
 import { useAuthMe } from '@/api/hooks';
 import { useStoragePermissions } from '@/api/actionHooks';
@@ -72,7 +73,10 @@ function GatedButton({ enabled, disabledReason, onClick, icon, label }: GatedBut
  * storage supports none of `iso`/`vztmpl`/`import`; otherwise gated on a signed-in session and the
  * caller's own `Datastore.AllocateTemplate` on this storage (`useStoragePermissions`), same
  * disabled-button-with-tooltip pattern `NodePowerMenu` uses for its own node-scoped gate -- the
- * server enforces both independently either way.
+ * server enforces both independently either way. Also renders `UploadsIndicator` (T39), which
+ * shows any upload tracked in `useUploadStore` for this node/storage regardless of gating -- an
+ * upload already in flight keeps running (and stays visible) even if the caller's privileges
+ * change mid-upload.
  */
 export function StorageActions({ node, storage, contentTypes }: StorageActionsProps) {
   const auth = useAuthMe();
@@ -96,7 +100,7 @@ export function StorageActions({ node, storage, contentTypes }: StorageActionsPr
       : undefined;
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <GatedButton
         enabled={enabled}
         disabledReason={disabledReason}
@@ -111,6 +115,8 @@ export function StorageActions({ node, storage, contentTypes }: StorageActionsPr
         icon={<CloudDownload className="size-3.5" />}
         label="Download from URL"
       />
+
+      <UploadsIndicator node={node} storage={storage} />
 
       <UploadDialog
         node={node}

@@ -4,6 +4,7 @@ import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 
 import { createQueryClient } from '@/api/queryClient';
+import { initUploadStore } from '@/store/uploadStore';
 import { routeTree } from './routeTree.gen';
 import './index.css';
 
@@ -19,6 +20,9 @@ declare module '@tanstack/react-router' {
 }
 
 const queryClient = createQueryClient();
+// Lets `useUploadStore` (app-wide upload tracking, T39) invalidate `['storage-content', ...]` and
+// read the live `['tasks']` cache with the same client every other query/mutation in the app uses.
+initUploadStore(queryClient);
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
