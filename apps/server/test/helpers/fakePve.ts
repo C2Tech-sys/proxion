@@ -84,13 +84,17 @@ export interface FakePve {
    * large-body test doesn't defeat its own point by holding the whole body in memory a second time
    * here -- and the full incoming header map, lower-cased the same way Node's own HTTP parser
    * already lower-cases every header name, for asserting exactly which headers this server
-   * forwards (and which it never does -- see `storageActions.test.ts`'s header-forwarding test). */
+   * forwards (and which it never does -- see `storageActions.test.ts`'s header-forwarding test) --
+   * and `parts` (T35), the multipart field names (and, for the one part carrying a
+   * `filename="..."` attribute, that filename) this fake found in the body's first ~8 KiB, in
+   * wire order, same as real pveproxy's own multipart parser reads them. */
   uploadCalls: Array<{
     path: string;
     contentType: string | undefined;
     query: Record<string, string>;
     bytes: number;
     headers: Record<string, string | string[] | undefined>;
+    parts: Array<{ name: string; filename?: string }>;
   }>;
   /** Makes the next `POST .../storage/{storage}/upload` call fail with the given status/message
    * (checked before the body is even read, mirroring a real early PVE-side rejection e.g. a bad
@@ -472,8 +476,33 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     query: Record<string, string>;
     bytes: number;
     headers: Record<string, string | string[] | undefined>;
+    /** The multipart part names (and, for the one part carrying a `filename="..."` attribute,
+     * that filename) this fake found in the body's first ~8 KiB -- in wire order, same as real
+     * pveproxy itself parses them (T35). Present on every recorded call, including ones the
+     * strict field-name check below let through. */
+    parts: Array<{ name: string; filename?: string }>;
   }> = [];
   const uploadErrors = new Map<string, { status: number; message: string; errors?: Record<string, string> }>();
+
+  // How much of the body's head this fake ever inspects to find the multipart part names -- real
+  // field values (`content`, `checksum`, ...) are a few bytes each, so this comfortably covers
+  // every part's headers without ever holding a large upload's actual file bytes here.
+  const MULTIPART_HEAD_CAP = 8192;
+
+  /** Every `Content-Disposition: form-data; name="..."[; filename="..."]` header this fake sees in
+   * `head`, in order -- the same information real pveproxy's own multipart parser
+   * (`PVE::APIServer::AnyEvent::file_upload_multipart`) reads off each part in turn. */
+  function parseMultipartPartNames(head: Buffer): Array<{ name: string; filename?: string }> {
+    const text = head.toString('latin1');
+    const partRe = /Content-Disposition:\s*form-data;\s*name="([^"]*)"(?:;\s*filename="([^"]*)")?/g;
+    const parts: Array<{ name: string; filename?: string }> = [];
+    for (const match of text.matchAll(partRe)) {
+      const name = match[1]!;
+      const filename = match[2];
+      parts.push(filename !== undefined ? { name, filename } : { name });
+    }
+    return parts;
+  }
 
   app.post('/api2/json/nodes/:node/storage/:storage/upload', async (req, reply) => {
     const { storage } = req.params as { node: string; storage: string };
@@ -484,10 +513,29 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
         .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
       return;
     }
+
     let bytes = 0;
+    let head = Buffer.alloc(0);
     for await (const chunk of req.body as AsyncIterable<Buffer>) {
       bytes += (chunk as Buffer).length;
+      if (head.length < MULTIPART_HEAD_CAP) {
+        head = Buffer.concat([head, chunk as Buffer]).subarray(0, MULTIPART_HEAD_CAP);
+      }
     }
+
+    const parts = parseMultipartPartNames(head);
+    // Real pveproxy (`file_upload_multipart`) requires the part carrying a `filename="..."`
+    // attribute -- the actual file data -- to itself be named exactly `filename`, and dies
+    // immediately, before reading any file data, for any other name (T35: this is the bug that
+    // made every real upload 400 -- the browser sent that part named `file`). Mirrored here,
+    // verbatim including pveproxy's own message text, so a test can prove the fix without a real
+    // PVE host.
+    const filePart = parts.find((part) => part.filename !== undefined);
+    if (filePart && filePart.name !== 'filename') {
+      reply.code(400).send({ data: null, message: `wrong field name '${filePart.name}' for file upload, expected 'filename'` });
+      return;
+    }
+
     uploadCalls.push({
       path: req.url,
       contentType: req.headers['content-type'],
@@ -496,6 +544,7 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       // `{ ...req.headers }` -- a plain copy, since Fastify's own `req.headers` is a live object
       // reused across requests by the underlying Node HTTP server.
       headers: { ...req.headers },
+      parts,
     });
     reply.send({ data: 'UPID:fakepve:00000001:00000000:00000000:imgcopy:0:root@pam:' });
   });

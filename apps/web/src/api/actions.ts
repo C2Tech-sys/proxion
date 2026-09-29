@@ -412,9 +412,14 @@ export interface UploadToStorageOptions {
 /**
  * Uploads a file (ISO, container template, or import file) to a storage. Real mode: `POST
  * /api/actions/storage/:node/:storage/upload?content=&filename=`, the browser's own
- * `multipart/form-data` body (fields `content`, `filename`, `file`, in that order) streamed
- * through unchanged -- see the server README's "Storage browser" section. Built with
- * `XMLHttpRequest` rather than `fetch`: only `XMLHttpRequest` reports upload progress
+ * `multipart/form-data` body (fields `content`, then the file itself as `filename`, in that
+ * order) streamed through unchanged -- see the server README's "Storage browser" section. The
+ * file part's own form field is named `filename` (T35), not `file`: Proxmox's own multipart
+ * parser (`pveproxy`, `PVE::APIServer::AnyEvent::file_upload_multipart`) hard-codes that exact
+ * field name and takes the *target* filename from that part's `filename="..."` attribute,
+ * `die`ing immediately -- "wrong field name '...' for file upload, expected 'filename'" -- for
+ * any other name; there is no separate text field for it. Built with `XMLHttpRequest` rather
+ * than `fetch`: only `XMLHttpRequest` reports upload progress
  * (`xhr.upload.onprogress`), which the upload dialog's progress bar needs. Fixture mode: simulates
  * progress ticks over ~1.5s then adds the item to the in-memory fixture storage content
  * (`actionsFixture.ts` / `fixtures.ts`'s `addFixtureStorageContent`).
@@ -459,8 +464,10 @@ export function uploadToStorage(node: string, storage: string, options: UploadTo
 
         const formData = new FormData();
         formData.append('content', options.content);
-        formData.append('filename', options.filename);
-        formData.append('file', options.file, options.filename);
+        // T35: the file part's own field name must be `filename` (see this function's doc
+        // comment) -- not a separate text field plus a `file` part, which is what pveproxy
+        // rejects every real upload for, immediately, before this server's own logic ever runs.
+        formData.append('filename', options.file, options.filename);
 
         xhr = new XMLHttpRequest();
         // Explicit, not relied-on-as-default: a large upload over a slow link must never be cut
