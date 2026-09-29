@@ -1,4 +1,4 @@
-import type { Readable } from 'node:stream';
+import { PassThrough } from 'node:stream';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { PveApiError, type PveClient } from '@proxion/pve-api';
@@ -225,24 +225,81 @@ export function registerStorageRoutes(
           return;
         }
 
-        // Aborts the outgoing PVE request the moment the browser disconnects mid-upload
-        // (`req.raw`'s `aborted` event, or a `close` seen before the request finished arriving --
-        // `req.raw.complete` is only ever true once the whole body has been received) so a
-        // half-sent upload doesn't hang PVE-side, and so this route settles cleanly instead of
-        // leaving an unhandled rejection once the response can no longer be written.
-        const abortController = new AbortController();
-        const abort = () => abortController.abort();
-        req.raw.once('aborted', abort);
-        req.raw.once('close', () => {
-          if (!req.raw.complete) abort();
-        });
+        // T35 incident: this route used to pipe `req.raw` (Fastify's own inbound request stream)
+        // straight through as the *outgoing* PVE request body. When Proxmox replied early (e.g.
+        // an auth or size rejection) and stopped reading, undici's h1 client -- finishing up the
+        // now-settled request -- destroyed the stream it had been piping as that body. Since that
+        // stream was `req.raw` itself, destroying it fired `req.raw`'s own `close` event, which
+        // this route's old `close`-with-`!req.raw.complete` heuristic treated as "the browser gave
+        // up", aborting the very undici request that was about to hand back Proxmox's real
+        // status/message. Real-world result: a 2.9 GiB ISO upload Proxmox rejected came back as a
+        // 502 "Proxmox VE is unreachable" instead of Proxmox's own answer (see CHANGELOG).
+        //
+        // Fix: pipe `req.raw` into its own `PassThrough` and hand PVE *that* instead. undici can
+        // now destroy the PVE-bound stream however it likes when the exchange settles -- it is
+        // never `req.raw`, so `req.raw`'s own `close`/`aborted` events stay tied to what they
+        // actually mean: the browser's own connection to *this* server, not Proxmox's.
+        const upstreamBody = new PassThrough();
+        req.raw.pipe(upstreamBody);
         // A Node `Readable`'s `error` event throws as an uncaught exception (crashing the process)
-        // when nothing is listening for it -- a real risk here, since the request stream this
-        // route pipes to PVE (`req.raw`) can itself emit one for the same reason it emits
-        // `aborted`/`close` early (e.g. the underlying socket resets mid-upload). The abort wiring
-        // above already gets PVE-side cleanup from `aborted`/`close`; this is only the required
-        // listener that keeps that same event from taking the whole server down.
+        // when nothing is listening for it. Both `req.raw` (e.g. the browser's socket resetting
+        // mid-upload) and `upstreamBody` (destroyed by undici once the PVE request settles) can
+        // emit one; neither needs any reaction here -- the abort wiring below is what actually
+        // reacts to a genuine client disconnect.
         req.raw.on('error', () => {});
+        upstreamBody.on('error', () => {});
+
+        // Abort the outgoing PVE request only when the *client* has truly gone away -- never
+        // because Proxmox (or our own `upstreamBody`) settled first. `aborted` fires only on a
+        // real client disconnect. The underlying socket's own `close` can *also* mean the client
+        // vanished (e.g. a hard TCP reset, which never raises `aborted`) -- but it equally fires
+        // once we finish writing a perfectly normal reply, so it is only wired up while the
+        // upstream call is still unsettled, and removed (in `finally` below) the instant it
+        // settles, so replying can never itself be mistaken for a disconnect. Do NOT reintroduce
+        // the old `!req.raw.complete` check here: it treated "Proxmox stopped reading before the
+        // browser finished sending" -- a wholly ordinary early rejection -- as a client abort,
+        // which is the exact incident this fix exists for.
+        const abortController = new AbortController();
+        let upstreamSettled = false;
+        const abort = () => {
+          abortController.abort();
+          // Before this fix, `req.raw` *was* the stream undici destroyed once the outgoing PVE
+          // request settled -- which, incidentally, is also what told Fastify/Node this request's
+          // body was done with. Decoupling PVE's body onto `upstreamBody` means nothing else calls
+          // `req.raw.destroy()` on a genuine client disconnect any more (`.pipe()` only forwards a
+          // normal `end`, never a source `close`/error to the destination, and vice versa), so
+          // this route now does it explicitly, for both ends, rather than depending on that
+          // previously-incidental side effect.
+          req.raw.destroy();
+          upstreamBody.destroy();
+        };
+        req.raw.once('aborted', abort);
+        const onSocketClose = () => {
+          if (!upstreamSettled) abort();
+        };
+        req.raw.socket?.once('close', onSocketClose);
+        // The client may already be gone by the time we get here -- the permission check above is
+        // itself a round trip to PVE, so a slow one can lose the race against the browser giving
+        // up. `once('aborted'/'close', ...)` above only catches a disconnect that happens *after*
+        // this line; a disconnect that already happened fired (and consumed) those events before
+        // we ever attached anything, so it would otherwise never call `abort()` at all -- leaving
+        // `upstreamBody` a perfectly healthy, empty stream with nothing left to ever feed or end
+        // it, and `uploadStream()` hanging on it until undici's own (one-hour) body timeout. The
+        // state flags below reflect the same disconnect regardless of when we started listening,
+        // so this catches it either way.
+        if (req.raw.destroyed || req.raw.socket?.destroyed) {
+          abort();
+        }
+
+        app.log.debug(
+          {
+            route: 'storage-upload',
+            contentLength,
+            // Only the media type, never the multipart boundary (or anything else after it).
+            contentType: String(req.headers['content-type']).split(';', 1)[0]?.trim(),
+          },
+          'Storage upload starting upstream request',
+        );
 
         let upid: unknown;
         try {
@@ -251,19 +308,29 @@ export function registerStorageRoutes(
             { node: node.data, storage: storage.data },
             {
               headers: { 'content-type': String(req.headers['content-type']) },
-              // The route-scoped content-type parser registered above hands the raw incoming
-              // request stream straight through as `request.body` (no `parseAs`) -- this is
-              // Fastify's `req.raw` itself, a Node `Readable`, never buffered by this process.
-              body: req.body as unknown as Readable,
+              body: upstreamBody,
               contentLength,
               signal: abortController.signal,
             },
           );
         } catch (error) {
-          if (sendPveError(reply, error)) return;
-          app.log.warn({ err: error }, 'Storage upload request failed');
+          if (error instanceof PveApiError) {
+            app.log.warn(
+              { route: 'storage-upload', status: error.status, message: sanitizeMessage(formatPveErrorMessage(error)) },
+              'Storage upload rejected by Proxmox VE',
+            );
+            if (sendPveError(reply, error)) return;
+          }
+          const transportError = error as NodeJS.ErrnoException;
+          app.log.warn(
+            { route: 'storage-upload', code: transportError?.code, message: transportError?.message },
+            'Storage upload request failed (transport error)',
+          );
           reply.code(502).send({ error: 'pve-unreachable' });
           return;
+        } finally {
+          upstreamSettled = true;
+          req.raw.socket?.off('close', onSocketClose);
         }
 
         app.log.info(

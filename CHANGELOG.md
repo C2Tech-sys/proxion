@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Storage upload never reached Proxmox's storage: pveproxy expects the file part to be named
+  `filename`; the browser sent it as `file`. Fixed, with a strict fake-PVE test.
+- Storage upload: an early reply from Proxmox (for example an authentication or size error) was
+  reported as "Proxmox VE is unreachable" because the route aborted its own request when Proxmox
+  stopped reading; the real status and message are now returned.
+
 ## [0.4.1] - 2026-09-28
 
 ### Fixed

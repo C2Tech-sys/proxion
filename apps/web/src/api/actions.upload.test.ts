@@ -82,6 +82,24 @@ describe('uploadToStorage (real XHR wiring)', () => {
     await expect(promise).resolves.toEqual({ upid: 'UPID:test:1::::imgcopy::root@pam:' });
   });
 
+  it('sends the file as a `filename` form field (not `file`, and no separate text `filename` field) -- pveproxy\'s own multipart parser requires exactly this field name (T35)', async () => {
+    const file = new File(['x'.repeat(1024)], 'debian.iso', { type: 'application/octet-stream' });
+
+    void uploadToStorage('pve1', 'local', { content: 'iso', filename: 'debian.iso', file });
+
+    await vi.waitFor(() => expect(FakeXhr.instances).toHaveLength(1));
+    const sent = FakeXhr.instances[0]!.sentBody as FormData;
+    expect(sent).toBeInstanceOf(FormData);
+
+    const fieldNames = Array.from(sent.keys());
+    expect(fieldNames).toEqual(['content', 'filename']);
+    expect(sent.get('content')).toBe('iso');
+
+    const filePart = sent.get('filename');
+    expect(filePart).toBeInstanceOf(File);
+    expect((filePart as File).name).toBe('debian.iso');
+  });
+
   it('a File whose bytes cannot be read fails immediately without ever opening an XHR', async () => {
     // A duck-typed stand-in for `File` whose `slice().arrayBuffer()` rejects -- simulating a
     // cloud-sync placeholder that was never fully downloaded, or a file that changed/disappeared

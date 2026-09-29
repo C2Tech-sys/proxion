@@ -50,9 +50,29 @@ describe('storage action routes', () => {
 
   const BOUNDARY = '----storageActionsTestBoundary';
 
-  /** Builds a real multipart/form-data body: `content`, `filename`, then the `file` part, in that
-   * order -- same field order the web client builds (`api/actions.ts`'s `uploadToStorage`). */
+  /** Builds a real multipart/form-data body: `content`, then the file itself as a part named
+   * `filename` (T35) -- same field order/naming the web client builds (`api/actions.ts`'s
+   * `uploadToStorage`), which is itself dictated by what real pveproxy's own multipart parser
+   * (`PVE::APIServer::AnyEvent::file_upload_multipart`) requires: the file part's own field name
+   * must be `filename`, with the target filename carried in that part's `filename="..."`
+   * attribute -- there is no separate text field for it. */
   function buildMultipartBody(fields: { content: string; filename: string }, fileBytes: Buffer): Buffer {
+    const CRLF = '\r\n';
+    return Buffer.concat([
+      Buffer.from(`--${BOUNDARY}${CRLF}Content-Disposition: form-data; name="content"${CRLF}${CRLF}${fields.content}${CRLF}`),
+      Buffer.from(
+        `--${BOUNDARY}${CRLF}Content-Disposition: form-data; name="filename"; filename="${fields.filename}"${CRLF}Content-Type: application/octet-stream${CRLF}${CRLF}`,
+      ),
+      fileBytes,
+      Buffer.from(`${CRLF}--${BOUNDARY}--${CRLF}`),
+    ]);
+  }
+
+  /** The T35 bug, reproduced byte-for-byte: `content`, a separate text `filename` field, then the
+   * file data as a part named `file` -- what this server (and the real web client, before T35)
+   * used to send. Real pveproxy refuses this immediately (see `fakePve.ts`'s own strict check,
+   * mirroring `file_upload_multipart`'s `die`), never reaching the rest of the body at all. */
+  function buildLegacyMultipartBody(fields: { content: string; filename: string }, fileBytes: Buffer): Buffer {
     const CRLF = '\r\n';
     return Buffer.concat([
       Buffer.from(`--${BOUNDARY}${CRLF}Content-Disposition: form-data; name="content"${CRLF}${CRLF}${fields.content}${CRLF}`),
@@ -63,6 +83,49 @@ describe('storage action routes', () => {
       fileBytes,
       Buffer.from(`${CRLF}--${BOUNDARY}--${CRLF}`),
     ]);
+  }
+
+  /**
+   * Sends a real (not `app.inject()`) multipart upload request over a real socket and resolves
+   * with the response actually read back -- unlike `app.inject()`, whose in-process request wraps
+   * the payload one level below where `req.raw`'s own `aborted`/`close` events fire (see the
+   * existing "client abort" test's own comment below), a real socket is what actually exercises
+   * the T35 fix: `req.raw` piped into its own `PassThrough` so Proxmox's own early reply is never
+   * at risk of being discarded when undici tears down the *upstream* body once that reply lands.
+   */
+  function realSocketUploadRequest(address: string, cookie: string, body: Buffer): Promise<{ statusCode: number; body: string }> {
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        `${address}/api/actions/storage/pve1/local/upload?content=iso&filename=big.iso`,
+        {
+          method: 'POST',
+          headers: {
+            cookie,
+            'content-type': `multipart/form-data; boundary=${BOUNDARY}`,
+            'content-length': String(body.length),
+          },
+          // Deliberately not `connection: close` -- asking the server to close this connection
+          // itself, before it has necessarily drained the rest of this request's own body, risks
+          // exactly the "early reply gets discarded by a TCP reset" failure mode this fix is
+          // about (see `stream-early-reply.test.ts` in `packages/pve-api`), just one hop over.
+          // Default keep-alive is safe either side; this test closes its *own* end explicitly
+          // below, once it already has the full response in hand.
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(chunk));
+          res.on('end', () => {
+            // Closes the client's own end of this connection now that the response is fully read
+            // -- otherwise Node's keep-alive agent holds the socket open and `afterEach`'s
+            // `app.close()` hangs waiting for it.
+            req.destroy();
+            resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') });
+          });
+        },
+      );
+      req.on('error', reject);
+      req.end(body);
+    });
   }
 
   function uploadRequest(
@@ -334,7 +397,94 @@ describe('storage action routes', () => {
       expect(forwarded.origin).toBeUndefined();
       expect(forwarded.referer).toBeUndefined();
       expect(forwarded['x-test-leak']).toBeUndefined();
+
+      // T35 item 6: a stream body with an explicit `content-length` keeps content-length framing
+      // all the way to PVE -- undici parses that header into its own internal `contentLength` and
+      // threads it straight through (`node_modules/undici/lib/core/request.js`'s header
+      // processing, `lib/dispatcher/client-h1.js`'s `AsyncWriter.write()`), only ever falling back
+      // to `transfer-encoding: chunked` when no content-length was given at all. PVE's own
+      // pveproxy requires `Content-Length` on uploads, so this route must never let it disappear.
+      expect(forwarded['transfer-encoding']).toBeUndefined();
     });
+
+    it('a browser-shaped body (T35 layout: the file part named `filename`) reaches PVE with that exact part order', async () => {
+      const cookie = await setupSession();
+      fakePve.setStoragePermissions('local', { 'Datastore.AllocateTemplate': true });
+      const body = buildMultipartBody({ content: 'iso', filename: 'debian.iso' }, Buffer.alloc(1024, 1));
+
+      const res = await uploadRequest('pve1', 'local', 'content=iso&filename=debian.iso', body, { cookie });
+
+      expect(res.statusCode).toBe(202);
+      expect(fakePve.uploadCalls).toHaveLength(1);
+      expect(fakePve.uploadCalls[0]!.parts).toEqual([{ name: 'content' }, { name: 'filename', filename: 'debian.iso' }]);
+    });
+
+    it('the OLD layout (a text `filename` field plus a `file` part) is rejected by real Proxmox\'s own multipart parser -- reproduced here via the fake\'s strict check (T35)', async () => {
+      const cookie = await setupSession();
+      fakePve.setStoragePermissions('local', { 'Datastore.AllocateTemplate': true });
+      const body = buildLegacyMultipartBody({ content: 'iso', filename: 'debian.iso' }, Buffer.alloc(1024, 1));
+
+      const res = await uploadRequest('pve1', 'local', 'content=iso&filename=debian.iso', body, { cookie });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({
+        error: 'pve-rejected',
+        message: "wrong field name 'file' for file upload, expected 'filename'",
+      });
+    });
+
+    it('surfaces Proxmox\'s real early reply (401, before Proxmox ever reads the body) instead of "Proxmox VE is unreachable" (T35)', async () => {
+      const cookie = await setupSession();
+      fakePve.setStoragePermissions('local', { 'Datastore.AllocateTemplate': true });
+      fakePve.setUploadError('local', 401, 'authentication failure');
+
+      // A real socket end to end (see `realSocketUploadRequest`'s own comment) with a body large
+      // enough that Proxmox's early reply genuinely arrives well before the browser would have
+      // finished sending -- the exact shape of the production incident (a 2.9 GiB upload), just
+      // smaller.
+      const address = await app.listen({ port: 0, host: '127.0.0.1' });
+      const body = buildMultipartBody({ content: 'iso', filename: 'big.iso' }, Buffer.alloc(10 * 1024 * 1024, 9));
+
+      const res = await realSocketUploadRequest(address, cookie, body);
+      // Node keeps this connection idle rather than closing it outright once the response is
+      // read (the client-side `req.destroy()` above races the connection's return to the
+      // `Agent`'s keep-alive pool) -- force it closed so `afterEach`'s `app.close()` doesn't hang
+      // waiting for an idle socket nothing will ever use again.
+      app.server.closeAllConnections();
+
+      expect(res.statusCode).toBe(401);
+      expect(JSON.parse(res.body)).toEqual({ error: 'pve-rejected', message: 'authentication failure' });
+
+      // The server is still alive and correctly routing afterwards -- the whole point of this
+      // fix is that Proxmox's early reply no longer takes the in-flight request down with it.
+      const followUp = await queryUrlMetadataRequest('pve1', 'https://example.com/x.iso', cookie);
+      expect(followUp.statusCode).toBe(200);
+    }, 10_000);
+
+    it('surfaces Proxmox\'s real early reply (413, before Proxmox ever reads the body) instead of "Proxmox VE is unreachable" (T35)', async () => {
+      // A 4xx (client-error) PVE rejection, same as the 401 case above -- deliberately not a 5xx:
+      // every other guest-action route already maps a genuine PVE 5xx to a generic 502
+      // "pve-unreachable" on purpose (no PVE-internal detail leaked for a server-side failure;
+      // see e.g. `actions.test.ts`'s "maps a PVE 5xx to 502 pve-unreachable" test) -- this route
+      // reuses that same `sendPveError` convention (T35 item 3: "exactly like the other routes"),
+      // so a 5xx here would still 502 by design. What T35 fixes is PVE replies getting discarded
+      // by this route's *own* abort logic, not that 5xx convention.
+      const cookie = await setupSession();
+      fakePve.setStoragePermissions('local', { 'Datastore.AllocateTemplate': true });
+      fakePve.setUploadError('local', 413, 'for data too large');
+
+      const address = await app.listen({ port: 0, host: '127.0.0.1' });
+      const body = buildMultipartBody({ content: 'iso', filename: 'big.iso' }, Buffer.alloc(10 * 1024 * 1024, 9));
+
+      const res = await realSocketUploadRequest(address, cookie, body);
+      app.server.closeAllConnections();
+
+      expect(res.statusCode).toBe(413);
+      expect(JSON.parse(res.body)).toEqual({ error: 'pve-rejected', message: 'for data too large' });
+
+      const followUp = await queryUrlMetadataRequest('pve1', 'https://example.com/x.iso', cookie);
+      expect(followUp.statusCode).toBe(200);
+    }, 10_000);
 
     it('a client abort mid-upload does not crash the server', async () => {
       const cookie = await setupSession();
