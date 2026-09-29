@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The app no longer unmounts and remounts the whole page during a background session check (for
+  example when the window regains focus after 30 s). Open dialogs, in-progress uploads and page
+  state survive.
+
 ## [0.4.2] - 2026-09-29
 
 ### Fixed

@@ -22,6 +22,19 @@ export const Route = createFileRoute('/_shell')({
  * them there. `data === undefined` (still loading) and a real identity both render the shell as
  * normal -- the former briefly, the latter because they're allowed in -- only a *settled* "no"
  * triggers the redirect, so a slow first `/api/auth/me` round-trip never flashes a redirect.
+ *
+ * INCIDENT (T36): this gate used to require `settled` (`!isLoading && !isFetching`) to render the
+ * shell too, not just to redirect. `useAuthMe`'s `staleTime` is only 30s, and TanStack Query
+ * refetches on window focus/reconnect by default (both intentionally left on -- see below), so
+ * *any* focus/reconnect more than 30s after the last check flips `isFetching` true and briefly
+ * re-triggers this same render path. Gating the render on `settled` meant that background refetch
+ * unmounted the ENTIRE shell (top bar, rail, page, every open dialog and its local state) for the
+ * round trip, then remounted it from scratch -- in production this silently killed an in-progress
+ * upload dialog (the XHR kept running invisibly; see `useStorageUpload`). The render decision
+ * below now only cares whether an identity is already known (`auth` is present), never whether a
+ * background refetch happens to be in flight; `settled` still gates the *redirect* decision only,
+ * so the stale-`null` window right after login (comment below) still can't fire an errant
+ * redirect. Do not fold `isFetching`/`settled` back into the render's own condition.
  */
 function useAuthGate(): boolean {
   const { data: auth, isLoading, isFetching } = useAuthMe();
@@ -38,6 +51,8 @@ function useAuthGate(): boolean {
   // the invalidated refetch is in flight (`isLoading` alone is already `false` by then, since
   // the query settled once before). Waiting for `!isFetching` too avoids treating that stale
   // `null` as a fresh "no" and redirecting straight back to /login after a successful sign-in.
+  // Used ONLY for the redirect below -- see the incident note above for why the shell's own
+  // render decision no longer waits on this.
   const settled = !isLoading && !isFetching;
 
   useEffect(() => {
@@ -51,7 +66,11 @@ function useAuthGate(): boolean {
     }
   }, [settled, auth, navigate, location.pathname, location.searchStr]);
 
-  return settled && auth !== null && auth !== undefined;
+  // Render the shell whenever an identity is already known, regardless of a background refetch
+  // (`isFetching`) being in flight -- see the incident note above. `auth === null` (definitive
+  // "no", OR the stale-null window right after login) still renders nothing either way, so this
+  // never flashes the real shell to a signed-out visitor.
+  return auth !== null && auth !== undefined;
 }
 
 /**
@@ -160,8 +179,10 @@ function ShellLayout() {
     }
   }, [collapsed]);
 
-  // Not authenticated (redirect effect above is already navigating to /login) or still waiting
-  // on the first /api/auth/me round-trip: render nothing rather than flashing the real shell.
+  // Not authenticated (redirect effect above is already navigating to /login, or this is the
+  // stale-null window right after login -- see `useAuthGate`) or still waiting on the very first
+  // /api/auth/me round-trip: render nothing rather than flashing the real shell. A *background*
+  // refetch of an already-known identity does NOT land here (T36) -- see `useAuthGate` above.
   if (!authenticated) return null;
 
   return (

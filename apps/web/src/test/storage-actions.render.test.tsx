@@ -208,6 +208,64 @@ describe('UploadDialog', () => {
   });
 });
 
+describe('UploadDialog survives a background auth refetch (T36)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('stays open with its chosen content type when the auth query starts a background refetch', async () => {
+    // Radix's Select opens its trigger on `pointerdown` (jsdom has no Pointer Events API).
+    if (!Element.prototype.hasPointerCapture) {
+      Element.prototype.hasPointerCapture = () => false;
+    }
+    if (!Element.prototype.setPointerCapture) {
+      Element.prototype.setPointerCapture = () => {};
+    }
+    if (!Element.prototype.releasePointerCapture) {
+      Element.prototype.releasePointerCapture = () => {};
+    }
+    if (!Element.prototype.scrollIntoView) {
+      Element.prototype.scrollIntoView = () => {};
+    }
+
+    mockUseAuthMe.mockReturnValue(authData('session'));
+    mockUseStoragePermissions.mockReturnValue(permissionsData(true));
+
+    const queryClient = createQueryClient();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <StorageActions node="pve1" storage="local" contentTypes={['iso', 'vztmpl', 'backup']} />
+        <Toaster />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Upload$/ }));
+    expect(await screen.findByText('Upload to local')).toBeInTheDocument();
+
+    // Pick a non-default content type so its survival across the refetch is actually meaningful.
+    fireEvent.click(screen.getByRole('combobox', { name: 'Content type' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'CT template' }));
+    expect(screen.getByRole('combobox', { name: 'Content type' })).toHaveTextContent('CT template');
+
+    // Simulate a background `/api/auth/me` refetch (the T36 incident trigger): the underlying
+    // `useAuthMe` query flips to `isFetching: true` while its data is untouched -- this is what
+    // the real hook does on window focus/reconnect past its 30s `staleTime`. Re-rendering the same
+    // tree with that mocked state must NOT touch this dialog's open/selected state -- `StorageActions`
+    // itself never even reads `isFetching`; the shell-level fix (`routes/_shell.tsx`, tested in
+    // `shell-auth-refetch.render.test.tsx`) is what stops the enclosing page from unmounting.
+    mockUseAuthMe.mockReturnValue({ ...authData('session'), isFetching: true, isLoading: false });
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <StorageActions node="pve1" storage="local" contentTypes={['iso', 'vztmpl', 'backup']} />
+        <Toaster />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText('Upload to local')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Content type' })).toHaveTextContent('CT template');
+  });
+});
+
 describe('DownloadUrlDialog', () => {
   afterEach(() => {
     vi.clearAllMocks();
