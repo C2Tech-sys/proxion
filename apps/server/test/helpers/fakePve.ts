@@ -77,6 +77,18 @@ export interface FakePve {
    * additive next to `setVmPermissions`/`setNodePermissions`, same shape/rationale, used by
    * `storageActions.test.ts` (T32). No defaults: absent a call, a storage grants nothing. */
   setStoragePermissions: (storage: string, privs: Record<string, boolean>) => void;
+  /**
+   * Holds back the *next* `GET /access/permissions` response until `release()` is called --
+   * used by `storageActions.test.ts` (T37) to reopen the T35 permission-check race: the upload
+   * route awaits `hasStoragePrivilege()` before wiring up its client-disconnect listeners, so a
+   * disconnect that lands while that request is in flight is the exact window the route's
+   * synchronous `req.raw.destroyed` guard exists to catch. `reached` resolves the instant this
+   * fake actually receives that request (before it replies), so a test can deterministically
+   * disconnect its client mid-check rather than guessing at a timing window. One-shot: only the
+   * next matching request is held; every other request (and every later one) answers immediately,
+   * same as today.
+   */
+  holdPermissions: () => { release: () => void; reached: Promise<void> };
   /** Every `POST .../storage/{storage}/upload` request PVE has received, in order: the resolved
    * path, the exact `content-type` header seen (boundary intact), the query string PVE itself saw
    * (`content`/`filename`, if this fake ever needs to assert them), the exact byte count of the
@@ -235,7 +247,18 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   const extraPermsByStorage = new Map<string, Record<string, boolean>>();
   const statusByGuest = new Map<string, 'running' | 'stopped'>();
 
+  // One-shot hold for the *next* `/access/permissions` request -- see `holdPermissions` above.
+  let pendingPermissionsHold:
+    | { releasePromise: Promise<void>; resolveReached: () => void }
+    | undefined;
+
   app.get('/api2/json/access/permissions', async (req, reply) => {
+    if (pendingPermissionsHold) {
+      const hold = pendingPermissionsHold;
+      pendingPermissionsHold = undefined;
+      hold.resolveReached();
+      await hold.releasePromise;
+    }
     const query = req.query as { path?: string };
     const vmMatch = query.path?.match(/^\/vms\/(\d+)$/);
     const nodeMatch = query.path?.match(/^\/nodes\/(.+)$/);
@@ -675,6 +698,18 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     },
     setStoragePermissions: (storage: string, privs: Record<string, boolean>) => {
       extraPermsByStorage.set(storage, privs);
+    },
+    holdPermissions: () => {
+      let resolveReached!: () => void;
+      const reached = new Promise<void>((resolve) => {
+        resolveReached = resolve;
+      });
+      let releaseFn!: () => void;
+      const releasePromise = new Promise<void>((resolve) => {
+        releaseFn = resolve;
+      });
+      pendingPermissionsHold = { releasePromise, resolveReached };
+      return { release: () => releaseFn(), reached };
     },
     get uploadCalls() {
       return uploadCalls;

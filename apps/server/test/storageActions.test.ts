@@ -1,6 +1,6 @@
 import * as http from 'node:http';
 import { Readable } from 'node:stream';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance, InjectOptions } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
@@ -527,6 +527,82 @@ describe('storage action routes', () => {
       const followUp = await queryUrlMetadataRequest('pve1', 'https://example.com/x.iso', cookie);
       expect(followUp.statusCode).toBe(200);
     });
+
+    it(
+      'a client disconnect while the Datastore.AllocateTemplate permission check is still in flight aborts before ever calling PVE\'s upload endpoint (T37)',
+      async () => {
+        const cookie = await setupSession();
+        fakePve.setStoragePermissions('local', { 'Datastore.AllocateTemplate': true });
+
+        const unhandledRejections: unknown[] = [];
+        const onUnhandledRejection = (reason: unknown) => unhandledRejections.push(reason);
+        process.on('unhandledRejection', onUnhandledRejection);
+        const errorSpy = vi.spyOn(app.log, 'error');
+
+        try {
+          // Holds the fake PVE's `/access/permissions` reply -- the same round trip
+          // `hasStoragePrivilege()` awaits at storageRoutes.ts:217, before this route ever
+          // attaches its `aborted`/`close` disconnect listeners.
+          const hold = fakePve.holdPermissions();
+          const address = await app.listen({ port: 0, host: '127.0.0.1' });
+
+          // Only the multipart head (a few hundred bytes) is ever written; the declared
+          // Content-Length (1 MiB) is never approached -- nothing but this test's own
+          // `req.destroy()` below ever ends this request.
+          const head = Buffer.concat([
+            Buffer.from(`--${BOUNDARY}\r\nContent-Disposition: form-data; name="content"\r\n\r\niso\r\n`),
+            Buffer.from(
+              `--${BOUNDARY}\r\nContent-Disposition: form-data; name="filename"; filename="big.iso"\r\nContent-Type: application/octet-stream\r\n\r\n`,
+            ),
+          ]);
+
+          const req = http.request(
+            `${address}/api/actions/storage/pve1/local/upload?content=iso&filename=big.iso`,
+            {
+              method: 'POST',
+              headers: {
+                cookie,
+                'content-type': `multipart/form-data; boundary=${BOUNDARY}`,
+                'content-length': String(1024 * 1024),
+              },
+            },
+          );
+          req.on('error', () => {});
+          req.write(head);
+
+          // Wait until the fake PVE has actually received (and is holding the reply to) the
+          // permission-check request -- the exact race window T35 opened: this route hasn't
+          // attached its `aborted`/`close` listeners yet, so only the synchronous
+          // `req.raw.destroyed || req.raw.socket?.destroyed` check made right after attaching
+          // them (storageRoutes.ts:290) can still catch a disconnect that happened during this
+          // await.
+          await hold.reached;
+          req.destroy();
+          // Give the server a moment to actually observe the client socket closing -- a real
+          // TCP event, not synchronous with `req.destroy()` above -- before releasing the held
+          // permission-check reply, so this test doesn't race past the very window it means to
+          // exercise.
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          hold.release();
+
+          // Grace period: long enough to prove nothing ever reaches PVE's upload endpoint, but
+          // nowhere near undici's own one-hour body timeout this fix exists to avoid hitting.
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          expect(fakePve.uploadCalls.length).toBe(0);
+
+          // The server is still healthy -- an ordinary request still succeeds.
+          const followUp = await queryUrlMetadataRequest('pve1', 'https://example.com/x.iso', cookie);
+          expect(followUp.statusCode).toBe(200);
+
+          expect(errorSpy).not.toHaveBeenCalled();
+          expect(unhandledRejections).toEqual([]);
+        } finally {
+          process.off('unhandledRejection', onUnhandledRejection);
+          app.server.closeAllConnections();
+        }
+      },
+      10_000,
+    );
   });
 
   describe('download-url', () => {
