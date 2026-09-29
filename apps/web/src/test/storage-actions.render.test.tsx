@@ -321,7 +321,9 @@ describe('UploadsIndicator survives a StorageActions remount (T39)', () => {
     expect(await screen.findByText(/Uploading debian-12\.iso/)).toBeInTheDocument();
     expect(screen.getByText(/42%/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    // Named after the file (not just "Cancel") so two simultaneous uploads' Cancel buttons stay
+    // unambiguous to assistive tech and to this query alike.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel upload of debian-12.iso' }));
     expect(capturedSignal?.aborted).toBe(true);
   });
 });

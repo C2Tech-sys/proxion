@@ -100,7 +100,7 @@ export function StorageActions({ node, storage, contentTypes }: StorageActionsPr
       : undefined;
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <GatedButton
         enabled={enabled}
         disabledReason={disabledReason}

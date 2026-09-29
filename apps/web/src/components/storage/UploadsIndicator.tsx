@@ -46,7 +46,11 @@ export function UploadsIndicator({ node, storage }: UploadsIndicatorProps) {
   if (uploads.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-1">
+    // `w-full min-w-0`: this sits in `StorageActions`'s own `flex flex-wrap` row alongside the
+    // Upload/Download buttons -- without these, a flex item's default `min-width: auto` keeps it
+    // (and the `truncate` below) from ever shrinking below its content's intrinsic width, so on a
+    // narrow viewport it would push the row wider instead of wrapping onto its own line.
+    <div className="flex w-full min-w-0 flex-col gap-1">
       {uploads.map((entry) => {
         const percent = entry.total > 0 ? Math.min(100, Math.round((entry.sent / entry.total) * 100)) : 0;
         const isError = entry.status === 'error';
@@ -54,7 +58,7 @@ export function UploadsIndicator({ node, storage }: UploadsIndicatorProps) {
           <div
             key={entry.id}
             className={cn(
-              'flex items-center gap-2 rounded-md border border-border bg-secondary/50 px-2 py-1 text-xs',
+              'flex min-w-0 items-center gap-2 rounded-md border border-border bg-secondary/50 px-2 py-1 text-xs',
               isError && 'border-destructive/50 text-destructive',
             )}
           >
@@ -79,7 +83,13 @@ export function UploadsIndicator({ node, storage }: UploadsIndicatorProps) {
               )}
             </div>
             {entry.status === 'uploading' && (
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => cancel(entry.id)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                aria-label={`Cancel upload of ${entry.filename}`}
+                onClick={() => cancel(entry.id)}
+              >
                 Cancel
               </Button>
             )}
