@@ -218,7 +218,12 @@ describe('ConsoleThumbnailService: cache and refresh throttle', () => {
 
   it('throttles refresh=true to one live capture per VM per throttleMs, falling back to cache', async () => {
     const capture = vi.fn<CaptureFn>().mockResolvedValue(frame());
-    const service = makeService(capture, { throttleMs: 50 });
+    // An injected clock, not real elapsed time: under a loaded parallel test run, the real
+    // gap between these awaited calls can exceed a few tens of ms on its own, which used to
+    // slip the second call past the throttle window before it ever meant to. Advancing this
+    // by decree makes the window's edges exact regardless of machine load.
+    let clock = 1_700_000_000_000;
+    const service = makeService(capture, { throttleMs: 50, now: () => clock });
 
     const first = await service.get(ctx(1, { refresh: true }));
     expect(first).toMatchObject({ source: 'live' });
@@ -227,7 +232,7 @@ describe('ConsoleThumbnailService: cache and refresh throttle', () => {
     expect(throttled).toMatchObject({ source: 'cache' });
     expect(capture).toHaveBeenCalledTimes(1);
 
-    await new Promise((r) => setTimeout(r, 60));
+    clock += 60;
     const afterThrottle = await service.get(ctx(1, { refresh: true }));
     expect(afterThrottle).toMatchObject({ source: 'live' });
     expect(capture).toHaveBeenCalledTimes(2);
@@ -247,7 +252,10 @@ describe('ConsoleThumbnailService: cache and refresh throttle', () => {
       .fn<CaptureFn>()
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce(frame());
-    const service = makeService(capture, { cacheTtlFailedMs: 30 });
+    // Injected clock (see the throttle test above) rather than real elapsed time, so the
+    // "still within cacheTtlFailedMs" assertion can't be tripped by a slow, loaded machine.
+    let clock = 1_700_000_000_000;
+    const service = makeService(capture, { cacheTtlFailedMs: 30, now: () => clock });
 
     const first = await service.get(ctx(1));
     expect(first).toEqual({ kind: 'capture-failed' });
@@ -256,7 +264,7 @@ describe('ConsoleThumbnailService: cache and refresh throttle', () => {
     expect(stillFailed).toEqual({ kind: 'capture-failed' });
     expect(capture).toHaveBeenCalledTimes(1); // served from the (short-lived) failure cache
 
-    await new Promise((r) => setTimeout(r, 40));
+    clock += 40;
     const retried = await service.get(ctx(1));
     expect(retried).toMatchObject({ kind: 'ok', source: 'live' });
     expect(capture).toHaveBeenCalledTimes(2);

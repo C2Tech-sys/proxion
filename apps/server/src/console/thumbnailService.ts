@@ -137,6 +137,10 @@ export interface ConsoleThumbnailServiceOptions {
   maxConcurrentCaptures?: number;
   queueWaitMs?: number;
   captureImpl?: CaptureFn;
+  /** Clock used by the refresh throttle and cache-age checks (`get`/`runCapture`). Defaults
+   *  to `Date.now`; overridable in tests so throttle/TTL windows can be asserted without
+   *  depending on real elapsed time (which can drift under load). */
+  now?: () => number;
 }
 
 /**
@@ -171,6 +175,7 @@ export class ConsoleThumbnailService {
   private readonly maxConcurrentCaptures: number;
   private readonly queueWaitMs: number;
   private readonly captureImpl: CaptureFn;
+  private readonly now: () => number;
 
   constructor(
     private readonly config: Config,
@@ -185,6 +190,11 @@ export class ConsoleThumbnailService {
     this.maxConcurrentCaptures = options.maxConcurrentCaptures ?? MAX_CONCURRENT_CAPTURES;
     this.queueWaitMs = options.queueWaitMs ?? QUEUE_WAIT_MS;
     this.captureImpl = options.captureImpl ?? ((ctx) => this.defaultCapture(ctx));
+    // Not `options.now ?? Date.now`: that would capture today's `Date.now` function object at
+    // construction time, so a later `vi.useFakeTimers({ toFake: ['Date'] })` -- which replaces
+    // the global `Date` -- would silently miss it. The wrapper re-reads the (possibly faked)
+    // global on every call instead.
+    this.now = options.now ?? (() => Date.now());
   }
 
   /** Number of live captures currently in progress (0..maxConcurrentCaptures). */
@@ -270,7 +280,7 @@ export class ConsoleThumbnailService {
 
   async get(ctx: CaptureContext): Promise<ThumbnailOutcome> {
     const vmKey = `${ctx.node}:${ctx.type}:${ctx.vmid}`;
-    const now = Date.now();
+    const now = this.now();
 
     if (!ctx.refresh) {
       const cached = this.cache.get(vmKey);
@@ -322,7 +332,7 @@ export class ConsoleThumbnailService {
 
   /** Owns one capture slot (already acquired) for the duration; never rejects. */
   private async runCapture(ctx: CaptureContext, vmKey: string): Promise<CacheEntry> {
-    this.lastLiveCaptureStartedAt.set(vmKey, Date.now());
+    this.lastLiveCaptureStartedAt.set(vmKey, this.now());
     try {
       const attempt = await this.captureFrame(ctx);
 
@@ -330,14 +340,14 @@ export class ConsoleThumbnailService {
         // The agent's view is authoritative at capture time even though the route's
         // earlier status/current check said running -- treat it as a distinct, short-lived
         // outcome so the caller answers 404, not 503.
-        const entry: CacheEntryFailed = { ok: false, capturedAt: Date.now(), reason: 'not-running' };
+        const entry: CacheEntryFailed = { ok: false, capturedAt: this.now(), reason: 'not-running' };
         this.cache.set(vmKey, entry);
         return entry;
       }
       if (attempt.kind === 'agent-unauthorized') {
         // No VNC fallback here on purpose: a misconfigured token should be loud
         // (already warned once in `captureFrame`), not silently degrade every request.
-        const entry: CacheEntryFailed = { ok: false, capturedAt: Date.now() };
+        const entry: CacheEntryFailed = { ok: false, capturedAt: this.now() };
         this.cache.set(vmKey, entry);
         return entry;
       }
@@ -345,7 +355,7 @@ export class ConsoleThumbnailService {
       const master = downscaleFrame(attempt.frame, MASTER_WIDTH);
       const entry: CacheEntryOk = {
         ok: true,
-        capturedAt: Date.now(),
+        capturedAt: this.now(),
         node: ctx.node,
         type: ctx.type,
         vmid: ctx.vmid,
@@ -358,7 +368,7 @@ export class ConsoleThumbnailService {
       return entry;
     } catch (err) {
       this.log.warn({ err: (err as Error).message }, 'Console thumbnail capture failed');
-      const entry: CacheEntryFailed = { ok: false, capturedAt: Date.now() };
+      const entry: CacheEntryFailed = { ok: false, capturedAt: this.now() };
       this.cache.set(vmKey, entry);
       return entry;
     } finally {
