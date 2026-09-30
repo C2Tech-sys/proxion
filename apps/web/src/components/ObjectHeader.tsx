@@ -11,6 +11,7 @@ import {
   RotateCcw,
   RotateCw,
   Square,
+  Trash2,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +32,7 @@ import { useGuestActionFlow } from '@/components/actions/useGuestActionFlow';
 import { RenameGuestDialog } from '@/components/actions/RenameGuestDialog';
 import { MigrateGuestDialog } from '@/components/actions/MigrateGuestDialog';
 import { CloneGuestDialog } from '@/components/actions/CloneGuestDialog';
+import { DeleteGuestDialog } from '@/components/actions/DeleteGuestDialog';
 import { useAuthMe, useClusterResources } from '@/api/hooks';
 import { usePermissions } from '@/api/actionHooks';
 import { USE_FIXTURES } from '@/api/client';
@@ -134,6 +136,7 @@ function GuestQuickActions({
   const [renameOpen, setRenameOpen] = useState(false);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   // Fixture/demo mode has no real session concept (and nothing real to protect) -- it always
   // demonstrates the enabled state. A real deployment gates strictly on the caller's own
@@ -144,11 +147,13 @@ function GuestQuickActions({
   const hasConfigOptions = permissions.data?.can('VM.Config.Options') === true;
   const hasMigrate = permissions.data?.can('VM.Migrate') === true;
   const hasClone = permissions.data?.can('VM.Clone') === true;
+  const hasAllocate = permissions.data?.can('VM.Allocate') === true;
   const otherNodeCount = (clusterResources.data ?? []).filter((r) => r.type === 'node' && r.node !== node).length;
   const canWrite = isSessionMode && hasPowerMgmt;
   const canRename = isSessionMode && hasConfigOptions;
   const canMigrate = isSessionMode && hasMigrate && otherNodeCount > 0;
   const canClone = isSessionMode && hasClone;
+  const canDelete = isSessionMode && hasAllocate;
   const disabledReason = !isSessionMode
     ? 'Read-only: signed in with a service token'
     : !hasPowerMgmt
@@ -170,6 +175,12 @@ function GuestQuickActions({
     ? 'Read-only: signed in with a service token'
     : !hasClone
       ? "You don't have VM.Clone on this guest"
+      : undefined;
+
+  const deleteDisabledReason = !isSessionMode
+    ? 'Read-only: signed in with a service token'
+    : !hasAllocate
+      ? "You don't have VM.Allocate on this guest"
       : undefined;
 
   const running = status === 'running';
@@ -307,6 +318,15 @@ function GuestQuickActions({
                 )}
               </>
             )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={!canDelete}
+              title={canDelete ? undefined : deleteDisabledReason}
+              onSelect={() => setDeleteOpen(true)}
+            >
+              <Trash2 /> Delete…
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -342,6 +362,16 @@ function GuestQuickActions({
         key={cloneOpen ? 'clone-open' : 'clone-closed'}
         open={cloneOpen}
         onOpenChange={setCloneOpen}
+        node={node}
+        type={type}
+        vmid={vmid}
+        name={name}
+        status={status}
+      />
+      <DeleteGuestDialog
+        key={deleteOpen ? 'delete-open' : 'delete-closed'}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
         node={node}
         type={type}
         vmid={vmid}

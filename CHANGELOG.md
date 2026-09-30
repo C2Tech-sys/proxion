@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   opens a box (pre-filled from the clipboard where the browser allows) and types the text as
   keystrokes (US keyboard layout assumed, up to 4096 characters, with progress and Cancel;
   characters with no key, such as emoji, are skipped and counted).
+### Added
+
+- "Delete…" on a guest's object header "More" menu or its context menu: permanently destroy a
+  stopped VM/CT behind a typed-VMID confirmation, with optional "purge" (also remove it from
+  backup jobs, replication and HA; off by default) and "destroy unreferenced disks" (on by
+  default) checkboxes. A running guest must be stopped first. Session sign-in only, gated on
+  `VM.Allocate` -- the shared service token stays read-only here too.
 
 ## [0.6.0] - 2026-09-30
 

@@ -8,6 +8,7 @@ import { registerNodeRoutes } from './nodeRoutes.js';
 import { registerStorageRoutes } from './storageRoutes.js';
 import { registerBackupRoutes } from './backupRoutes.js';
 import { registerCloneRoutes } from './cloneRoutes.js';
+import { registerDestroyRoutes } from './destroyRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -409,4 +410,7 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
 
   // Guest clone / clone-nextid (`cloneRoutes.ts`) shares the same bucket, same rationale.
   registerCloneRoutes(app, guestActionsRateLimit);
+
+  // Guest delete/destroy (`destroyRoutes.ts`) shares the same bucket, same rationale.
+  registerDestroyRoutes(app, guestActionsRateLimit);
 }

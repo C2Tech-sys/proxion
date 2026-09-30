@@ -425,6 +425,20 @@ export function addFixtureGuest(resource: ClusterResource): void {
 }
 
 /**
+ * Test/demo-only mutator: removes one guest from the shared in-memory `resources` array, in place,
+ * along with its per-vmid `configs` entry and its `snapshots` tree (`<type>-<vmid>`) -- the
+ * inverse of `addFixtureGuest`, used by `actionsFixture.ts`'s `fixtureDestroyGuest`. A no-op if no
+ * matching guest exists.
+ */
+export function removeFixtureGuest(node: string, type: GuestType, vmid: number): void {
+  const index = resources.findIndex((r) => r.node === node && r.type === type && r.vmid === vmid);
+  if (index === -1) return;
+  resources.splice(index, 1);
+  delete configs[String(vmid)];
+  delete snapshots[`${type}-${vmid}`];
+}
+
+/**
  * Test/demo-only: one past the highest vmid currently in the shared in-memory `resources` array
  * (any resource type, matching real PVE's own `GET /cluster/nextid`, which considers every id in
  * the cluster) -- used by `actionsFixture.ts`'s `fixtureRestoreNextId` for the restore dialog's
