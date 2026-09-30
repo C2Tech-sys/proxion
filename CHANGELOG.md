@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The Guests list now supports multi-select bulk power actions: a checkbox column (with a
+  select-all-in-view header checkbox) selects guests across the current filtered view, and a
+  bulk actions bar starts/shuts down/reboots/stops the whole selection at once, confirming in a
+  dialog that lists what applies, skips what doesn't (wrong power state, or a template) with a
+  reason, and runs the applicable guests with a concurrency limit of 3.
+
 ## [0.5.0] - 2026-09-29
 
 ### Added

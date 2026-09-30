@@ -1,4 +1,4 @@
-import { useMemo, type KeyboardEvent, type MouseEvent } from 'react';
+import { useMemo, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router';
 import { ArrowDown, ArrowUp, Columns3 } from 'lucide-react';
 
@@ -6,6 +6,7 @@ import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
@@ -19,15 +20,20 @@ import { TagChip } from '@/components/TagChip';
 import { UsageBar } from '@/components/UsageBar';
 import { EmptyState } from '@/components/EmptyState';
 import { GuestContextMenu } from '@/components/actions/GuestContextMenu';
-import { useClusterResources } from '@/api/hooks';
+import { BulkActionsBar } from '@/components/actions/BulkActionsBar';
+import { BulkActionDialog } from '@/components/actions/BulkActionDialog';
+import { useAuthMe, useClusterResources } from '@/api/hooks';
 import { usePrefs, useUpdatePrefs } from '@/api/prefsHooks';
+import { USE_FIXTURES } from '@/api/client';
 import { formatMemDetail, formatPercent, formatUptime } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import type { BulkAction, BulkGuest } from '@/lib/bulkActions';
 import {
   DEFAULT_GUESTS_SEARCH_STATE,
   GUEST_COLUMNS,
   GUEST_STATUS_FILTERS,
   GUEST_TYPE_FILTERS,
+  guestKey,
   guestNodeNames,
   hasReportedDiskUsage,
   resolveVisibleColumns,
@@ -131,7 +137,19 @@ function SortableHead({ label, sortKey, activeKey, dir, onToggle, className }: S
  *  `TableRow`'s own classes by hand. Clicking anywhere in the row (or pressing Enter while it's
  *  focused) opens the guest's Summary tab, same as the inventory rail's guest rows; the name and
  *  node cells stop that click from bubbling so their own links navigate exactly once. */
-function GuestTableRow({ row, visibleColumns }: { row: GuestRow; visibleColumns: Set<GuestColumnId> }) {
+function GuestTableRow({
+  row,
+  rowIndex,
+  visibleColumns,
+  selected,
+  onToggleSelect,
+}: {
+  row: GuestRow;
+  rowIndex: number;
+  visibleColumns: Set<GuestColumnId>;
+  selected: boolean;
+  onToggleSelect: (row: GuestRow, rowIndex: number, shiftKey: boolean) => void;
+}) {
   const navigate = useNavigate();
 
   function open() {
@@ -143,6 +161,15 @@ function GuestTableRow({ row, visibleColumns }: { row: GuestRow; visibleColumns:
   }
 
   function stop(event: MouseEvent) {
+    event.stopPropagation();
+  }
+
+  // Radix's Checkbox calls `preventDefault()` on Enter/Space (so the browser doesn't also submit
+  // a form or scroll the page) but never `stopPropagation()` -- left alone, that keydown still
+  // bubbles from the checkbox up through this cell to the row's own `onKeyDown` below, which would
+  // then "helpfully" navigate to the guest on top of toggling its checkbox. Stopped here instead
+  // of only on `click` (T44 fix pass): keyboard users reach the checkbox by Tab, not by clicking.
+  function stopKeyDown(event: KeyboardEvent<HTMLElement>) {
     event.stopPropagation();
   }
 
@@ -162,8 +189,19 @@ function GuestTableRow({ row, visibleColumns }: { row: GuestRow; visibleColumns:
         tabIndex={0}
         onClick={open}
         onKeyDown={onKeyDown}
+        aria-selected={selected}
         className="cursor-pointer border-b border-border outline-none transition-colors last:border-0 hover:bg-muted/40 focus-visible:bg-accent/10"
       >
+        <TableCell onClick={stop} onKeyDown={stopKeyDown} className="w-8">
+          <Checkbox
+            aria-label={`Select ${row.name}`}
+            checked={selected}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleSelect(row, rowIndex, event.shiftKey);
+            }}
+          />
+        </TableCell>
         <TableCell onClick={stop}>
           <Link
             to="/vm/$node/$type/$vmid"
@@ -250,6 +288,20 @@ export function GuestsPage() {
   const { data: resources, isLoading } = useClusterResources();
   const { data: prefs } = usePrefs();
   const updatePrefs = useUpdatePrefs();
+  const auth = useAuthMe();
+  // Same session-vs-token gate every other write surface uses (`GuestContextMenu`,
+  // `ObjectHeader`) -- fixture/demo mode has no real session concept and always demonstrates the
+  // enabled state; a real deployment disables every bulk button for a service token, same as it
+  // does every other quick action. The server enforces per-guest privileges independently either
+  // way (T44's ticket: this client-side gate is read-only-vs-not, not privilege-per-guest).
+  const isTokenMode = !(USE_FIXTURES || auth.data?.mode === 'session');
+
+  // T44: bulk selection, keyed by `guestKey` (node/type/vmid) so it's independent of row order --
+  // local component state, not URL-backed (the ticket is explicit selection shouldn't survive a
+  // page reload or be shareable via link, unlike the search/filter/sort state above).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
+  const [pendingBulkAction, setPendingBulkAction] = useState<BulkAction | null>(null);
 
   const state: GuestsSearchState = {
     q: search.q ?? DEFAULT_GUESTS_SEARCH_STATE.q,
@@ -275,6 +327,69 @@ export function GuestsPage() {
   );
   const runningShown = rows.filter((row) => row.status === 'running').length;
   const visibleColumns = resolveVisibleColumns(prefs?.guestList?.columns);
+
+  // Drops any selected guest that's left the current filtered view (a status/type/node filter
+  // change, or a search that no longer matches it) -- a sort-only change leaves this *set* of
+  // visible keys unchanged (only their order), so selection survives sorting exactly as the
+  // ticket asks. This adjusts `selected` during render rather than in an effect (React's own
+  // "adjusting state when a prop changes" pattern): `visibleSignature` is a sorted, order-
+  // independent fingerprint of the current filtered view, compared against the fingerprint as of
+  // the last time this ran; a sort-only re-render always produces the same fingerprint, so the
+  // `if` below only actually fires -- and only calls `setSelected` -- on a real membership change.
+  const visibleKeySet = useMemo(() => new Set(rows.map(guestKey)), [rows]);
+  const visibleSignature = useMemo(() => Array.from(visibleKeySet).sort().join('\u0000'), [visibleKeySet]);
+  const [prevVisibleSignature, setPrevVisibleSignature] = useState(visibleSignature);
+  if (visibleSignature !== prevVisibleSignature) {
+    setPrevVisibleSignature(visibleSignature);
+    setSelected((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const key of prev) {
+        if (visibleKeySet.has(key)) next.add(key);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }
+
+  const selectedCount = selected.size;
+  const allVisibleSelected = rows.length > 0 && rows.every((row) => selected.has(guestKey(row)));
+  const someVisibleSelected = rows.some((row) => selected.has(guestKey(row)));
+
+  function toggleRowSelection(row: GuestRow, rowIndex: number, shiftKey: boolean) {
+    const key = guestKey(row);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (shiftKey && lastClickedIndex !== null) {
+        const selecting = !prev.has(key);
+        const [start, end] = lastClickedIndex < rowIndex ? [lastClickedIndex, rowIndex] : [rowIndex, lastClickedIndex];
+        for (let i = start; i <= end; i += 1) {
+          const rangeKey = guestKey(rows[i]!);
+          if (selecting) next.add(rangeKey);
+          else next.delete(rangeKey);
+        }
+      } else if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+    setLastClickedIndex(rowIndex);
+  }
+
+  function toggleSelectAllVisible(checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const row of rows) {
+        if (checked) next.add(guestKey(row));
+        else next.delete(guestKey(row));
+      }
+      return next;
+    });
+  }
+
+  const selectedGuests: BulkGuest[] = rows.filter((row) => selected.has(guestKey(row)));
 
   function updateSearch(partial: Partial<GuestsSearchState>) {
     void navigate({ search: toGuestsSearch({ ...state, ...partial }), replace: true });
@@ -355,6 +470,13 @@ export function GuestsPage() {
         </DropdownMenu>
       </div>
 
+      <BulkActionsBar
+        selectedCount={selectedCount}
+        tokenMode={isTokenMode}
+        onAction={(action) => setPendingBulkAction(action)}
+        onClear={() => setSelected(new Set())}
+      />
+
       {isLoading ? (
         <Skeleton className="h-96" />
       ) : rows.length === 0 ? (
@@ -364,6 +486,13 @@ export function GuestsPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8">
+                  <Checkbox
+                    aria-label="Select all guests"
+                    checked={allVisibleSelected ? true : someVisibleSelected ? 'indeterminate' : false}
+                    onCheckedChange={(checked) => toggleSelectAllVisible(checked === true)}
+                  />
+                </TableHead>
                 <SortableHead label="Name" sortKey="name" activeKey={state.sort} dir={state.dir} onToggle={toggleSort} />
                 <SortableHead
                   label="VMID"
@@ -415,12 +544,30 @@ export function GuestsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => (
-                <GuestTableRow key={row.id} row={row} visibleColumns={visibleColumns} />
+              {rows.map((row, rowIndex) => (
+                <GuestTableRow
+                  key={row.id}
+                  row={row}
+                  rowIndex={rowIndex}
+                  visibleColumns={visibleColumns}
+                  selected={selected.has(guestKey(row))}
+                  onToggleSelect={toggleRowSelection}
+                />
               ))}
             </TableBody>
           </Table>
         </div>
+      )}
+
+      {pendingBulkAction && (
+        <BulkActionDialog
+          action={pendingBulkAction}
+          guests={selectedGuests}
+          onOpenChange={(open) => {
+            if (!open) setPendingBulkAction(null);
+          }}
+          onRunComplete={(failedKeys) => setSelected(new Set(failedKeys))}
+        />
       )}
     </div>
   );
