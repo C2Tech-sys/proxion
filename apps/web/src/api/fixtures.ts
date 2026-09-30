@@ -587,3 +587,33 @@ export function setFixtureSnapshots(
   next[currentIndex] = withParent(next[currentIndex]!, action.snapname);
   snapshots[key] = next;
 }
+
+/**
+ * Test/demo-only mutator (T48): shallow-merges arbitrary config keys into one guest's fixture
+ * config (`configs[vmid]`, served by `getVmConfig`), in place -- the generalisation of
+ * `setFixtureGuestConfig` (which only knows `name`/`description`) that the hardware edit fixture
+ * flow (`src/api/hardware.ts`) needs for `cores`/`memory`/`ideN`/`scsiN`/... An `undefined` value
+ * deletes the key. A no-op if no config exists for `vmid` (kept lenient, same as the other
+ * fixture mutators).
+ */
+export function patchFixtureGuestConfig(
+  _node: string,
+  _type: GuestType,
+  vmid: number,
+  patch: Record<string, string | number | undefined>,
+): void {
+  const key = String(vmid);
+  const config = configs[key];
+  if (!config) return;
+  const next: GuestConfig = { ...config };
+  for (const [field, value] of Object.entries(patch)) {
+    if (value === undefined) delete next[field];
+    else next[field] = value;
+  }
+  configs[key] = next;
+}
+
+/** Test/demo-only lookup (T48): one guest's current fixture config, or `undefined` if none. */
+export function getFixtureGuestConfig(vmid: number): GuestConfig | undefined {
+  return configs[String(vmid)];
+}

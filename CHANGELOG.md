@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Edit a guest's hardware from its Hardware tab (first cut): processors (sockets,
+  cores, CPU type grouped by vendor; a container's cores), memory (MiB with a GiB
+  helper, plus the balloon minimum for a VM and swap for a container), the ISO in
+  each CD/DVD drive (or "No media"), and growing a disk (add N GiB -- never a
+  shrink). Changes PVE holds back until the guest restarts are listed in a
+  "Changes pending a restart" banner with the affected rows badged "pending".
+  Session sign-in only, gated on `VM.Config.CPU`/`VM.Config.Memory`/
+  `VM.Config.CDROM`/`VM.Config.Disk` -- the shared service token stays read-only
+  here too.
+
 ## [0.7.0] - 2026-09-30
 
 ### Fixed

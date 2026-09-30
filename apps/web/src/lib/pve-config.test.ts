@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  cpuHasExtraOptions,
+  gibToResizeSize,
+  isMountableIsoVolid,
+  parseCpuModel,
+  parseSizeToGiB,
   getDrives,
   getNetSpecs,
   getRootfsDrive,
@@ -175,5 +180,52 @@ describe('getDrives / getRootfsDrive / getNetSpecs', () => {
       scsi0: 'tank:vm-100-disk-0,size=32G',
     };
     expect(getNetSpecs(config).map((n) => n.key).sort()).toEqual(['net0', 'net1']);
+  });
+});
+
+describe('parseSizeToGiB / gibToResizeSize (T48)', () => {
+  it('parses PVE size suffixes into GiB', () => {
+    expect(parseSizeToGiB('32G')).toBe(32);
+    expect(parseSizeToGiB('512M')).toBe(0.5);
+    expect(parseSizeToGiB('2T')).toBe(2048);
+    expect(parseSizeToGiB('1073741824')).toBe(1);
+    expect(parseSizeToGiB(undefined)).toBeNull();
+    expect(parseSizeToGiB('lots')).toBeNull();
+  });
+
+  it('builds the grow-only resize string', () => {
+    expect(gibToResizeSize(10)).toBe('+10G');
+    expect(gibToResizeSize(1.5)).toBe('+1536M');
+  });
+});
+
+describe('isMountableIsoVolid (T48)', () => {
+  it('accepts iso/img volumes with any extension case', () => {
+    expect(isMountableIsoVolid('local:iso/debian-12.iso')).toBe(true);
+    expect(isMountableIsoVolid('local:iso/Win11.ISO')).toBe(true);
+    expect(isMountableIsoVolid('nfs-iso:iso/disk.Img')).toBe(true);
+  });
+
+  it('rejects other content, traversal and other extensions', () => {
+    expect(isMountableIsoVolid('local:vztmpl/a.iso')).toBe(false);
+    expect(isMountableIsoVolid('local:iso/a..b.iso')).toBe(false);
+    expect(isMountableIsoVolid('local:iso/a.isox')).toBe(false);
+    expect(isMountableIsoVolid('local:iso/a.iso,media=disk')).toBe(false);
+  });
+});
+
+describe('parseCpuModel / cpuHasExtraOptions (T48)', () => {
+  it('reads the model from a bare or cputype= property string', () => {
+    expect(parseCpuModel('host')).toBe('host');
+    expect(parseCpuModel('host,flags=+aes')).toBe('host');
+    expect(parseCpuModel('cputype=x86-64-v2-AES,hidden=1')).toBe('x86-64-v2-AES');
+    expect(parseCpuModel(undefined)).toBeUndefined();
+    expect(parseCpuModel('flags=+aes')).toBeUndefined();
+  });
+
+  it('detects options beyond the model', () => {
+    expect(cpuHasExtraOptions('host')).toBe(false);
+    expect(cpuHasExtraOptions('host,flags=+aes')).toBe(true);
+    expect(cpuHasExtraOptions(undefined)).toBe(false);
   });
 });

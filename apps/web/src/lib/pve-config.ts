@@ -236,3 +236,64 @@ export function getNetSpecs(config: GuestConfig): ParsedNetSpec[] {
     .filter(([key]) => NET_SPEC_KEY.test(key))
     .map(([key, value]) => parseNetSpec(key, String(value)));
 }
+
+const SIZE_TO_GIB: Record<string, number> = { K: 1 / 1024 / 1024, M: 1 / 1024, G: 1, T: 1024 };
+
+/**
+ * Parses a PVE drive `size=` value (`"32G"`, `"512M"`, `"4T"`; a bare number is bytes) into GiB,
+ * for the Hardware tab's resize dialog. `null` for `undefined` or an unrecognised shape.
+ */
+export function parseSizeToGiB(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const match = /^(\d+(?:\.\d+)?)\s*([KMGT])?$/i.exec(raw.trim());
+  if (!match) return null;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return null;
+  const suffix = (match[2] ?? '').toUpperCase();
+  if (suffix === '') return value / 1024 / 1024 / 1024;
+  return value * (SIZE_TO_GIB[suffix] ?? 0);
+}
+
+/**
+ * The grow-only `size` string PVE's resize call takes for "add `gib` GiB": `+10G` for a whole
+ * number of GiB, `+1536M` otherwise. The leading `+` is what makes it a relative grow -- the
+ * server route refuses anything without it.
+ */
+export function gibToResizeSize(gib: number): string {
+  if (Number.isInteger(gib)) return `+${gib}G`;
+  return `+${Math.round(gib * 1024)}M`;
+}
+
+/**
+ * The CPU model of a PVE `cpu` config value. The value is a property string whose model is either
+ * the first bare segment (`"host,flags=+aes"`) or `cputype=` (`"cputype=x86-64-v2-AES,hidden=1"`);
+ * `undefined` when there is no `cpu` key at all (PVE's default, `kvm64`).
+ */
+export function parseCpuModel(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const parts = raw.split(',');
+  const explicit = parts.find((p) => p.startsWith('cputype='));
+  if (explicit) return explicit.slice('cputype='.length);
+  const first = parts[0];
+  return first && !first.includes('=') ? first : undefined;
+}
+
+/**
+ * Whether `volid` is an ISO the hardware edit route will accept for a CD-ROM -- the exact shape
+ * `apps/server/src/actions/hardwareRoutes.ts` validates (`storage:iso/<file>.iso|.img`, no `..`),
+ * so the picker never offers a volume the server would just reject.
+ */
+export function isMountableIsoVolid(volid: string): boolean {
+  return (
+    volid.length <= 255 &&
+    !volid.includes('..') &&
+    /^[A-Za-z][A-Za-z0-9._-]*:iso\/[A-Za-z0-9][A-Za-z0-9._+-]*\.([iI][sS][oO]|[iI][mM][gG])$/.test(volid)
+  );
+}
+
+/** Whether a PVE `cpu` config value carries options beyond the model (flags, hidden, ...). */
+export function cpuHasExtraOptions(raw: string | undefined): boolean {
+  if (!raw) return false;
+  const parts = raw.split(',').filter((p) => p.length > 0);
+  return parts.length > 1;
+}
