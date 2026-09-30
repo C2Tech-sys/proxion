@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Hovering (or keyboard-focusing) a running guest's row in the inventory tree now shows a
+  floating console-preview card, matching the dashboard and VM/CT Summary previews; off when
+  "Console thumbnails" is disabled in Preferences, and only on fine-pointer (mouse) devices.
+
 ## [0.5.0] - 2026-09-29
 
 ### Added
