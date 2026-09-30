@@ -47,6 +47,14 @@ export interface GuestRow {
   hastate?: string | undefined;
 }
 
+/** A stable identity for one guest across sorts/filters/renders -- `node/type/vmid` is unique
+ *  cluster-wide (PVE vmids are only unique within a node+type, not globally). Used by the Guests
+ *  table's bulk-selection state (T44) to key a `Set` independent of row order, and by
+ *  `BulkActionDialog` to key its own applicable/skipped lists the same way. */
+export function guestKey(guest: Pick<GuestRow, 'node' | 'type' | 'vmid'>): string {
+  return `${guest.node}/${guest.type}/${guest.vmid}`;
+}
+
 function readHastate(resource: ClusterResource): string | undefined {
   const value = (resource as unknown as { hastate?: unknown }).hastate;
   return typeof value === 'string' && value.length > 0 ? value : undefined;
