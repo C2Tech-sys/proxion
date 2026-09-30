@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Alert notifications: the server can now announce opened/escalated/resolved/cleared alerts over
+  a webhook (generic JSON, Discord, Slack, ntfy or Gotify) and/or email, batched within a short
+  debounce window into one message per channel. Configure via `PROXION_NOTIFY_*` env vars (see
+  the README's "Notifications" section); Preferences shows which channels are configured and has
+  a "Send test notification" button.
+
 ## [0.5.0] - 2026-09-29
 
 ### Added

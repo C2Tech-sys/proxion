@@ -240,6 +240,46 @@ Other scripts: `pnpm build`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm f
 - `apps/server` -- `@proxion/server`, the Fastify API/proxy server.
 - `packages/pve-api` -- `@proxion/pve-api`, the generated Proxmox VE API client.
 
+## Notifications
+
+Proxion can announce alerts (failed tasks, backup incidents, storage over the configured
+threshold) as they open, escalate, resolve or clear -- over a webhook and/or email -- instead of
+only showing them on the dashboard. Off by default; set any of the env vars below to enable a
+channel. Multiple transitions within a short window are batched into one message per channel, and
+a restart never re-announces something it already told a channel about (state persists to
+`<PROXION_DATA_DIR>/notify-state.json`).
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `PROXION_NOTIFY_WEBHOOK_URL` | unset | Absolute `http(s)://` URL. Setting this enables the webhook channel. |
+| `PROXION_NOTIFY_WEBHOOK_FORMAT` | `generic` | `generic` \| `discord` \| `slack` \| `ntfy` \| `gotify` -- picks the request body shape. |
+| `PROXION_NOTIFY_WEBHOOK_TOKEN` | unset | Sent as `Authorization: Bearer <token>` (ntfy/gotify style). Never logged. |
+| `PROXION_NOTIFY_SMTP_URL` | unset | `smtp://user:pass@host:port` (STARTTLS) or `smtps://...` (implicit TLS). Setting this together with the two below enables the email channel. |
+| `PROXION_NOTIFY_EMAIL_FROM` | unset | Required together with `PROXION_NOTIFY_SMTP_URL`/`_EMAIL_TO`. |
+| `PROXION_NOTIFY_EMAIL_TO` | unset | Comma-separated recipient list. Required together with the two above. |
+| `PROXION_NOTIFY_MIN_SEVERITY` | `warning` | `warning` \| `error` -- the lowest severity that opens a notification. |
+| `PROXION_NOTIFY_INCLUDE_RESOLVED` | `true` | Whether a heal/removal also sends a resolved/cleared notice. |
+| `PROXION_NOTIFY_DEBOUNCE_MS` | `10000` | How long transitions are batched before sending. |
+| `PROXION_NOTIFY_SITE_NAME` | `Proxion` | Shown in message titles/subjects, e.g. `[Proxion] 2 alert(s): ...`. |
+| `PROXION_PUBLIC_URL` | unset | When set, messages include a deep link back into the app for guest alerts. |
+
+**Discord** (`PROXION_NOTIFY_WEBHOOK_FORMAT=discord`): create a channel webhook (Channel Settings
+-> Integrations -> Webhooks) and set `PROXION_NOTIFY_WEBHOOK_URL` to its URL -- no token needed.
+
+**ntfy** (`PROXION_NOTIFY_WEBHOOK_FORMAT=ntfy`): `PROXION_NOTIFY_WEBHOOK_URL=https://ntfy.sh/your-topic`
+(self-hosted ntfy works the same way); set `PROXION_NOTIFY_WEBHOOK_TOKEN` if your topic requires
+auth.
+
+**Email**: `PROXION_NOTIFY_SMTP_URL=smtps://user:pass@smtp.example.com:465`,
+`PROXION_NOTIFY_EMAIL_FROM=proxion@example.com`, `PROXION_NOTIFY_EMAIL_TO=ops@example.com`.
+
+The webhook token and the SMTP URL's embedded credentials are never written to the server's logs
+-- a channel failure logs only the channel name and host.
+
+The Preferences page shows which channels are configured and has a "Send test notification"
+button (a signed-in session only; disabled with a shared service token, same as every other write
+in token mode) -- `GET /api/notify/status` / `POST /api/notify/test`.
+
 ## Security model
 
 - **Pass-through login**: Proxion never asks for or stores your PVE

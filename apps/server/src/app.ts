@@ -15,6 +15,7 @@ import consoleRoutes from './console/routes.js';
 import consoleWsRoutes from './console/ws.js';
 import consoleThumbnailRoutes from './console/thumbnailRoutes.js';
 import prefsRoutes from './prefs/routes.js';
+import notifyRoutes from './notify/routes.js';
 import { SessionStore } from './auth/sessionStore.js';
 import { PrefsStore } from './prefs/store.js';
 import { ConsoleTicketStore } from './console/ticketStore.js';
@@ -22,6 +23,11 @@ import { ConsoleThumbnailService } from './console/thumbnailService.js';
 import { Poller } from './poller/poller.js';
 import { createPveDispatcher, createPveWsAgent } from './pve/dispatcher.js';
 import { buildPveClient } from './pve/client.js';
+import { Notifier } from './notify/notifier.js';
+import { createWebhookChannel } from './notify/channels/webhook.js';
+import { createEmailChannel } from './notify/channels/email.js';
+import type { NotifyChannel } from './notify/types.js';
+import type { ResourceLike } from '@proxion/core';
 
 export interface BuildAppOptions {
   config?: Config;
@@ -70,6 +76,59 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const poller = tokenClient ? new Poller(tokenClient, app.log) : undefined;
   app.decorate('proxionPoller', poller);
 
+  // --- Alert notifications (T43) -- one channel per configured webhook/SMTP target, and a
+  // Notifier only when at least one exists (a deployment with none configured just never
+  // decorates `app.notifier`; see notify/routes.ts's `not-configured` response). ---
+  const notifyChannels: NotifyChannel[] = [];
+  if (config.PROXION_NOTIFY_WEBHOOK_URL) {
+    notifyChannels.push(
+      createWebhookChannel({
+        url: config.PROXION_NOTIFY_WEBHOOK_URL,
+        format: config.PROXION_NOTIFY_WEBHOOK_FORMAT,
+        token: config.PROXION_NOTIFY_WEBHOOK_TOKEN,
+      }),
+    );
+  }
+  if (config.PROXION_NOTIFY_SMTP_URL && config.PROXION_NOTIFY_EMAIL_FROM && config.PROXION_NOTIFY_EMAIL_TO) {
+    notifyChannels.push(
+      createEmailChannel({
+        smtpUrl: config.PROXION_NOTIFY_SMTP_URL,
+        from: config.PROXION_NOTIFY_EMAIL_FROM,
+        to: config.PROXION_NOTIFY_EMAIL_TO,
+      }),
+    );
+  }
+  // Host names only -- never the webhook URL/token or the SMTP connection string.
+  app.log.info(
+    {
+      channels: notifyChannels.length > 0 ? notifyChannels.map((c) => ({ name: c.name, host: c.host })) : [],
+    },
+    notifyChannels.length > 0
+      ? 'Proxion notification channels configured'
+      : 'Proxion notification channels: none configured',
+  );
+
+  const notifier =
+    notifyChannels.length > 0
+      ? await Notifier.create({
+          dataDir: path.resolve(process.cwd(), config.PROXION_DATA_DIR),
+          minSeverity: config.PROXION_NOTIFY_MIN_SEVERITY,
+          includeResolved: config.PROXION_NOTIFY_INCLUDE_RESOLVED,
+          debounceMs: config.PROXION_NOTIFY_DEBOUNCE_MS,
+          siteName: config.PROXION_NOTIFY_SITE_NAME,
+          publicUrl: config.PROXION_PUBLIC_URL,
+          channels: notifyChannels,
+          log: app.log,
+          getResources: () => (poller?.getSnapshot().resources ?? []) as ResourceLike[],
+        })
+      : undefined;
+  app.decorate('notifier', notifier);
+  if (notifier && poller) {
+    poller.on((event) => {
+      if (event.type === 'alerts') notifier.onAlerts(event.data);
+    });
+  }
+
   app.addHook('onClose', async () => {
     poller?.stop();
     pveWsAgent?.destroy();
@@ -91,6 +150,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(consoleWsRoutes);
   await app.register(consoleThumbnailRoutes);
   await app.register(prefsRoutes);
+  await app.register(notifyRoutes);
 
   if (config.NODE_ENV === 'production') {
     await app.register(fastifyStatic, {

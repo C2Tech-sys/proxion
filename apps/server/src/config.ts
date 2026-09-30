@@ -107,6 +107,75 @@ const envSchema = z
     // on a constrained link. Uploads are always streamed through, never buffered, so this bounds
     // request duration/bandwidth, not this process's memory.
     PROXION_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(32 * 1024 * 1024 * 1024),
+
+    // --- Alert notifications (T43): webhook + email channels, fed by the poller's alerts
+    // snapshot (see notify/notifier.ts). Every field here is optional -- a deployment with none
+    // of them set simply has no notification channels configured, and /api/notify/status
+    // reports that.
+    PROXION_NOTIFY_WEBHOOK_URL: z
+      .string()
+      .refine(
+        (value) => {
+          try {
+            const url = new URL(value);
+            return url.protocol === 'http:' || url.protocol === 'https:';
+          } catch {
+            return false;
+          }
+        },
+        { message: 'PROXION_NOTIFY_WEBHOOK_URL must be an absolute http(s) URL' },
+      )
+      .optional(),
+    PROXION_NOTIFY_WEBHOOK_FORMAT: z
+      .enum(['generic', 'discord', 'slack', 'ntfy', 'gotify'])
+      .default('generic'),
+    // Sent as `Authorization: Bearer <token>` -- never logged (see notify/channels/webhook.ts).
+    PROXION_NOTIFY_WEBHOOK_TOKEN: z.string().optional(),
+
+    // `smtp://user:pass@host:port` (STARTTLS) or `smtps://...` (implicit TLS) -- credentials
+    // live inside the URL itself, per nodemailer convention, and are never logged.
+    PROXION_NOTIFY_SMTP_URL: z
+      .string()
+      .refine(
+        (value) => {
+          try {
+            const url = new URL(value);
+            return url.protocol === 'smtp:' || url.protocol === 'smtps:';
+          } catch {
+            return false;
+          }
+        },
+        { message: 'PROXION_NOTIFY_SMTP_URL must be an smtp:// or smtps:// URL' },
+      )
+      .optional(),
+    PROXION_NOTIFY_EMAIL_FROM: z.string().min(1).optional(),
+    // Comma-separated list of recipients.
+    PROXION_NOTIFY_EMAIL_TO: z.string().min(1).optional(),
+
+    // The lowest severity that opens a notification (an alert below this is tracked but never
+    // announced as "opened" -- see notify/notifier.ts). `healed`/resolution notices are governed
+    // separately by PROXION_NOTIFY_INCLUDE_RESOLVED, not this threshold.
+    PROXION_NOTIFY_MIN_SEVERITY: z.enum(['warning', 'error']).default('warning'),
+    PROXION_NOTIFY_INCLUDE_RESOLVED: boolEnv(true),
+    // How long the notifier batches transitions before sending one message per channel.
+    PROXION_NOTIFY_DEBOUNCE_MS: z.coerce.number().int().positive().default(10_000),
+    PROXION_NOTIFY_SITE_NAME: z.string().min(1).default('Proxion'),
+    // Used to build a deep link into a notification's body/message when set (e.g.
+    // "https://proxion.example.com"); omitted from messages entirely when unset.
+    PROXION_PUBLIC_URL: z
+      .string()
+      .refine(
+        (value) => {
+          try {
+            const url = new URL(value);
+            return url.protocol === 'http:' || url.protocol === 'https:';
+          } catch {
+            return false;
+          }
+        },
+        { message: 'PROXION_PUBLIC_URL must be an absolute http(s) URL' },
+      )
+      .optional(),
   })
   .superRefine((config, ctx) => {
     const hasId = Boolean(config.PVE_TOKEN_ID);
@@ -117,6 +186,27 @@ const envSchema = z
         path: [hasId ? 'PVE_TOKEN_SECRET' : 'PVE_TOKEN_ID'],
         message: 'PVE_TOKEN_ID and PVE_TOKEN_SECRET must both be set, or both left unset',
       });
+    }
+
+    // Email channel: SMTP_URL, EMAIL_FROM and EMAIL_TO are all-or-nothing -- any one set without
+    // the others is very likely a half-finished config, not an intentional partial setup.
+    const emailFields: Array<['PROXION_NOTIFY_SMTP_URL' | 'PROXION_NOTIFY_EMAIL_FROM' | 'PROXION_NOTIFY_EMAIL_TO', string | undefined]> = [
+      ['PROXION_NOTIFY_SMTP_URL', config.PROXION_NOTIFY_SMTP_URL],
+      ['PROXION_NOTIFY_EMAIL_FROM', config.PROXION_NOTIFY_EMAIL_FROM],
+      ['PROXION_NOTIFY_EMAIL_TO', config.PROXION_NOTIFY_EMAIL_TO],
+    ];
+    const setCount = emailFields.filter(([, value]) => Boolean(value)).length;
+    if (setCount > 0 && setCount < emailFields.length) {
+      for (const [field, value] of emailFields) {
+        if (!value) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [field],
+            message:
+              'PROXION_NOTIFY_SMTP_URL, PROXION_NOTIFY_EMAIL_FROM and PROXION_NOTIFY_EMAIL_TO must all be set together for email notifications',
+          });
+        }
+      }
     }
   });
 
