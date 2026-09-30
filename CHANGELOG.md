@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bulk actions bar starts/shuts down/reboots/stops the whole selection at once, confirming in a
   dialog that lists what applies, skips what doesn't (wrong power state, or a template) with a
   reason, and runs the applicable guests with a concurrency limit of 3.
+- "Clone…" on a guest's object header "More" menu or its context menu: clone a VM/CT to a new
+  VMID (with a "use next free ID" button), full or linked (linked only from a template), an
+  optional target node/storage, an optional source snapshot, and a description. Session sign-in
+  only, gated on `VM.Clone` (source) and `VM.Allocate` (new VMID), plus `Datastore.AllocateSpace`
+  on the target storage when one is given -- the shared service token stays read-only here too.
 
 ## [0.5.0] - 2026-09-29
 

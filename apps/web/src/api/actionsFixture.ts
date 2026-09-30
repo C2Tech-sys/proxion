@@ -13,6 +13,7 @@ import {
 import type { BackupContentItem, ClusterResource, GuestType } from '@/api/types';
 import type {
   BackupGuestBody,
+  CloneGuestBody,
   CreateSnapshotBody,
   DownloadUrlToStorageBody,
   GuestAction,
@@ -386,5 +387,46 @@ export async function fixtureRestoreGuest(
 /** Fixture-mode implementation of `getRestoreNextId` (see `src/api/actions.ts`): one past the
  * highest vmid currently in the shared in-memory fixture resources (`getFixtureNextId`). */
 export async function fixtureRestoreNextId(): Promise<number> {
+  return delay(getFixtureNextId());
+}
+
+/** How long `fixtureCloneGuest` simulates PVE's own clone taking. */
+const CLONE_DELAY_MS = 1000;
+
+/** Fixture-mode implementation of `cloneGuest` (see `src/api/actions.ts`, T42): no real request --
+ * after `CLONE_DELAY_MS`, adds a new guest row to the in-memory fixture resources
+ * (`addFixtureGuest`) -- a copy of the source guest at the new vmid/node, with the requested name
+ * (falling back to the source's own name) and always `stopped`/non-template, so the demo has a
+ * plausible fresh clone to navigate to. `full`/`storage`/`snapname`/`description`/`bwlimit` have no
+ * further fixture-visible effect. */
+export async function fixtureCloneGuest(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  body: CloneGuestBody,
+): Promise<GuestActionResult> {
+  await wait(CLONE_DELAY_MS);
+
+  const source = getFixtureGuestByVmid(vmid);
+  const target = body.target ?? node;
+  const cloned: ClusterResource = {
+    ...(source ?? { id: `${type}/${body.newid}`, type, node: target, status: 'stopped' }),
+    id: `${type}/${body.newid}`,
+    type,
+    node: target,
+    vmid: body.newid,
+    name: body.name ?? `${source?.name ?? `vm-${vmid}`}-clone`,
+    status: 'stopped',
+    template: 0,
+  };
+  addFixtureGuest(cloned);
+
+  return { upid: fakeUpidFor(target, body.newid, type === 'qemu' ? 'qmclone' : 'vzclone') };
+}
+
+/** Fixture-mode implementation of `getCloneNextId` (see `src/api/actions.ts`, T42): one past the
+ * highest vmid currently in the shared in-memory fixture resources (`getFixtureNextId`) -- same
+ * helper `fixtureRestoreNextId` uses. */
+export async function fixtureCloneNextId(): Promise<number> {
   return delay(getFixtureNextId());
 }

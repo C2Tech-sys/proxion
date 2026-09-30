@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowRightLeft, Copy, ExternalLink, Pencil, Power, RotateCw, Square, TvMinimal } from 'lucide-react';
+import { ArrowRightLeft, Copy, CopyPlus, ExternalLink, Pencil, Power, RotateCw, Square, TvMinimal } from 'lucide-react';
 import { toast } from 'sonner';
 
 import {
@@ -14,6 +14,7 @@ import { GuestActionDialog } from '@/components/actions/GuestActionDialog';
 import { useGuestActionFlow } from '@/components/actions/useGuestActionFlow';
 import { RenameGuestDialog } from '@/components/actions/RenameGuestDialog';
 import { MigrateGuestDialog } from '@/components/actions/MigrateGuestDialog';
+import { CloneGuestDialog } from '@/components/actions/CloneGuestDialog';
 import { useAuthMe, useClusterResources } from '@/api/hooks';
 import { usePermissions } from '@/api/actionHooks';
 import { USE_FIXTURES } from '@/api/client';
@@ -81,6 +82,21 @@ function useCanMigrateGuest(vmid: number, node: string): { canMigrate: boolean; 
   };
 }
 
+/** Same shape as `useCanRunGuestActions`, gated on `VM.Clone` instead -- the privilege "Clone…"
+ * needs, independent of `VM.PowerMgmt`/`VM.Config.Options`/`VM.Migrate`. */
+function useCanCloneGuest(vmid: number): { canClone: boolean; disabledReason: string } {
+  const auth = useAuthMe();
+  const permissions = usePermissions(vmid);
+  const isSessionMode = USE_FIXTURES || auth.data?.mode === 'session';
+  const hasClone = permissions.data?.can('VM.Clone') === true;
+  return {
+    canClone: isSessionMode && hasClone,
+    disabledReason: !isSessionMode
+      ? 'Read-only: signed in with a service token'
+      : "You don't have VM.Clone on this guest",
+  };
+}
+
 export interface GuestContextMenuTarget {
   node: string;
   type: GuestType;
@@ -106,9 +122,11 @@ export function GuestContextMenu({ guest, children }: GuestContextMenuProps) {
   const { canWrite, disabledReason } = useCanRunGuestActions(guest.vmid);
   const { canRename, disabledReason: renameDisabledReason } = useCanConfigureGuest(guest.vmid);
   const { canMigrate, disabledReason: migrateDisabledReason } = useCanMigrateGuest(guest.vmid, guest.node);
+  const { canClone, disabledReason: cloneDisabledReason } = useCanCloneGuest(guest.vmid);
   const flow = useGuestActionFlow({ node: guest.node, type: guest.type, vmid: guest.vmid, name: guest.name });
   const [renameOpen, setRenameOpen] = useState(false);
   const [migrateOpen, setMigrateOpen] = useState(false);
+  const [cloneOpen, setCloneOpen] = useState(false);
   const running = guest.status === 'running';
   const stopped = !running && guest.status !== 'paused';
 
@@ -153,6 +171,13 @@ export function GuestContextMenu({ guest, children }: GuestContextMenuProps) {
           onSelect={() => setMigrateOpen(true)}
         >
           <ArrowRightLeft /> Migrate…
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!canClone}
+          title={canClone ? undefined : cloneDisabledReason}
+          onSelect={() => setCloneOpen(true)}
+        >
+          <CopyPlus /> Clone…
         </ContextMenuItem>
         <ContextMenuSeparator />
         {stopped && (
@@ -212,6 +237,16 @@ export function GuestContextMenu({ guest, children }: GuestContextMenuProps) {
         key={migrateOpen ? 'migrate-open' : 'migrate-closed'}
         open={migrateOpen}
         onOpenChange={setMigrateOpen}
+        node={guest.node}
+        type={guest.type}
+        vmid={guest.vmid}
+        name={guest.name}
+        status={guest.status}
+      />
+      <CloneGuestDialog
+        key={cloneOpen ? 'clone-open' : 'clone-closed'}
+        open={cloneOpen}
+        onOpenChange={setCloneOpen}
         node={guest.node}
         type={guest.type}
         vmid={guest.vmid}

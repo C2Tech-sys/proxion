@@ -20,6 +20,8 @@ import {
   backupGuest,
   restoreGuest,
   getRestoreNextId,
+  cloneGuest,
+  getCloneNextId,
   GuestActionError,
   type GuestAction,
   type GuestActionBody,
@@ -33,6 +35,7 @@ import {
   type DownloadUrlToStorageBody,
   type BackupGuestBody,
   type RestoreGuestBody,
+  type CloneGuestBody,
 } from '@/api/actions';
 import type { GuestType, PveTask } from '@/api/types';
 
@@ -167,7 +170,15 @@ const TASK_WATCH_TIMEOUT_MS = 60_000;
  * client has no live task feed, and `SNAPSHOT_REFETCH_DELAY_MS`'s delayed invalidation alone is
  * enough there (the fixture mutation has already completed synchronously by the time it fires).
  */
-function watchTaskCompletion(queryClient: QueryClient, upid: string, onFinished: () => void): void {
+function watchTaskCompletion(
+  queryClient: QueryClient,
+  upid: string,
+  onFinished: () => void,
+  /** Optional -- called instead of `onFinished` when the finished task's own `status` reports a
+   * failure (PVE reports `"OK"` on success, anything else is the error text). Every caller before
+   * `useCloneGuest` (T42) omits this and always treats a finished task as success, unchanged. */
+  onFailed?: (message: string) => void,
+): void {
   if (USE_FIXTURES) return;
 
   const stop = queryClient.getQueryCache().subscribe((event) => {
@@ -176,7 +187,11 @@ function watchTaskCompletion(queryClient: QueryClient, upid: string, onFinished:
     const tasks = queryClient.getQueryData<PveTask[]>(TASKS_QUERY_KEY);
     const task = tasks?.find((t) => t.upid === upid);
     if (task && task.endtime !== undefined) {
-      onFinished();
+      if (onFailed && task.status !== undefined && task.status !== 'OK') {
+        onFailed(task.status);
+      } else {
+        onFinished();
+      }
       clearTimeout(timeout);
       stop();
     }
@@ -606,6 +621,75 @@ export function useRestoreNextId(node: string, type: GuestType, vmid: number, en
   return useQuery({
     queryKey: ['restore-nextid', node, type, vmid],
     queryFn: () => getRestoreNextId(node, type, vmid),
+    enabled,
+  });
+}
+
+export interface CloneGuestVars {
+  node: string;
+  type: GuestType;
+  vmid: number;
+  /** The source guest's display name, for the "Cloning <name> -> <newid>..." toast only -- never
+   * sent to the server. */
+  name: string;
+  body: CloneGuestBody;
+}
+
+/**
+ * Requests one guest clone (`src/api/actions.ts`, T42). On success: a "Cloning <name> -> <newid>..."
+ * toast right away, then waits for the task to finish (`watchTaskCompletion` -- a no-op in fixture
+ * mode, where the in-memory clone already exists by the time this fires) before invalidating the
+ * cluster-wide resources query, navigating to the new guest's own URL (Summary tab), and toasting
+ * "Clone created: <newid>". Unlike `useMigrateGuest`/`useRestoreGuest`, a *failed* clone task (PVE
+ * reports a `status` other than `"OK"` once it ends) is reported as its own error toast instead of
+ * the success toast/navigate -- a clone can fail well after this route's own 202 (e.g. the target
+ * storage runs out of space mid-copy), and there is no in-place guest left to navigate to in that
+ * case. On a request-level error (never reached PVE, or a 4xx before the task started): a toast
+ * with the server's message, same convention as `useMigrateGuest`.
+ */
+export function useCloneGuest() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  return useMutation({
+    mutationFn: (vars: CloneGuestVars) => cloneGuest(vars.node, vars.type, vars.vmid, vars.body),
+    onSuccess: (result, vars) => {
+      toast.success(`Cloning ${vars.name} → ${vars.body.newid}…`);
+      const target = vars.body.target ?? vars.node;
+
+      const finish = () => {
+        void queryClient.invalidateQueries({ queryKey: CLUSTER_RESOURCES_QUERY_KEY });
+        void navigate({
+          to: '/vm/$node/$type/$vmid',
+          params: { node: target, type: vars.type, vmid: String(vars.body.newid) },
+          search: { tab: 'summary' },
+        });
+        toast.success(`Clone created: ${vars.body.newid}`);
+      };
+      const failed = (message: string) => {
+        toast.error(message || 'The clone task failed.');
+      };
+
+      if (USE_FIXTURES) {
+        finish();
+      } else {
+        watchTaskCompletion(queryClient, result.upid, finish, failed);
+      }
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof GuestActionError ? error.message : 'The clone could not be started.');
+    },
+  });
+}
+
+/**
+ * The next free vmid in the cluster, for `CloneGuestDialog`'s "Use next free ID" button
+ * (`src/api/actions.ts`, T42). Same shape/rationale as `useRestoreNextId`.
+ */
+export function useCloneNextId(node: string, type: GuestType, vmid: number, enabled = true) {
+  return useQuery({
+    queryKey: ['clone-nextid', node, type, vmid],
+    queryFn: () => getCloneNextId(node, type, vmid),
     enabled,
   });
 }
