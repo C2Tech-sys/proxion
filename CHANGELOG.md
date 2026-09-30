@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-30
+
 ### Added
 
 - "Backup now" and "Restore from backup" on a guest's Backups tab: start a
@@ -347,7 +349,8 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/C2Tech-sys/proxion/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/C2Tech-sys/proxion/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/C2Tech-sys/proxion/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/C2Tech-sys/proxion/compare/v0.4.1...v0.4.2
