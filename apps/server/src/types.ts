@@ -8,6 +8,7 @@ import type { Poller } from './poller/poller.js';
 import type { ConsoleTicketStore } from './console/ticketStore.js';
 import type { ConsoleThumbnailService } from './console/thumbnailService.js';
 import type { PrefsStore } from './prefs/store.js';
+import type { Notifier } from './notify/notifier.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -24,5 +25,8 @@ declare module 'fastify' {
     consoleTicketStore: ConsoleTicketStore;
     consoleThumbnails: ConsoleThumbnailService;
     prefsStore: PrefsStore;
+    /** Only decorated when at least one notification channel (webhook/email) is configured -- see
+     *  `notify/routes.ts` and `app.ts`. */
+    notifier: Notifier | undefined;
   }
 }

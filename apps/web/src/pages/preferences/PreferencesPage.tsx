@@ -12,9 +12,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { SegmentedControl, SwitchToggle } from '@/pages/preferences/controls';
 import { useAuthMe } from '@/api/hooks';
 import { usePrefs, useUpdatePrefs } from '@/api/prefsHooks';
+import { useNotifyStatus, useSendTestNotification } from '@/api/notifyHooks';
 import {
   PREFS_DEFAULTS,
   type Density,
@@ -64,6 +66,83 @@ function PrefRow({
 
 const SAVED_FLASH_MS = 1500;
 
+/** Standard "shared service token, not a person" tooltip/title -- same wording
+ *  `NodePowerMenu`/`ObjectHeader`'s quick actions use for the same reason. */
+const TOKEN_MODE_TOOLTIP = 'Read-only: signed in with a service token';
+
+/**
+ * The Preferences page's "Notifications" section (T43): which alert-notification channels the
+ * server has configured (or a one-sentence hint naming the env vars when none are), and a "Send
+ * test notification" button. Disabled in token mode (a shared service token isn't a person to
+ * notify) and when nothing is configured at all -- the tooltip only covers the token-mode case
+ * (the standard one every other read-only control here uses); the "nothing configured" case
+ * explains itself via the hint text right above the button.
+ */
+function NotificationsSection({
+  readOnly,
+  configured,
+  onSendTest,
+  sending,
+}: {
+  readOnly: boolean;
+  configured: { webhook: boolean; email: boolean } | undefined;
+  onSendTest: () => void;
+  sending: boolean;
+}) {
+  const channelNames = [
+    configured?.webhook ? 'Webhook' : undefined,
+    configured?.email ? 'Email' : undefined,
+  ].filter((name): name is string => name !== undefined);
+  const hasAnyChannel = channelNames.length > 0;
+  const button = (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={readOnly || !hasAnyChannel || sending}
+      title={!readOnly && !hasAnyChannel ? 'No notification channels are configured' : undefined}
+      onClick={onSendTest}
+    >
+      {sending ? 'Sending…' : 'Send test notification'}
+    </Button>
+  );
+
+  return (
+    <div className="flex flex-col divide-y divide-border">
+      <PrefRow
+        label="Channels"
+        description={
+          hasAnyChannel
+            ? `Configured: ${channelNames.join(', ')}`
+            : 'Set PROXION_NOTIFY_WEBHOOK_URL, or PROXION_NOTIFY_SMTP_URL with PROXION_NOTIFY_EMAIL_FROM/_TO, to enable notifications.'
+        }
+      >
+        {readOnly ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span tabIndex={0} className="inline-flex rounded-md focus-visible:ring-[3px] focus-visible:ring-ring/50">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled
+                  aria-disabled="true"
+                  tabIndex={-1}
+                  title={TOKEN_MODE_TOOLTIP}
+                  className="pointer-events-none"
+                >
+                  Send test notification
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{TOKEN_MODE_TOOLTIP}</TooltipContent>
+          </Tooltip>
+        ) : (
+          button
+        )}
+      </PrefRow>
+    </div>
+  );
+}
+
 /**
  * Preferences: appearance, dashboard defaults, console thumbnails, layout, and the signed-in
  * identity. Every control saves on interaction (no Save button) -- `useUpdatePrefs`'s optimistic
@@ -74,6 +153,8 @@ export function PreferencesPage() {
   const { data: auth } = useAuthMe();
   const { data: prefs } = usePrefs();
   const updatePrefs = useUpdatePrefs();
+  const { data: notifyStatus } = useNotifyStatus();
+  const sendTest = useSendTestNotification();
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth);
   const [resetOpen, setResetOpen] = useState(false);
@@ -252,6 +333,15 @@ export function PreferencesPage() {
               </div>
             </PrefRow>
           </div>
+        </Panel>
+
+        <Panel title="Notifications">
+          <NotificationsSection
+            readOnly={readOnly}
+            configured={notifyStatus?.configured}
+            onSendTest={() => sendTest.mutate()}
+            sending={sendTest.isPending}
+          />
         </Panel>
 
         <Panel title="Account" className="lg:col-span-2">

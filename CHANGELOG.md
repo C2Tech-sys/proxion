@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hovering (or keyboard-focusing) a running guest's row in the inventory tree now shows a
   floating console-preview card, matching the dashboard and VM/CT Summary previews; off when
   "Console thumbnails" is disabled in Preferences, and only on fine-pointer (mouse) devices.
+- Alert notifications: the server can now announce opened/escalated/resolved/cleared alerts over
+  a webhook (generic JSON, Discord, Slack, ntfy or Gotify) and/or email, batched within a short
+  debounce window into one message per channel. Configure via `PROXION_NOTIFY_*` env vars (see
+  the README's "Notifications" section); Preferences shows which channels are configured and has
+  a "Send test notification" button.
 
 ## [0.5.0] - 2026-09-29
 
