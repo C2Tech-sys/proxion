@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add, edit and remove network devices from a guest's Hardware tab: an "Add network
+  device" button and an edit/remove action on each NIC row. A VM picks model, bridge
+  (from the node's bridges), VLAN tag, firewall, rate limit, disconnect and MTU; a
+  container picks its interface name, bridge, IPv4 (DHCP / static + gateway /
+  manual), IPv6 (SLAAC / DHCP / static + gateway / manual), VLAN tag, firewall, rate
+  limit and MTU. A new device gets a Proxmox-generated MAC (or an override); editing
+  never changes an existing MAC. Session sign-in only, gated on `VM.Config.Network`
+  -- the shared service token stays read-only here too.
+
 ## [0.8.0] - 2026-09-30
 
 ### Added

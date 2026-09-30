@@ -10,6 +10,8 @@ import { EditMemoryDialog } from '@/components/hardware/EditMemoryDialog';
 import { EditCdromDialog } from '@/components/hardware/EditCdromDialog';
 import { ResizeDiskDialog } from '@/components/hardware/ResizeDiskDialog';
 import { PendingBanner } from '@/components/hardware/PendingBanner';
+import { AddNicButton, EditNicDialog } from '@/components/hardware/EditNicDialog';
+import { RemoveNicButton, RemoveNicDialog } from '@/components/hardware/RemoveNicDialog';
 import { useAuthMe, useVmConfig } from '@/api/hooks';
 import { usePermissions } from '@/api/actionHooks';
 import { usePendingConfig, useResizeDisk } from '@/api/hardwareHooks';
@@ -23,6 +25,8 @@ import {
   getRootfsDrive,
   parseBootOrder,
   parseMemory,
+  parseNicConfig,
+  type NicFields,
   type ParsedDrive,
   type ParsedNetSpec,
 } from '@/lib/pve-config';
@@ -47,6 +51,16 @@ type EditTarget =
 
 /** Builds one row's pencil, already gated on session mode and the privilege it needs. */
 type ActionFor = (label: string, privilege: string, target: EditTarget) => ReactNode;
+
+/** What an open network-device dialog is for: a new device, one being edited, or one being removed. */
+type NicTarget = { kind: 'add' } | { kind: 'edit'; nic: NicFields } | { kind: 'remove'; slot: string };
+
+/** The network section's actions, already gated on session mode and `VM.Config.Network`: the
+ * "Add network device" button of its header row, and the edit pencil + remove trash of a NIC row. */
+interface NicActions {
+  add: () => ReactNode;
+  row: (nic: NicFields) => ReactNode;
+}
 
 function Flag({ on }: { on: boolean | undefined }) {
   if (on === undefined) return <span className="text-muted-foreground">-</span>;
@@ -114,12 +128,17 @@ function netLine(net: ParsedNetSpec): string {
   return bits.join(' ');
 }
 
+/** The network section header row's value. */
+function nicCount(count: number): ReactNode {
+  return <span className="text-muted-foreground">{count === 0 ? 'None' : `${count} device${count === 1 ? '' : 's'}`}</span>;
+}
+
 /** A disk bus whose drives the resize route can grow (not `unused`, EFI disk or TPM state). */
 function isResizable(drive: ParsedDrive): boolean {
   return ['ide', 'sata', 'scsi', 'virtio', 'mp'].includes(drive.bus) || drive.key === 'rootfs';
 }
 
-function qemuRows(config: GuestConfig, actionFor: ActionFor): Row[] {
+function qemuRows(config: GuestConfig, actionFor: ActionFor, nicActions: NicActions): Row[] {
   const drives = getDrives(config);
   const disks = drives.filter((d) => d.media !== 'cdrom' && d.bus !== 'efidisk' && d.bus !== 'tpmstate' && !d.volume.includes('cloudinit'));
   const cdroms = drives.filter((d) => d.media === 'cdrom' && !d.volume.includes('cloudinit'));
@@ -175,6 +194,7 @@ function qemuRows(config: GuestConfig, actionFor: ActionFor): Row[] {
     });
   }
 
+  rows.push({ label: 'Network Devices', value: nicCount(nets.length), action: nicActions.add() });
   for (const net of nets) {
     rows.push({
       label: `Network Device (${net.key})`,
@@ -187,6 +207,7 @@ function qemuRows(config: GuestConfig, actionFor: ActionFor): Row[] {
         </span>
       ),
       keys: [net.key],
+      action: nicActions.row(parseNicConfig('qemu', net.key, String(config[net.key] ?? ''))),
     });
   }
 
@@ -225,7 +246,7 @@ function qemuRows(config: GuestConfig, actionFor: ActionFor): Row[] {
   return rows;
 }
 
-function lxcRows(config: GuestConfig, actionFor: ActionFor): Row[] {
+function lxcRows(config: GuestConfig, actionFor: ActionFor, nicActions: NicActions): Row[] {
   const rootfs = getRootfsDrive(config);
   const mounts = getDrives(config).filter((d) => d.bus === 'mp');
   const nets = getNetSpecs(config);
@@ -283,6 +304,7 @@ function lxcRows(config: GuestConfig, actionFor: ActionFor): Row[] {
     });
   }
 
+  rows.push({ label: 'Network Devices', value: nicCount(nets.length), action: nicActions.add() });
   for (const net of nets) {
     rows.push({
       label: `Network Device (${net.key})`,
@@ -295,6 +317,7 @@ function lxcRows(config: GuestConfig, actionFor: ActionFor): Row[] {
         </span>
       ),
       keys: [net.key],
+      action: nicActions.row(parseNicConfig('lxc', net.key, String(config[net.key] ?? ''))),
     });
   }
 
@@ -327,6 +350,7 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
   const resize = useResizeDisk();
   const resetResize = resize.reset;
   const [editing, setEditing] = useState<EditTarget | null>(null);
+  const [nicTarget, setNicTarget] = useState<NicTarget | null>(null);
 
   // Fixture/demo mode has no real session concept -- it always demonstrates the enabled state,
   // same as the object header's own quick actions.
@@ -345,6 +369,30 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
     return <EditHardwareButton label={label} disabledReason={disabledReason} onClick={open} />;
   };
 
+  // Network devices: one privilege for add, edit and remove alike.
+  const nicDisabledReason = !isSessionMode
+    ? 'Read-only: signed in with a service token'
+    : permissions.data?.can('VM.Config.Network') !== true
+      ? "You don't have VM.Config.Network on this guest"
+      : undefined;
+  const nicActions: NicActions = {
+    add: () => <AddNicButton disabledReason={nicDisabledReason} onClick={() => setNicTarget({ kind: 'add' })} />,
+    row: (nic) => (
+      <div className="flex shrink-0 items-center">
+        <EditHardwareButton
+          label={`network device ${nic.key}`}
+          disabledReason={nicDisabledReason}
+          onClick={() => setNicTarget({ kind: 'edit', nic })}
+        />
+        <RemoveNicButton
+          slot={nic.key}
+          disabledReason={nicDisabledReason}
+          onClick={() => setNicTarget({ kind: 'remove', slot: nic.key })}
+        />
+      </div>
+    ),
+  };
+
   if (isLoading) {
     return <Skeleton className="h-64" />;
   }
@@ -355,10 +403,13 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
     return <EmptyState message="No configuration available." />;
   }
 
-  const rows = type === 'qemu' ? qemuRows(config, actionFor) : lxcRows(config, actionFor);
+  const rows = type === 'qemu' ? qemuRows(config, actionFor, nicActions) : lxcRows(config, actionFor, nicActions);
   const pendingKeys = (pending.data ?? []).filter(isPendingEntry).map((entry) => entry.key);
   const closeDialog = (open: boolean) => {
     if (!open) setEditing(null);
+  };
+  const closeNicDialog = (open: boolean) => {
+    if (!open) setNicTarget(null);
   };
 
   return (
@@ -437,6 +488,22 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
           disk={editing.disk}
           size={editing.size}
           mutation={resize}
+        />
+      )}
+      {nicTarget?.kind === 'add' && (
+        <EditNicDialog open onOpenChange={closeNicDialog} node={node} type={type} vmid={vmid} />
+      )}
+      {nicTarget?.kind === 'edit' && (
+        <EditNicDialog open onOpenChange={closeNicDialog} node={node} type={type} vmid={vmid} nic={nicTarget.nic} />
+      )}
+      {nicTarget?.kind === 'remove' && (
+        <RemoveNicDialog
+          open
+          onOpenChange={closeNicDialog}
+          node={node}
+          type={type}
+          vmid={vmid}
+          slot={nicTarget.slot}
         />
       )}
     </div>

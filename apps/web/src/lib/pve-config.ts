@@ -297,3 +297,143 @@ export function cpuHasExtraOptions(raw: string | undefined): boolean {
   const parts = raw.split(',').filter((p) => p.length > 0);
   return parts.length > 1;
 }
+
+// --- Network device editing (T50) -------------------------------------------------------------
+// Everything the NIC dialog needs that `parseNetSpec` (read-only display) doesn't cover: the full
+// editable field set (incl. `link_down`, `mtu`, `ip6`, `gw6`), a bare-model qemu value, and
+// validators that mirror `apps/server/src/actions/networkRoutes.ts` exactly.
+
+/** The qemu NIC models the server route accepts (`networkRoutes.ts`). */
+export const QEMU_NIC_MODELS = [
+  'virtio',
+  'e1000',
+  'e1000e',
+  'rtl8139',
+  'vmxnet3',
+  'e1000-82540em',
+  'e1000-82544gc',
+  'e1000-82545em',
+] as const;
+
+const MAC_RE = /^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$/;
+const BRIDGE_NAME_RE = /^[A-Za-z][A-Za-z0-9_.-]{0,14}$/;
+const LXC_NAME_RE = /^eth\d{1,3}$/;
+
+/** `AA:BB:CC:DD:EE:FF` (colon-separated, either case). */
+export function isValidMac(value: string): boolean {
+  return MAC_RE.test(value);
+}
+
+/** A valid MAC whose first byte's multicast bit is clear -- the only kind a NIC may have. */
+export function isUnicastMac(value: string): boolean {
+  return MAC_RE.test(value) && (Number.parseInt(value.slice(0, 2), 16) & 1) === 0;
+}
+
+export function isValidBridgeName(value: string): boolean {
+  return BRIDGE_NAME_RE.test(value);
+}
+
+export function isValidLxcIfName(value: string): boolean {
+  return LXC_NAME_RE.test(value);
+}
+
+export function isIPv4(value: string): boolean {
+  const parts = value.split('.');
+  return parts.length === 4 && parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255);
+}
+
+/** `a.b.c.d/n`, n in 0..32. */
+export function isIPv4Cidr(value: string): boolean {
+  const slash = value.indexOf('/');
+  if (slash === -1) return false;
+  const prefix = value.slice(slash + 1);
+  return isIPv4(value.slice(0, slash)) && /^\d{1,2}$/.test(prefix) && Number(prefix) <= 32;
+}
+
+export function isIPv6(value: string): boolean {
+  if (!value.includes(':') || !/^[0-9A-Fa-f:.]+$/.test(value)) return false;
+  const halves = value.split('::');
+  if (halves.length > 2) return false;
+  const toGroups = (side: string | undefined): string[] => (side === undefined || side === '' ? [] : side.split(':'));
+  const all = [...toGroups(halves[0]), ...(halves.length === 2 ? toGroups(halves[1]) : [])];
+  let count = 0;
+  for (let i = 0; i < all.length; i++) {
+    const group = all[i]!;
+    if (/^[0-9A-Fa-f]{1,4}$/.test(group)) {
+      count += 1;
+    } else if (i === all.length - 1 && isIPv4(group)) {
+      count += 2; // an embedded IPv4 tail is two groups
+    } else {
+      return false;
+    }
+  }
+  return halves.length === 2 ? count <= 7 : count === 8;
+}
+
+/** `<ipv6>/n`, n in 0..128. */
+export function isIPv6Cidr(value: string): boolean {
+  const slash = value.indexOf('/');
+  if (slash === -1) return false;
+  const prefix = value.slice(slash + 1);
+  return isIPv6(value.slice(0, slash)) && /^\d{1,3}$/.test(prefix) && Number(prefix) <= 128;
+}
+
+/** Every editable field of one `netN` config value. */
+export interface NicFields {
+  key: string;
+  /** qemu: the NIC model (`virtio`, ...). */
+  model?: string | undefined;
+  /** The device's MAC: qemu `<model>=<MAC>`, lxc `hwaddr=`. */
+  mac?: string | undefined;
+  bridge?: string | undefined;
+  vlan?: number | undefined;
+  firewall: boolean;
+  /** MB/s, as PVE stores it. */
+  rate?: number | undefined;
+  /** qemu only. */
+  linkDown: boolean;
+  mtu?: number | undefined;
+  /** lxc only from here on. */
+  name?: string | undefined;
+  ip?: string | undefined;
+  gw?: string | undefined;
+  ip6?: string | undefined;
+  gw6?: string | undefined;
+}
+
+function optionalNumber(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** Parses one `netN` value into its editable fields. Handles a qemu value with no MAC (a bare
+ * `virtio,bridge=vmbr0`, what PVE accepts on create) as well as the `<model>=<MAC>` form. */
+export function parseNicConfig(type: 'qemu' | 'lxc', key: string, raw: string): NicFields {
+  const kv = parseKeyValueString(raw);
+  const base: NicFields = {
+    key,
+    bridge: kv.bridge,
+    vlan: optionalNumber(kv.tag),
+    firewall: truthy(kv.firewall),
+    rate: optionalNumber(kv.rate),
+    linkDown: truthy(kv.link_down),
+    mtu: optionalNumber(kv.mtu),
+  };
+  if (type === 'lxc') {
+    return { ...base, linkDown: false, name: kv.name, mac: kv.hwaddr, ip: kv.ip, gw: kv.gw, ip6: kv.ip6, gw6: kv.gw6 };
+  }
+  const first = raw.split(',')[0] ?? '';
+  const eq = first.indexOf('=');
+  const model = eq === -1 ? first : first.slice(0, eq);
+  const mac = eq === -1 ? undefined : first.slice(eq + 1);
+  return { ...base, model: model || undefined, mac: mac && isValidMac(mac) ? mac : undefined };
+}
+
+/** The lowest unused `net<n>` (0..31) in a guest config, `undefined` when all 32 are taken. */
+export function nextFreeNetSlot(config: GuestConfig): string | undefined {
+  for (let n = 0; n < 32; n++) {
+    if (config[`net${n}`] === undefined) return `net${n}`;
+  }
+  return undefined;
+}
