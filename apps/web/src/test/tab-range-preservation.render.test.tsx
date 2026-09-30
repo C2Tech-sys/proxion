@@ -9,7 +9,7 @@ import { createQueryClient } from '@/api/queryClient';
 /** Generous on purpose: fixture mode adds a simulated 250ms network delay per query, and the
  *  full suite runs many jsdom environments in parallel, so the default 1000ms `findBy*` budget
  *  can flake under load even though it's comfortable in isolation. */
-const FIND_TIMEOUT_MS = 5000;
+const FIND_TIMEOUT_MS = 10_000;
 
 /**
  * `setTab` used to replace the whole search object (`{ tab }`), dropping `?range=` on a plain

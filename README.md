@@ -235,7 +235,7 @@ No Proxmox host handy? Demo the UI against static fixtures instead:
 pnpm demo   # fixture-mode UI, no Proxmox needed (any shell)
 ```
 
-Other scripts: `pnpm build`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm format`.
+Other scripts: `pnpm build`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm format`. On a busy machine, `PROXION_VITEST_WORKERS=<n>` caps the web suite's vitest workers.
 
 ## Workspace layout
 

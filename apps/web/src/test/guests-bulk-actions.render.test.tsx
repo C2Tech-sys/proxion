@@ -23,7 +23,7 @@ vi.mock('@/api/actions', async () => {
   return { ...actual, guestAction: (...args: unknown[]) => mockGuestAction(...args) };
 });
 
-const FIND_TIMEOUT_MS = 5000;
+const FIND_TIMEOUT_MS = 10_000;
 
 function renderGuests(initialEntry = '/guests') {
   const queryClient = createQueryClient();

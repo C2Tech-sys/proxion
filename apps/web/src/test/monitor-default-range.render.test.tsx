@@ -6,7 +6,33 @@ import { routeTree } from '@/routeTree.gen';
 
 const prefsState: { defaultRange: 'hour' | 'day' | 'week' | 'month' | 'year' } = { defaultRange: 'week' };
 /** Route + fixture data render takes a while when the whole suite runs in parallel. */
-const FIND_TIMEOUT_MS = 8000;
+const FIND_TIMEOUT_MS = 10_000;
+
+// These tests assert on the range chips, not on drawn charts. jsdom has no canvas, so the real
+// uPlot throws from its own deferred commit whenever a chart stays mounted long enough for that
+// to run (i.e. on a loaded machine); the stand-in (same shape as TimeSeriesChart.test.tsx's)
+// keeps the route's charts inert. jsdom also lacks ResizeObserver, which the chart wrapper uses.
+vi.mock('uplot', () => {
+  class MockUplot {
+    over = document.createElement('div');
+    cursor = { idx: null, left: 0, top: 0 };
+    constructor(opts: { hooks?: { ready?: ((self: MockUplot) => void)[] } }, _data: unknown, target: HTMLElement) {
+      target.appendChild(this.over);
+      opts.hooks?.ready?.forEach((fn) => fn(this));
+    }
+    setSize() {}
+    setData() {}
+    destroy() {}
+  }
+  return { default: MockUplot };
+});
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    observe() {}
+    disconnect() {}
+  },
+);
 
 vi.mock('@/api/prefsHooks', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/prefsHooks')>();

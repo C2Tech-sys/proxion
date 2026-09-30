@@ -10,7 +10,7 @@ import { PREFS_DEFAULTS, type UserPrefs } from '@/api/prefs';
 // Several of this page's fixture-client queries (status, config, agent, rrd, cluster resources,
 // node tasks, and now prefs) stack their simulated delays -- see vm-summary-last-backup's own
 // copy of this constant for why the default 1000ms findBy* timeout isn't enough.
-const FIND_TIMEOUT_MS = 5000;
+const FIND_TIMEOUT_MS = 10_000;
 
 const { patchPrefsMock } = vi.hoisted(() => ({ patchPrefsMock: vi.fn() }));
 
