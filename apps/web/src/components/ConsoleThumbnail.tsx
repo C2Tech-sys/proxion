@@ -39,6 +39,12 @@ export interface ConsoleThumbnailProps {
   template?: boolean | undefined;
   /** `'lg'` requests the 800px-wide capture (VM Summary); default is the dashboard-tile size. */
   size?: 'default' | 'lg' | undefined;
+  /** `'hover'` is the compact tile the inventory tree's hover card shows (`GuestThumbnailHover.tsx`):
+   *  same image and status placeholders as `'default'`, but no refresh button/freshness label
+   *  (there is no room, and no "leave it open and watch it refresh" use case in a hover card),
+   *  and no background refresh interval -- it fetches once when the card opens and stops, since
+   *  the whole tile unmounts the moment the pointer leaves. */
+  variant?: 'default' | 'hover' | undefined;
   className?: string | undefined;
   /** Bump this (e.g. from a "Refresh all" button) to force one live re-capture, regardless of visibility. */
   refreshToken?: number | undefined;
@@ -84,6 +90,7 @@ export function ConsoleThumbnail({
   status,
   template,
   size = 'default',
+  variant = 'default',
   className,
   refreshToken,
   refreshIntervalMs = THUMBNAIL_REFRESH_INTERVAL_MS,
@@ -252,8 +259,13 @@ export function ConsoleThumbnail({
     }
 
     void run(isManual);
+    // A hover-card tile fetches once when it opens and never again in the background: it
+    // unmounts the moment the pointer leaves, so there is no "sit there and refresh" scenario
+    // for it the way a dashboard tile or the Summary tab's has.
     const interval =
-      isVisible && isFocused ? setInterval(() => void run(false), refreshIntervalMs) : undefined;
+      variant !== 'hover' && isVisible && isFocused
+        ? setInterval(() => void run(false), refreshIntervalMs)
+        : undefined;
 
     return () => {
       cancelled = true;
@@ -271,6 +283,7 @@ export function ConsoleThumbnail({
     vmid,
     width,
     refreshIntervalMs,
+    variant,
   ]);
 
   const manualRefresh = useCallback((event: MouseEvent<HTMLButtonElement>) => {
@@ -364,7 +377,7 @@ export function ConsoleThumbnail({
             <span className="truncate text-xs font-medium text-white">{name}</span>
             <span className="shrink-0 font-numeric text-[11px] text-zinc-300">#{vmid}</span>
           </div>
-          {phase === 'ok' && (
+          {phase === 'ok' && variant !== 'hover' && (
             <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
               {(notice ?? freshness) && (
                 <span className="text-[10px] text-zinc-300">{notice ?? freshness}</span>

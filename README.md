@@ -148,7 +148,7 @@ change your cluster -- `/api/pve/*` itself stays a read-only proxy.
 | Storage browser                                    | Works           | vSphere-style datastore page at `/storage/$node/$storage`: summary strip (status, type, shared/usage) plus a searchable, sortable content browser (type chips, owner links to guests), linked from the inventory tree, command palette, dashboard and node Storage tab. |
 | Embedded VNC console / terminal                    | Works           | noVNC-protocol VNC console and xterm.js terminal, each with a toolbar (Ctrl+Alt+Del, scale-to-fit, reconnect) and a dedicated pop-out window.                          |
 | Node shell                                         | Works           | xterm.js terminal against the node's own shell, with pop-out.                                                                                                          |
-| Console thumbnails                                 | Works           | Dashboard "Consoles" panel and VM/CT Summary preview of each running guest's display, captured server-side over VNC (needs `VM.Console`); one `vncproxy` task per capture. |
+| Console thumbnails                                 | Works           | Dashboard "Consoles" panel, VM/CT Summary preview, and an inventory-tree hover card (hover or keyboard-focus a running guest row) of each running guest's display, captured server-side over VNC (needs `VM.Console`); one `vncproxy` task per capture. |
 | Recent Tasks drawer                                | Works           | Live, via the SSE task feed.                                                                                                                                           |
 | Preferences                                        | Works           | Theme, density, default Monitor range, console thumbnails on/off + refresh interval, inventory rail width, and your Summary panel order -- stored server-side per user, so they follow you across browsers. Read-only under the shared service token. |
 | Power actions                                      | Works (session sign-in only) | Start/Shut down/Reboot/Pause/Resume/Stop/Reset from the VM/CT object header (Start/Shut down/Reboot/Stop also in the inventory tree's context menu), each behind a confirmation dialog. Needs a signed-in session and `VM.PowerMgmt` on the guest -- the shared service token stays read-only, and so does the raw `/api/pve/*` proxy; this goes through one small, allow-listed server route instead. |
@@ -279,7 +279,8 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
   create/rollback/delete and the cluster-wide Guests list shipped in 0.2;
   migrate, node reboot/shutdown and the storage browser shipped in 0.3.
 - **Phase 3**: VMware-style extras -- console thumbnails in the inventory
-  tree itself (today: dashboard and VM/CT Summary only), a built-in SSH
+  tree itself (done: a hover card on each running guest row, alongside the
+  existing dashboard and VM/CT Summary previews), a built-in SSH
   client for nodes/guests, alarms/alerting, and a storage browser.
 
 ## How it's built

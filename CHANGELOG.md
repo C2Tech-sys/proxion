@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bulk actions bar starts/shuts down/reboots/stops the whole selection at once, confirming in a
   dialog that lists what applies, skips what doesn't (wrong power state, or a template) with a
   reason, and runs the applicable guests with a concurrency limit of 3.
+- Hovering (or keyboard-focusing) a running guest's row in the inventory tree now shows a
+  floating console-preview card, matching the dashboard and VM/CT Summary previews; off when
+  "Console thumbnails" is disabled in Preferences, and only on fine-pointer (mouse) devices.
 
 ## [0.5.0] - 2026-09-29
 

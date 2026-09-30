@@ -24,6 +24,7 @@ import { StatusDot } from '@/components/StatusDot';
 import { TagChip } from '@/components/TagChip';
 import { EmptyState } from '@/components/EmptyState';
 import { GuestContextMenu } from '@/components/actions/GuestContextMenu';
+import { GuestThumbnailHover } from '@/components/GuestThumbnailHover';
 import { useClusterResources } from '@/api/hooks';
 import { buildInventoryTree, filterTree, type GuestNode, type NodeNode } from '@/lib/tree';
 import { cn } from '@/lib/utils';
@@ -142,31 +143,33 @@ function GuestRow({ guest }: { guest: GuestNode }) {
   const isActive = String(params.vmid) === String(guest.vmid) && params.node === guest.node;
 
   return (
-    <GuestContextMenu guest={guest}>
-      <Link
-        to="/vm/$node/$type/$vmid"
-        params={{ node: guest.node, type: guest.type, vmid: String(guest.vmid) }}
-        search={{ tab: 'summary' }}
-        className={cn(
-          GUEST_ROW_GRID,
-          'w-full rounded-md py-1 pr-1.5 pl-7 text-left text-sm outline-none',
-          'hover:bg-accent/10 focus-visible:bg-accent/10',
-          isActive && 'bg-accent/15 text-foreground',
-        )}
-      >
-        <StatusDot status={guest.status} template={guest.template} />
-        <span className="min-w-0 truncate" title={guest.name}>
-          {guest.name}
-        </span>
-        <GuestTags tags={guest.tags} />
-        <span
-          data-testid="guest-vmid"
-          className="text-right text-[11px] text-muted-foreground font-numeric"
+    <GuestThumbnailHover guest={guest}>
+      <GuestContextMenu guest={guest}>
+        <Link
+          to="/vm/$node/$type/$vmid"
+          params={{ node: guest.node, type: guest.type, vmid: String(guest.vmid) }}
+          search={{ tab: 'summary' }}
+          className={cn(
+            GUEST_ROW_GRID,
+            'w-full rounded-md py-1 pr-1.5 pl-7 text-left text-sm outline-none',
+            'hover:bg-accent/10 focus-visible:bg-accent/10',
+            isActive && 'bg-accent/15 text-foreground',
+          )}
         >
-          {guest.vmid}
-        </span>
-      </Link>
-    </GuestContextMenu>
+          <StatusDot status={guest.status} template={guest.template} />
+          <span className="min-w-0 truncate" title={guest.name}>
+            {guest.name}
+          </span>
+          <GuestTags tags={guest.tags} />
+          <span
+            data-testid="guest-vmid"
+            className="text-right text-[11px] text-muted-foreground font-numeric"
+          >
+            {guest.vmid}
+          </span>
+        </Link>
+      </GuestContextMenu>
+    </GuestThumbnailHover>
   );
 }
 
