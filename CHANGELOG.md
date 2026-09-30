@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- "Delete…" on a guest's object header "More" menu or its context menu: permanently destroy a
+  stopped VM/CT behind a typed-VMID confirmation, with optional "purge" (also remove it from
+  backup jobs, replication and HA; off by default) and "destroy unreferenced disks" (on by
+  default) checkboxes. A running guest must be stopped first. Session sign-in only, gated on
+  `VM.Allocate` -- the shared service token stays read-only here too.
+
 ## [0.6.0] - 2026-09-30
 
 ### Added

@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowRightLeft, Copy, CopyPlus, ExternalLink, Pencil, Power, RotateCw, Square, TvMinimal } from 'lucide-react';
+import { ArrowRightLeft, Copy, CopyPlus, ExternalLink, Pencil, Power, RotateCw, Square, Trash2, TvMinimal } from 'lucide-react';
 import { toast } from 'sonner';
 
 import {
@@ -15,6 +15,7 @@ import { useGuestActionFlow } from '@/components/actions/useGuestActionFlow';
 import { RenameGuestDialog } from '@/components/actions/RenameGuestDialog';
 import { MigrateGuestDialog } from '@/components/actions/MigrateGuestDialog';
 import { CloneGuestDialog } from '@/components/actions/CloneGuestDialog';
+import { DeleteGuestDialog } from '@/components/actions/DeleteGuestDialog';
 import { useAuthMe, useClusterResources } from '@/api/hooks';
 import { usePermissions } from '@/api/actionHooks';
 import { USE_FIXTURES } from '@/api/client';
@@ -97,6 +98,22 @@ function useCanCloneGuest(vmid: number): { canClone: boolean; disabledReason: st
   };
 }
 
+/** Same shape as `useCanRunGuestActions`, gated on `VM.Allocate` instead -- the privilege
+ * "Delete…" needs (PVE requires it on `/vms/{vmid}` to destroy a guest), independent of the
+ * others. */
+function useCanDeleteGuest(vmid: number): { canDelete: boolean; disabledReason: string } {
+  const auth = useAuthMe();
+  const permissions = usePermissions(vmid);
+  const isSessionMode = USE_FIXTURES || auth.data?.mode === 'session';
+  const hasAllocate = permissions.data?.can('VM.Allocate') === true;
+  return {
+    canDelete: isSessionMode && hasAllocate,
+    disabledReason: !isSessionMode
+      ? 'Read-only: signed in with a service token'
+      : "You don't have VM.Allocate on this guest",
+  };
+}
+
 export interface GuestContextMenuTarget {
   node: string;
   type: GuestType;
@@ -123,10 +140,12 @@ export function GuestContextMenu({ guest, children }: GuestContextMenuProps) {
   const { canRename, disabledReason: renameDisabledReason } = useCanConfigureGuest(guest.vmid);
   const { canMigrate, disabledReason: migrateDisabledReason } = useCanMigrateGuest(guest.vmid, guest.node);
   const { canClone, disabledReason: cloneDisabledReason } = useCanCloneGuest(guest.vmid);
+  const { canDelete, disabledReason: deleteDisabledReason } = useCanDeleteGuest(guest.vmid);
   const flow = useGuestActionFlow({ node: guest.node, type: guest.type, vmid: guest.vmid, name: guest.name });
   const [renameOpen, setRenameOpen] = useState(false);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const running = guest.status === 'running';
   const stopped = !running && guest.status !== 'paused';
 
@@ -215,6 +234,15 @@ export function GuestContextMenu({ guest, children }: GuestContextMenuProps) {
             </ContextMenuItem>
           </>
         )}
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          variant="destructive"
+          disabled={!canDelete}
+          title={canDelete ? undefined : deleteDisabledReason}
+          onSelect={() => setDeleteOpen(true)}
+        >
+          <Trash2 /> Delete…
+        </ContextMenuItem>
       </ContextMenuContent>
       <GuestActionDialog
         key={flow.pendingAction ?? 'none'}
@@ -247,6 +275,16 @@ export function GuestContextMenu({ guest, children }: GuestContextMenuProps) {
         key={cloneOpen ? 'clone-open' : 'clone-closed'}
         open={cloneOpen}
         onOpenChange={setCloneOpen}
+        node={guest.node}
+        type={guest.type}
+        vmid={guest.vmid}
+        name={guest.name}
+        status={guest.status}
+      />
+      <DeleteGuestDialog
+        key={deleteOpen ? 'delete-open' : 'delete-closed'}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
         node={guest.node}
         type={guest.type}
         vmid={guest.vmid}

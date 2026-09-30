@@ -8,6 +8,7 @@ import {
   removeFixtureStorageContent,
   getFixtureGuestByVmid,
   addFixtureGuest,
+  removeFixtureGuest,
   getFixtureNextId,
 } from '@/api/fixtures';
 import type { BackupContentItem, ClusterResource, GuestType } from '@/api/types';
@@ -429,4 +430,21 @@ export async function fixtureCloneGuest(
  * helper `fixtureRestoreNextId` uses. */
 export async function fixtureCloneNextId(): Promise<number> {
   return delay(getFixtureNextId());
+}
+
+/** How long `fixtureDestroyGuest` simulates PVE's own destroy taking. */
+const DESTROY_DELAY_MS = 1000;
+
+/** Fixture-mode implementation of `destroyGuest` (see `src/api/actions.ts`, T47): no real request
+ * -- after `DESTROY_DELAY_MS`, removes the guest (plus its snapshots/config entries) from the
+ * in-memory fixture data (`removeFixtureGuest`), so the demo's inventory visibly loses it. The
+ * `purge`/`destroyUnreferencedDisks` flags have no fixture-visible effect. */
+export async function fixtureDestroyGuest(
+  node: string,
+  type: GuestType,
+  vmid: number,
+): Promise<GuestActionResult> {
+  await wait(DESTROY_DELAY_MS);
+  removeFixtureGuest(node, type, vmid);
+  return { upid: fakeUpidFor(node, vmid, type === 'qemu' ? 'qmdestroy' : 'vzdestroy') };
 }

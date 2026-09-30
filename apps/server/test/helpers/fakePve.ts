@@ -159,6 +159,19 @@ export interface FakePve {
     message: string,
     errors?: Record<string, string>,
   ) => void;
+  /** Every `DELETE /nodes/{node}/{type}/{vmid}` (guest destroy) request PVE has received, in
+   * order (type + vmid + the query params PVE saw -- DELETE params travel as a query string, see
+   * `snapshotCalls`). Used by `destroyRoutes.test.ts` (T47) to assert exactly what the server sent. */
+  destroyCalls: Array<{ type: 'qemu' | 'lxc'; vmid: number; query: Record<string, string> }>;
+  /** Makes the next `DELETE .../{type}/{vmid}` (guest destroy) call for the given `vmid` fail with
+   * the given status/message/errors -- same shape as `setCloneError`. */
+  setDestroyError: (
+    type: 'qemu' | 'lxc',
+    vmid: number,
+    status: number,
+    message: string,
+    errors?: Record<string, string>,
+  ) => void;
   close: () => Promise<void>;
 }
 
@@ -740,6 +753,31 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   registerCloneRoute('qemu');
   registerCloneRoute('lxc');
 
+  // Guest destroy (`DELETE /nodes/{node}/qemu/{vmid}`, `DELETE /nodes/{node}/lxc/{vmid}`), used by
+  // `src/actions/destroyRoutes.ts` (T47). Records every call (type + vmid + query) and returns a
+  // fake UPID on success, keyed errors by (type, vmid) same as `cloneErrors`.
+  const destroyCalls: Array<{ type: 'qemu' | 'lxc'; vmid: number; query: Record<string, string> }> = [];
+  const destroyErrors = new Map<string, { status: number; message: string; errors?: Record<string, string> }>();
+
+  function registerDestroyRoute(type: 'qemu' | 'lxc') {
+    app.delete(`/api2/json/nodes/:node/${type}/:vmid`, async (req, reply) => {
+      const { vmid } = req.params as { node: string; vmid: string };
+      destroyCalls.push({ type, vmid: Number(vmid), query: (req.query ?? {}) as Record<string, string> });
+      const failure = destroyErrors.get(`${type}:${Number(vmid)}`);
+      if (failure) {
+        reply
+          .code(failure.status)
+          .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
+        return;
+      }
+      reply.send({
+        data: `UPID:fakepve:00000001:00000000:00000000:${type === 'qemu' ? 'qmdestroy' : 'vzdestroy'}:${vmid}:root@pam:`,
+      });
+    });
+  }
+  registerDestroyRoute('qemu');
+  registerDestroyRoute('lxc');
+
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
   return {
@@ -896,6 +934,18 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       errors?: Record<string, string>,
     ) => {
       cloneErrors.set(cloneErrorKey(type, vmid), { status, message, ...(errors ? { errors } : {}) });
+    },
+    get destroyCalls() {
+      return destroyCalls;
+    },
+    setDestroyError: (
+      type: 'qemu' | 'lxc',
+      vmid: number,
+      status: number,
+      message: string,
+      errors?: Record<string, string>,
+    ) => {
+      destroyErrors.set(`${type}:${vmid}`, { status, message, ...(errors ? { errors } : {}) });
     },
     close: () => app.close(),
   };

@@ -22,6 +22,7 @@ import {
   getRestoreNextId,
   cloneGuest,
   getCloneNextId,
+  destroyGuest,
   GuestActionError,
   type GuestAction,
   type GuestActionBody,
@@ -36,6 +37,7 @@ import {
   type BackupGuestBody,
   type RestoreGuestBody,
   type CloneGuestBody,
+  type DestroyGuestBody,
 } from '@/api/actions';
 import type { GuestType, PveTask } from '@/api/types';
 
@@ -691,5 +693,54 @@ export function useCloneNextId(node: string, type: GuestType, vmid: number, enab
     queryKey: ['clone-nextid', node, type, vmid],
     queryFn: () => getCloneNextId(node, type, vmid),
     enabled,
+  });
+}
+
+export interface DestroyGuestVars {
+  node: string;
+  type: GuestType;
+  vmid: number;
+  /** The guest's display name, for the toasts only -- never sent to the server. */
+  name: string;
+  body: DestroyGuestBody;
+}
+
+/**
+ * Requests one guest delete (`src/api/actions.ts`, T47). On success: a "Deleting <name>..." toast
+ * right away, then waits for the task to finish (`watchTaskCompletion` -- a no-op in fixture mode,
+ * where the in-memory guest is already gone by the time this fires) before navigating to the
+ * guest's node page (Summary tab; the guest's own page no longer exists), invalidating the
+ * cluster-wide resources query, and toasting "Deleted <name> (<vmid>)". A *failed* destroy task
+ * (PVE reports a `status` other than `"OK"` once it ends, e.g. a locked guest) is reported as its
+ * own error toast instead, same as `useCloneGuest`. On a request-level error (never reached PVE,
+ * or a 4xx before the task started): a toast with the server's message.
+ */
+export function useDestroyGuest() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  return useMutation({
+    mutationFn: (vars: DestroyGuestVars) => destroyGuest(vars.node, vars.type, vars.vmid, vars.body),
+    onSuccess: (result, vars) => {
+      toast.success(`Deleting ${vars.name}…`);
+
+      const finish = () => {
+        void navigate({ to: '/node/$node', params: { node: vars.node }, search: { tab: 'summary' } });
+        void queryClient.invalidateQueries({ queryKey: CLUSTER_RESOURCES_QUERY_KEY });
+        toast.success(`Deleted ${vars.name} (${vars.vmid})`);
+      };
+      const failed = (message: string) => {
+        toast.error(message || 'The delete task failed.');
+      };
+
+      if (USE_FIXTURES) {
+        finish();
+      } else {
+        watchTaskCompletion(queryClient, result.upid, finish, failed);
+      }
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof GuestActionError ? error.message : 'The delete could not be started.');
+    },
   });
 }

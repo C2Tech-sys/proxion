@@ -17,6 +17,7 @@ import {
   fixtureRestoreNextId,
   fixtureCloneGuest,
   fixtureCloneNextId,
+  fixtureDestroyGuest,
 } from '@/api/actionsFixture';
 import type { GuestType } from '@/api/types';
 
@@ -802,6 +803,43 @@ export async function getCloneNextId(node: string, type: GuestType, vmid: number
   if (res.ok) {
     const body = (await res.json()) as { vmid: number };
     return body.vmid;
+  }
+  return throwSnapshotError(res);
+}
+
+/** Body for `destroyGuest`. Matches the server's own body contract for
+ * `DELETE /api/actions/guest/:node/:type/:vmid` (T47): `purge` also removes the guest from backup
+ * jobs, replication and HA (server default `false`); `destroyUnreferencedDisks` also removes
+ * disks owned by the guest that its config no longer references (server default `true`). */
+export interface DestroyGuestBody {
+  purge?: boolean;
+  destroyUnreferencedDisks?: boolean;
+}
+
+/**
+ * Requests one guest delete (destroy). Real mode: `DELETE /api/actions/guest/:node/:type/:vmid`
+ * with the flags in a JSON body (see the server README's "Guest actions" section). Fixture mode:
+ * simulates the request and removes the guest from the in-memory fixture resources
+ * (`actionsFixture.ts`).
+ */
+export async function destroyGuest(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  body: DestroyGuestBody,
+): Promise<GuestActionResult> {
+  if (USE_FIXTURES) {
+    return fixtureDestroyGuest(node, type, vmid);
+  }
+
+  const res = await fetch(`/api/actions/guest/${node}/${type}/${vmid}`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 202) {
+    return (await res.json()) as GuestActionResult;
   }
   return throwSnapshotError(res);
 }
