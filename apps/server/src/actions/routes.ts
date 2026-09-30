@@ -10,6 +10,7 @@ import { registerBackupRoutes } from './backupRoutes.js';
 import { registerCloneRoutes } from './cloneRoutes.js';
 import { registerDestroyRoutes } from './destroyRoutes.js';
 import { registerHardwareRoutes } from './hardwareRoutes.js';
+import { registerBootOrderRoutes } from './bootOrderRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -417,4 +418,6 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // Guest hardware edit (CPU/memory/CD-ROM) and disk grow (`hardwareRoutes.ts`) share the same
   // bucket, same rationale.
   registerHardwareRoutes(app, guestActionsRateLimit);
+  // Guest boot order (`bootOrderRoutes.ts`) shares the same bucket, same rationale.
+  registerBootOrderRoutes(app, guestActionsRateLimit);
 }

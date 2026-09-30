@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Edit a VM's boot order from its Hardware tab: the Boot Order row shows the order as
+  chips (or "No boot device") and a pencil opens a dialog listing every bootable device
+  (disks, CD/DVD drives, network devices) with an "enabled" checkbox and Up/Down buttons.
+  Legacy `boot: cdn` + `bootdisk` configs are read and rewritten as `order=...`. Session
+  sign-in only, gated on `VM.Config.Options`; containers have no boot order.
+
 ## [0.8.0] - 2026-09-30
 
 ### Added

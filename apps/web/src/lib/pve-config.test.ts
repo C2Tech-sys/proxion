@@ -10,6 +10,8 @@ import {
   getNetSpecs,
   getRootfsDrive,
   parseBootOrder,
+  parseGuestBootOrder,
+  listBootCandidates,
   parseDriveSpec,
   parseMemory,
   parseNetSpec,
@@ -227,5 +229,69 @@ describe('parseCpuModel / cpuHasExtraOptions (T48)', () => {
     expect(cpuHasExtraOptions('host')).toBe(false);
     expect(cpuHasExtraOptions('host,flags=+aes')).toBe(true);
     expect(cpuHasExtraOptions(undefined)).toBe(false);
+  });
+});
+
+describe('parseGuestBootOrder / listBootCandidates (T51)', () => {
+  const config: GuestConfig = {
+    scsi0: 'local-lvm:vm-100-disk-0,size=32G',
+    sata1: 'tank:vm-100-disk-1,size=8G',
+    ide2: 'local:iso/x.iso,media=cdrom',
+    ide3: 'tank:vm-100-cloudinit,media=cdrom',
+    net0: 'virtio=BC:24:11:64:00:01,bridge=vmbr0',
+    net1: 'e1000=BC:24:11:64:00:02,bridge=vmbr1',
+    efidisk0: 'tank:vm-100-disk-2,size=4M',
+    tpmstate0: 'tank:vm-100-disk-3,size=4M',
+    unused0: 'tank:vm-100-disk-9',
+    boot: 'order=scsi0;ide2;net0',
+  };
+
+  it('parses the modern order= form', () => {
+    expect(parseGuestBootOrder(config)).toEqual({ order: ['scsi0', 'ide2', 'net0'], legacy: false });
+  });
+
+  it('parses a modern value with extra properties and de-duplicates', () => {
+    expect(parseGuestBootOrder({ ...config, boot: 'order=net0;scsi0;net0,legacy=cdn' }).order).toEqual([
+      'net0',
+      'scsi0',
+    ]);
+  });
+
+  it('parses the legacy letters: c = bootdisk, d = first CD-ROM, n = first NIC', () => {
+    expect(parseGuestBootOrder({ ...config, boot: 'cdn', bootdisk: 'scsi0' })).toEqual({
+      order: ['scsi0', 'ide2', 'net0'],
+      legacy: true,
+    });
+    expect(parseGuestBootOrder({ ...config, boot: 'legacy=ndc', bootdisk: 'sata1' })).toEqual({
+      order: ['net0', 'ide2', 'sata1'],
+      legacy: true,
+    });
+  });
+
+  it('skips legacy letters that have no device (no bootdisk, unknown letter)', () => {
+    expect(parseGuestBootOrder({ ...config, boot: 'cdnx' }).order).toEqual(['ide2', 'net0']);
+  });
+
+  it('never maps the legacy d letter to a cloud-init drive', () => {
+    const onlyCloudInit: GuestConfig = { ide3: 'tank:vm-100-cloudinit,media=cdrom', boot: 'd' };
+    expect(parseGuestBootOrder(onlyCloudInit).order).toEqual([]);
+  });
+
+  it('returns an empty, non-legacy order without a boot key', () => {
+    expect(parseGuestBootOrder({ scsi0: 'tank:vm-100-disk-0,size=32G' })).toEqual({ order: [], legacy: false });
+  });
+
+  it('lists disks, CD-ROMs and NICs with descriptions, excluding cloud-init/EFI/TPM/unused', () => {
+    expect(listBootCandidates(config)).toEqual([
+      { key: 'ide2', label: 'ide2 — CD/DVD: local:iso/x.iso' },
+      { key: 'sata1', label: 'sata1 — tank:vm-100-disk-1 (8G)' },
+      { key: 'scsi0', label: 'scsi0 — local-lvm:vm-100-disk-0 (32G)' },
+      { key: 'net0', label: 'net0 — virtio, vmbr0' },
+      { key: 'net1', label: 'net1 — e1000, vmbr1' },
+    ]);
+  });
+
+  it('labels an empty CD-ROM drive "No media"', () => {
+    expect(listBootCandidates({ ide2: 'none,media=cdrom' })).toEqual([{ key: 'ide2', label: 'ide2 — CD/DVD: No media' }]);
   });
 });
