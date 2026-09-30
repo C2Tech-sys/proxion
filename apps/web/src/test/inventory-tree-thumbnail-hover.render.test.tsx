@@ -123,6 +123,71 @@ describe('Guest row console-thumbnail hover card', () => {
     const card = screen.getByTestId('guest-thumbnail-hover-card');
     expect(within(card).getByRole('img', { name: 'Console preview for web-prod-01' })).toBeInTheDocument();
     expect(within(card).getByText('web-prod-01 · 100')).toBeInTheDocument();
+
+    // Portaled straight to `document.body`, never as a descendant of the rail's own
+    // `overflow-y-auto` container -- that container clips its x-axis overflow, so an in-flow
+    // card nested inside it would silently get clipped the moment it didn't fit the rail's width
+    // (jsdom can't see that clipping, which is exactly why this assertion exists).
+    expect(document.body.contains(card)).toBe(true);
+    expect(screen.getByRole('tree').contains(card)).toBe(false);
+
+    // `position: fixed` with a computed, numeric `top`/`left` -- not the rail-relative
+    // `position: absolute` that a nested card would use.
+    expect(card.style.position).toBe('fixed');
+    expect(Number.isFinite(parseFloat(card.style.top))).toBe(true);
+    expect(Number.isFinite(parseFloat(card.style.left))).toBe(true);
+  });
+
+  it('clamps the card to stay inside a short viewport when the row sits near the bottom', async () => {
+    await renderTree();
+    vi.useFakeTimers();
+    vi.stubGlobal('innerWidth', 1024);
+    vi.stubGlobal('innerHeight', 200);
+
+    // The row's own wrapping element (`GuestThumbnailHover`'s trigger `<div>`) is the direct DOM
+    // parent of its `<a>` link -- `GuestContextMenu`'s Radix `ContextMenu.Root` renders no DOM
+    // node of its own around it.
+    const link = screen.getByText('web-prod-01').closest('a')!;
+    const rowEl = link.parentElement!;
+    vi.spyOn(rowEl, 'getBoundingClientRect').mockReturnValue({
+      top: 190,
+      left: 20,
+      right: 300,
+      bottom: 210,
+      width: 280,
+      height: 20,
+      x: 20,
+      y: 190,
+      toJSON: () => ({}),
+    });
+    const rail = screen.getByRole('tree');
+    vi.spyOn(rail, 'getBoundingClientRect').mockReturnValue({
+      top: 0,
+      left: 0,
+      right: 300,
+      bottom: 200,
+      width: 300,
+      height: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerEnter(screen.getByText('web-prod-01'));
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+
+    const card = screen.getByTestId('guest-thumbnail-hover-card');
+    const top = parseFloat(card.style.top);
+    const left = parseFloat(card.style.left);
+
+    // The row's own top (190) plus the card's (estimated) height would run well past a 200px-tall
+    // viewport -- the card must be shifted up to the 8px-margin ceiling of its clamp range, not
+    // left hanging off the bottom edge.
+    expect(top).toBe(8);
+    // Still placed to the right of the *rail's* right edge (300 + 6px gap), not the row's.
+    expect(left).toBe(306);
   });
 
   it('a stopped guest (db-prod-02) shows no card on hover', async () => {
