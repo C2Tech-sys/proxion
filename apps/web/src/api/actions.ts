@@ -15,6 +15,8 @@ import {
   fixtureBackupGuest,
   fixtureRestoreGuest,
   fixtureRestoreNextId,
+  fixtureCloneGuest,
+  fixtureCloneNextId,
 } from '@/api/actionsFixture';
 import type { GuestType } from '@/api/types';
 
@@ -736,6 +738,70 @@ export async function deleteStorageContent(
 
   if (res.status === 202) {
     return (await res.json()) as GuestActionResult;
+  }
+  return throwSnapshotError(res);
+}
+
+/** Body for `cloneGuest`. Matches the server's own body contract for
+ * `POST /api/actions/guest/:node/:type/:vmid/clone` -- `name` is sent as `name` for qemu / mapped
+ * to `hostname` for lxc server-side, so this shape is the same for both guest types. `full`
+ * defaults server-side to `true` (a full clone); `false` (a linked clone) is only accepted from a
+ * template source -- the server 400s (`linked-requires-template`) otherwise. */
+export interface CloneGuestBody {
+  newid: number;
+  name?: string;
+  full?: boolean;
+  target?: string;
+  storage?: string;
+  snapname?: string;
+  description?: string;
+  bwlimit?: number;
+}
+
+/**
+ * Requests one guest clone. Real mode: `POST /api/actions/guest/:node/:type/:vmid/clone` (see the
+ * server README's "Guest actions" section). Fixture mode: simulates the request and adds a new
+ * guest row -- a copy of the source guest with the new vmid/name/node -- to the in-memory fixture
+ * resources (`actionsFixture.ts`).
+ */
+export async function cloneGuest(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  body: CloneGuestBody,
+): Promise<GuestActionResult> {
+  if (USE_FIXTURES) {
+    return fixtureCloneGuest(node, type, vmid, body);
+  }
+
+  const res = await fetch(`/api/actions/guest/${node}/${type}/${vmid}/clone`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 202) {
+    return (await res.json()) as GuestActionResult;
+  }
+  return throwSnapshotError(res);
+}
+
+/**
+ * The next free vmid in the cluster, for `CloneGuestDialog`'s "Use next free ID" button. Real
+ * mode: `GET /api/actions/guest/:node/:type/:vmid/clone/nextid` (a thin proxy for PVE's own
+ * `GET /cluster/nextid`, session-only -- same endpoint `getRestoreNextId` calls, just under the
+ * clone route). Fixture mode: one past the highest vmid currently in the in-memory fixture
+ * resources (`actionsFixture.ts` / `fixtures.ts`'s `getFixtureNextId`).
+ */
+export async function getCloneNextId(node: string, type: GuestType, vmid: number): Promise<number> {
+  if (USE_FIXTURES) {
+    return fixtureCloneNextId();
+  }
+
+  const res = await fetch(`/api/actions/guest/${node}/${type}/${vmid}/clone/nextid`);
+  if (res.ok) {
+    const body = (await res.json()) as { vmid: number };
+    return body.vmid;
   }
   return throwSnapshotError(res);
 }

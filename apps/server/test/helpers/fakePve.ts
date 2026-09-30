@@ -147,6 +147,18 @@ export interface FakePve {
    * `setClusterResources` -- a test that already sets full cluster resources via that can just
    * include a `{ type: 'qemu'|'lxc', vmid, status }` row itself instead. */
   setExistingGuest: (vmid: number, status: 'running' | 'stopped') => void;
+  /** Every `POST .../{type}/{vmid}/clone` request PVE has received, in order (type + parsed form
+   * body). Used by `cloneRoutes.test.ts` (T42) to assert exactly what the server sent PVE. */
+  cloneCalls: Array<{ type: 'qemu' | 'lxc'; body: Record<string, string> }>;
+  /** Makes the next `POST .../{type}/{vmid}/clone` call for the given source `vmid` fail with the
+   * given status/message/errors -- same shape as `setCreateError`. */
+  setCloneError: (
+    type: 'qemu' | 'lxc',
+    vmid: number,
+    status: number,
+    message: string,
+    errors?: Record<string, string>,
+  ) => void;
   close: () => Promise<void>;
 }
 
@@ -698,6 +710,36 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   registerCreateRoute('qemu');
   registerCreateRoute('lxc');
 
+  // Guest clone (`POST /nodes/{node}/qemu/{vmid}/clone`, `POST /nodes/{node}/lxc/{vmid}/clone`),
+  // used by `src/actions/cloneRoutes.ts` (T42). Records every call (type + parsed form body) and
+  // returns a fake UPID on success, keyed errors by (type, source vmid) same as `createErrors`.
+  const cloneCalls: Array<{ type: 'qemu' | 'lxc'; body: Record<string, string> }> = [];
+  const cloneErrors = new Map<string, { status: number; message: string; errors?: Record<string, string> }>();
+
+  function cloneErrorKey(type: 'qemu' | 'lxc', vmid: number): string {
+    return `${type}:${vmid}`;
+  }
+
+  function registerCloneRoute(type: 'qemu' | 'lxc') {
+    app.post(`/api2/json/nodes/:node/${type}/:vmid/clone`, async (req, reply) => {
+      const { vmid } = req.params as { node: string; vmid: string };
+      const body = (req.body ?? {}) as Record<string, string>;
+      cloneCalls.push({ type, body });
+      const failure = cloneErrors.get(cloneErrorKey(type, Number(vmid)));
+      if (failure) {
+        reply
+          .code(failure.status)
+          .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
+        return;
+      }
+      reply.send({
+        data: `UPID:fakepve:00000001:00000000:00000000:${type === 'qemu' ? 'qmclone' : 'vzclone'}:${vmid}:root@pam:`,
+      });
+    });
+  }
+  registerCloneRoute('qemu');
+  registerCloneRoute('lxc');
+
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
   return {
@@ -842,6 +884,18 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     },
     setExistingGuest: (vmid: number, status: 'running' | 'stopped') => {
       existingGuestsByVmid.set(vmid, { status });
+    },
+    get cloneCalls() {
+      return cloneCalls;
+    },
+    setCloneError: (
+      type: 'qemu' | 'lxc',
+      vmid: number,
+      status: number,
+      message: string,
+      errors?: Record<string, string>,
+    ) => {
+      cloneErrors.set(cloneErrorKey(type, vmid), { status, message, ...(errors ? { errors } : {}) });
     },
     close: () => app.close(),
   };

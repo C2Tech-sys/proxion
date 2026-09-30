@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import {
   ArrowRightLeft,
+  CopyPlus,
   Loader2,
   MoreHorizontal,
   Pause,
@@ -29,6 +30,7 @@ import { GuestActionDialog } from '@/components/actions/GuestActionDialog';
 import { useGuestActionFlow } from '@/components/actions/useGuestActionFlow';
 import { RenameGuestDialog } from '@/components/actions/RenameGuestDialog';
 import { MigrateGuestDialog } from '@/components/actions/MigrateGuestDialog';
+import { CloneGuestDialog } from '@/components/actions/CloneGuestDialog';
 import { useAuthMe, useClusterResources } from '@/api/hooks';
 import { usePermissions } from '@/api/actionHooks';
 import { USE_FIXTURES } from '@/api/client';
@@ -131,19 +133,22 @@ function GuestQuickActions({
   const flow = useGuestActionFlow({ node, type, vmid, name });
   const [renameOpen, setRenameOpen] = useState(false);
   const [migrateOpen, setMigrateOpen] = useState(false);
+  const [cloneOpen, setCloneOpen] = useState(false);
 
   // Fixture/demo mode has no real session concept (and nothing real to protect) -- it always
   // demonstrates the enabled state. A real deployment gates strictly on the caller's own
-  // session + VM.PowerMgmt (or, for rename, VM.Config.Options; for migrate, VM.Migrate);
-  // the server enforces all three independently of this client-side gate.
+  // session + VM.PowerMgmt (or, for rename, VM.Config.Options; for migrate, VM.Migrate; for
+  // clone, VM.Clone); the server enforces all of these independently of this client-side gate.
   const isSessionMode = USE_FIXTURES || auth.data?.mode === 'session';
   const hasPowerMgmt = permissions.data?.can('VM.PowerMgmt') === true;
   const hasConfigOptions = permissions.data?.can('VM.Config.Options') === true;
   const hasMigrate = permissions.data?.can('VM.Migrate') === true;
+  const hasClone = permissions.data?.can('VM.Clone') === true;
   const otherNodeCount = (clusterResources.data ?? []).filter((r) => r.type === 'node' && r.node !== node).length;
   const canWrite = isSessionMode && hasPowerMgmt;
   const canRename = isSessionMode && hasConfigOptions;
   const canMigrate = isSessionMode && hasMigrate && otherNodeCount > 0;
+  const canClone = isSessionMode && hasClone;
   const disabledReason = !isSessionMode
     ? 'Read-only: signed in with a service token'
     : !hasPowerMgmt
@@ -161,6 +166,11 @@ function GuestQuickActions({
       : otherNodeCount === 0
         ? 'No other node to migrate to'
         : undefined;
+  const cloneDisabledReason = !isSessionMode
+    ? 'Read-only: signed in with a service token'
+    : !hasClone
+      ? "You don't have VM.Clone on this guest"
+      : undefined;
 
   const running = status === 'running';
   const paused = status === 'paused';
@@ -267,6 +277,13 @@ function GuestQuickActions({
             >
               <ArrowRightLeft /> Migrate…
             </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!canClone}
+              title={canClone ? undefined : cloneDisabledReason}
+              onSelect={() => setCloneOpen(true)}
+            >
+              <CopyPlus /> Clone…
+            </DropdownMenuItem>
             {showDestructiveActions && (
               <>
                 <DropdownMenuSeparator />
@@ -315,6 +332,16 @@ function GuestQuickActions({
         key={migrateOpen ? 'migrate-open' : 'migrate-closed'}
         open={migrateOpen}
         onOpenChange={setMigrateOpen}
+        node={node}
+        type={type}
+        vmid={vmid}
+        name={name}
+        status={status}
+      />
+      <CloneGuestDialog
+        key={cloneOpen ? 'clone-open' : 'clone-closed'}
+        open={cloneOpen}
+        onOpenChange={setCloneOpen}
         node={node}
         type={type}
         vmid={vmid}

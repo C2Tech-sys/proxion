@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   debounce window into one message per channel. Configure via `PROXION_NOTIFY_*` env vars (see
   the README's "Notifications" section); Preferences shows which channels are configured and has
   a "Send test notification" button.
+- "Clone…" on a guest's object header "More" menu or its context menu: clone a VM/CT to a new
+  VMID (with a "use next free ID" button), full or linked (linked only from a template), an
+  optional target node/storage, an optional source snapshot, and a description. Session sign-in
+  only, gated on `VM.Clone` (source) and `VM.Allocate` (new VMID), plus `Datastore.AllocateSpace`
+  on the target storage when one is given -- the shared service token stays read-only here too.
 
 ## [0.5.0] - 2026-09-29
 
