@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { ConsoleToolbar, ConsoleToolbarButton } from './ConsoleToolbar';
 import type { ConsoleConnectionStatus } from './ConsoleStatusPill';
 import { CONSOLE_SURFACE_HEIGHT_CLASS } from './layout';
+import { PasteTextDialog, type PasteTarget } from './PasteTextDialog';
 
 export interface VncConsoleProps {
   node: string;
@@ -32,6 +33,7 @@ export function VncConsole({ node, type, vmid, fill }: VncConsoleProps) {
   const [reason, setReason] = useState<string | undefined>(undefined);
   const [scaled, setScaled] = useState(true);
   const [attempt, setAttempt] = useState(0);
+  const [pasteOpen, setPasteOpen] = useState(false);
 
   // Prefixed with `import.meta.env.BASE_URL` so the pop-out window still resolves under the
   // GitHub Pages demo's `/proxion/` base -- see vite.config.ts's `base`.
@@ -127,12 +129,12 @@ export function VncConsole({ node, type, vmid, fill }: VncConsoleProps) {
     setAttempt((n) => n + 1);
   }, []);
 
-  const pasteClipboard = useCallback(() => {
-    navigator.clipboard
-      .readText()
-      .then((text) => rfbRef.current?.clipboardPasteFrom(text))
-      .catch(() => toast.error('Could not read the clipboard'));
-  }, []);
+  // Paste opens a dialog that types the text as keystrokes -- VNC's clipboard message alone does
+  // nothing on guests without a clipboard agent (see lib/vncTyping.ts).
+  const pasteClipboard = useCallback(() => setPasteOpen(true), []);
+
+  // The ambient noVNC declaration pins only a small surface; sendKey/focus are real RFB methods.
+  const getPasteTarget = useCallback(() => rfbRef.current as (RFB & PasteTarget) | null, []);
 
   const openPopout = useCallback(() => {
     window.open(popoutHref, '_blank', 'popup,width=1280,height=800');
@@ -189,6 +191,7 @@ export function VncConsole({ node, type, vmid, fill }: VncConsoleProps) {
         ref={containerRef}
         className="min-h-0 flex-1 overflow-hidden rounded-b-md border border-t-0 border-border bg-black"
       />
+      <PasteTextDialog open={pasteOpen} onOpenChange={setPasteOpen} getTarget={getPasteTarget} />
     </div>
   );
 }
