@@ -12,6 +12,9 @@ import {
   fixtureDownloadUrlToStorage,
   fixtureQueryUrlMetadata,
   fixtureDeleteStorageContent,
+  fixtureBackupGuest,
+  fixtureRestoreGuest,
+  fixtureRestoreNextId,
 } from '@/api/actionsFixture';
 import type { GuestType } from '@/api/types';
 
@@ -593,6 +596,110 @@ export async function queryUrlMetadata(node: string, url: string, verifyCertific
   const res = await fetch(`/api/actions/storage/${node}/query-url-metadata?${query}`);
   if (res.ok) {
     return (await res.json()) as UrlMetadataResult;
+  }
+  return throwSnapshotError(res);
+}
+
+/** Body for `backupGuest`. Matches the server's own body contract for
+ * `POST /api/actions/guest/:node/:type/:vmid/backup` -- `compress` and `prune` both default
+ * server-side (`zstd`, no pruning), but `BackupNowDialog` always sends every field explicitly. */
+export interface BackupGuestBody {
+  storage: string;
+  mode: 'snapshot' | 'suspend' | 'stop';
+  compress?: 'zstd' | 'gzip' | 'lzo' | '0';
+  protected?: boolean;
+  notes?: string;
+  prune?: boolean;
+}
+
+/**
+ * Requests one guest backup (vzdump) start. Real mode:
+ * `POST /api/actions/guest/:node/:type/:vmid/backup` (see the server README's "Guest actions"
+ * section). Fixture mode: simulates the request (~1s) and adds a realistic backup volume to the
+ * in-memory fixture storage content (`actionsFixture.ts`).
+ */
+export async function backupGuest(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  body: BackupGuestBody,
+): Promise<GuestActionResult> {
+  if (USE_FIXTURES) {
+    return fixtureBackupGuest(node, type, vmid, body);
+  }
+
+  const res = await fetch(`/api/actions/guest/${node}/${type}/${vmid}/backup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 202) {
+    return (await res.json()) as GuestActionResult;
+  }
+  return throwSnapshotError(res);
+}
+
+/** Body for `restoreGuest`. Matches the server's own body contract for
+ * `POST /api/actions/guest/:node/:type/:vmid/restore`. `unique` is qemu-only; `unprivileged` is
+ * lxc-only -- the server 400s if either is sent for the other guest type. `targetVmid` defaults to
+ * the guest's own `:vmid` server-side when omitted, but `RestoreBackupDialog` always sends it. */
+export interface RestoreGuestBody {
+  archive: string;
+  targetVmid?: number;
+  storage?: string;
+  start?: boolean;
+  force?: boolean;
+  /** qemu only. */
+  unique?: boolean;
+  /** lxc only. */
+  unprivileged?: boolean;
+}
+
+/**
+ * Requests one guest restore-from-backup. Real mode:
+ * `POST /api/actions/guest/:node/:type/:vmid/restore` (see the server README's "Guest actions"
+ * section). Fixture mode: simulates the request and either flips the target guest's status
+ * (restoring over an existing guest) or adds a new guest to the in-memory fixture resources
+ * (restoring to a fresh id), via `actionsFixture.ts`.
+ */
+export async function restoreGuest(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  body: RestoreGuestBody,
+): Promise<GuestActionResult> {
+  if (USE_FIXTURES) {
+    return fixtureRestoreGuest(node, type, vmid, body);
+  }
+
+  const res = await fetch(`/api/actions/guest/${node}/${type}/${vmid}/restore`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 202) {
+    return (await res.json()) as GuestActionResult;
+  }
+  return throwSnapshotError(res);
+}
+
+/**
+ * The next free vmid in the cluster, for the restore dialog's "Use next free ID" button. Real
+ * mode: `GET /api/actions/guest/:node/:type/:vmid/restore/nextid` (a thin proxy for PVE's own
+ * `GET /cluster/nextid`, session-only). Fixture mode: one past the highest vmid currently in the
+ * in-memory fixture resources (`actionsFixture.ts` / `fixtures.ts`'s `getFixtureNextId`).
+ */
+export async function getRestoreNextId(node: string, type: GuestType, vmid: number): Promise<number> {
+  if (USE_FIXTURES) {
+    return fixtureRestoreNextId();
+  }
+
+  const res = await fetch(`/api/actions/guest/${node}/${type}/${vmid}/restore/nextid`);
+  if (res.ok) {
+    const body = (await res.json()) as { vmid: number };
+    return body.vmid;
   }
   return throwSnapshotError(res);
 }

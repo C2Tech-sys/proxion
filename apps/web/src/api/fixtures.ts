@@ -405,6 +405,36 @@ export function removeFixtureStorageContent(node: string, storage: string, volid
   if (index !== -1) items.splice(index, 1);
 }
 
+/**
+ * Test/demo-only lookup: the one guest (qemu or lxc) at `vmid` in the shared in-memory `resources`
+ * array, or `undefined` if none exists -- used by `actionsFixture.ts`'s `fixtureRestoreGuest` to
+ * tell an in-place restore (the target vmid already exists) from a restore-to-a-new-id.
+ */
+export function getFixtureGuestByVmid(vmid: number): ClusterResource | undefined {
+  return resources.find((r) => (r.type === 'qemu' || r.type === 'lxc') && r.vmid === vmid);
+}
+
+/**
+ * Test/demo-only mutator: appends one new guest row to the shared in-memory `resources` array, in
+ * place -- same convention as the other fixture mutators above. Used by `actionsFixture.ts`'s
+ * `fixtureRestoreGuest` to simulate a restore-to-a-new-id creating a brand new guest, since (unlike
+ * every other fixture mutator here) there is no existing row to update.
+ */
+export function addFixtureGuest(resource: ClusterResource): void {
+  resources.push(resource);
+}
+
+/**
+ * Test/demo-only: one past the highest vmid currently in the shared in-memory `resources` array
+ * (any resource type, matching real PVE's own `GET /cluster/nextid`, which considers every id in
+ * the cluster) -- used by `actionsFixture.ts`'s `fixtureRestoreNextId` for the restore dialog's
+ * "Use next free ID" button.
+ */
+export function getFixtureNextId(): number {
+  const highest = resources.reduce((max, r) => (typeof r.vmid === 'number' ? Math.max(max, r.vmid) : max), 0);
+  return highest + 1;
+}
+
 /** Demo-only: which qemu guests' migrate precheck reports a local disk, purely synthetic (not
  * derived from any fixture json -- this app's fixture data has no per-guest storage/disk model)
  * so the "Migrate local disks" checkbox has something to show in the demo. `web-prod-01` (vmid

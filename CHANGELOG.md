@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- "Backup now" and "Restore from backup" on a guest's Backups tab: start a
+  vzdump backup (storage, mode, compression, protected, notes, optional
+  retention pruning), and restore a backup over an existing guest (with a
+  typed-VMID confirm and a running-guest guard) or onto a fresh VMID
+  (with a "use next free ID" button), plus a per-row Delete. Session
+  sign-in only, gated on `VM.Backup`/`VM.Allocate`/`Datastore.AllocateSpace`/
+  `Datastore.Allocate` as appropriate -- the shared service token stays
+  read-only here too.
+
 ## [0.5.0] - 2026-09-29
 
 ### Added

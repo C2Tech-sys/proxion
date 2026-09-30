@@ -17,6 +17,9 @@ import {
   nodeAction,
   downloadUrlToStorage,
   deleteStorageContent,
+  backupGuest,
+  restoreGuest,
+  getRestoreNextId,
   GuestActionError,
   type GuestAction,
   type GuestActionBody,
@@ -28,6 +31,8 @@ import {
   type MigrateGuestBody,
   type NodeActionCommand,
   type DownloadUrlToStorageBody,
+  type BackupGuestBody,
+  type RestoreGuestBody,
 } from '@/api/actions';
 import type { GuestType, PveTask } from '@/api/types';
 
@@ -501,5 +506,106 @@ export function useStorageDelete() {
     onError: (error: unknown, vars) => {
       toast.error(error instanceof GuestActionError ? error.message : `${vars.name} could not be deleted.`);
     },
+  });
+}
+
+export interface BackupGuestVars {
+  node: string;
+  type: GuestType;
+  vmid: number;
+  /** The guest's display name, for the "Backup started"/"finished" toasts only -- never sent to
+   * the server. */
+  name: string;
+  body: BackupGuestBody;
+}
+
+/**
+ * Requests one guest backup (vzdump) start (`src/api/actions.ts`, T41). On success: a "Backup
+ * started: <name>" toast right away, then waits for the task to finish (`watchTaskCompletion` --
+ * a no-op in fixture mode, where the in-memory backup volume already exists by the time this
+ * fires) before invalidating this tab's own `['storage-content', node, storage]` query (so the new
+ * backup volume shows up) and the shared `['tasks']` query, then toasting "Backup of <name>
+ * finished". On error: a toast with the server's message, same convention as `useGuestAction`.
+ */
+export function useBackupGuest() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (vars: BackupGuestVars) => backupGuest(vars.node, vars.type, vars.vmid, vars.body),
+    onSuccess: (result, vars) => {
+      toast.success(`Backup started: ${vars.name}`);
+      const finish = () => {
+        void queryClient.invalidateQueries({ queryKey: ['storage-content', vars.node, vars.body.storage] });
+        void queryClient.invalidateQueries({ queryKey: TASKS_QUERY_KEY });
+        toast.success(`Backup of ${vars.name} finished`);
+      };
+      if (USE_FIXTURES) finish();
+      else watchTaskCompletion(queryClient, result.upid, finish);
+    },
+    onError: (error: unknown, vars) => {
+      toast.error(error instanceof GuestActionError ? error.message : `Backup of ${vars.name} could not be started.`);
+    },
+  });
+}
+
+export interface RestoreGuestVars {
+  node: string;
+  type: GuestType;
+  vmid: number;
+  /** The restore's actual target vmid -- equal to `vmid` for an in-place restore, or a different
+   * (existing-overwrite or brand-new) id otherwise. Drives the post-restore navigate/toast below. */
+  targetVmid: number;
+  body: RestoreGuestBody;
+}
+
+/**
+ * Requests one guest restore-from-backup (`src/api/actions.ts`, T41). On success: a "Restore
+ * started…" toast right away, then waits for the task to finish (`watchTaskCompletion`) before
+ * invalidating the cluster-wide resources query and the target guest's own status query; when
+ * `targetVmid` differs from the source guest's own `vmid` (a new-id or cross-id overwrite restore),
+ * also navigates to the target guest's own URL (Summary tab) and toasts "Restored as <targetVmid>".
+ * On error: a toast with the server's message, same convention as `useMigrateGuest`.
+ */
+export function useRestoreGuest() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  return useMutation({
+    mutationFn: (vars: RestoreGuestVars) => restoreGuest(vars.node, vars.type, vars.vmid, vars.body),
+    onSuccess: (result, vars) => {
+      toast.success('Restore started…');
+
+      const finish = () => {
+        void queryClient.invalidateQueries({ queryKey: CLUSTER_RESOURCES_QUERY_KEY });
+        void queryClient.invalidateQueries({ queryKey: ['vm-status', vars.node, vars.type, vars.targetVmid] });
+        if (vars.targetVmid !== vars.vmid) {
+          void navigate({
+            to: '/vm/$node/$type/$vmid',
+            params: { node: vars.node, type: vars.type, vmid: String(vars.targetVmid) },
+            search: { tab: 'summary' },
+          });
+          toast.success(`Restored as ${vars.targetVmid}`);
+        }
+      };
+
+      if (USE_FIXTURES) finish();
+      else watchTaskCompletion(queryClient, result.upid, finish);
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof GuestActionError ? error.message : 'The restore could not be started.');
+    },
+  });
+}
+
+/**
+ * The next free vmid in the cluster, for `RestoreBackupDialog`'s "Use next free ID" button
+ * (`src/api/actions.ts`, T41). `enabled` is wired to the dialog's own `open` state, same
+ * convention as `useMigratePrecheck` -- this component stays mounted, just hidden, between opens.
+ */
+export function useRestoreNextId(node: string, type: GuestType, vmid: number, enabled = true) {
+  return useQuery({
+    queryKey: ['restore-nextid', node, type, vmid],
+    queryFn: () => getRestoreNextId(node, type, vmid),
+    enabled,
   });
 }
