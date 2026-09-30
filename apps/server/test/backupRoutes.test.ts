@@ -257,6 +257,26 @@ describe('guest backup/restore routes', () => {
       expect(res.statusCode).toBe(400);
       expect(res.json()).toEqual({ error: 'target-running', message: 'Stop the guest before restoring over it' });
     });
+
+    it('force with a target id that does not exist is a 400, and PVE is never called', async () => {
+      const cookie = await setupSession();
+      // targetVmid 999 does not exist (no setExistingGuest call) -- `force` has nothing to
+      // overwrite, so it's rejected outright rather than being silently dropped before PVE.
+      const res = await restore('/node1/qemu/100', {
+        cookie,
+        payload: {
+          archive: 'local:backup/vzdump-qemu-100-2024_01_01-00_00_00.tar.zst',
+          targetVmid: 999,
+          force: true,
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({
+        error: 'force-without-target',
+        message: 'force is only accepted when restoring over an existing guest',
+      });
+      expect(fakePve.createCalls).toHaveLength(0);
+    });
   });
 
   describe('restore privilege matrix', () => {
@@ -271,7 +291,7 @@ describe('guest backup/restore routes', () => {
       expect(res.json()).toEqual({ error: 'forbidden', missing: 'VM.Allocate' });
     });
 
-    it('new id succeeds with VM.Allocate', async () => {
+    it('new id succeeds with VM.Allocate, and PVE receives no force field at all', async () => {
       const cookie = await setupSession();
       fakePve.setVmPermissions(999, { 'VM.Allocate': true });
       const res = await restore('/node1/qemu/100', {
@@ -279,6 +299,12 @@ describe('guest backup/restore routes', () => {
         payload: { archive: 'local:backup/vzdump-qemu-100-2024_01_01-00_00_00.tar.zst', targetVmid: 999 },
       });
       expect(res.statusCode).toBe(202);
+      const call = fakePve.createCalls.at(-1);
+      expect(call?.body).toEqual({
+        vmid: '999',
+        archive: 'local:backup/vzdump-qemu-100-2024_01_01-00_00_00.tar.zst',
+      });
+      expect(call?.body).not.toHaveProperty('force');
     });
 
     it('overwrite accepts VM.Backup alone', async () => {

@@ -381,6 +381,15 @@ export function registerBackupRoutes(
           reply.code(400).send({ error: 'target-running', message: 'Stop the guest before restoring over it' });
           return;
         }
+      } else if (body.data.force) {
+        // A caller-supplied `force: true` for a target id that does NOT exist is never forwarded
+        // to PVE (see `callRestore`'s own call below) -- silently dropping it would let a raw API
+        // caller believe `force` took effect when it didn't, so this is rejected outright instead.
+        reply.code(400).send({
+          error: 'force-without-target',
+          message: 'force is only accepted when restoring over an existing guest',
+        });
+        return;
       }
 
       let missingVmPriv: string | undefined;
@@ -414,7 +423,14 @@ export function registerBackupRoutes(
           archive: body.data.archive,
           storage: body.data.storage,
           start: body.data.start,
-          force: body.data.force,
+          // Derived from the route's own existence check, never forwarded from the client body
+          // directly -- `overwriting` is what the target-exists/target-running gates above just
+          // verified against PVE's current state, closing the race a raw API caller's own
+          // `force: true` could otherwise exploit against a guest created concurrently under this
+          // id (see this route's own doc comment / T41 fix pass). The `force-without-target` 400
+          // above already refuses a `force: true` that wouldn't be forwarded here, so the client's
+          // intent is never silently dropped.
+          force: overwriting ? true : undefined,
           unique: body.data.unique,
           unprivileged: body.data.unprivileged,
         });
