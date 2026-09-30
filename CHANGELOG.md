@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The VNC console's "Paste" button now actually types into the guest. It used to send only
+  VNC's clipboard message, which QEMU forwards into the guest only when a clipboard agent
+  (qemu-vdagent / spice-vdagent) is running -- so on almost every VM nothing arrived. Paste now
+  opens a box (pre-filled from the clipboard where the browser allows) and types the text as
+  keystrokes (US keyboard layout assumed, up to 4096 characters, with progress and Cancel;
+  characters with no key, such as emoji, are skipped and counted).
+
 ## [0.6.0] - 2026-09-30
 
 ### Added
