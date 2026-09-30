@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add, detach and remove disks from a guest's Hardware tab. "Add disk" (VM) / "Add mount
+  point" (container) creates a new volume on an image-capable storage of the node -- bus,
+  size, a format limited to what the storage supports, cache / discard / SSD / IO thread and
+  backup for a VM; path, backup, read-only and ACL for a container -- and shows each
+  storage's free space. "Detach" keeps the volume as an unused disk; "Remove" on an unused
+  disk destroys the volume and needs its slot name typed to confirm. Session sign-in only;
+  adding needs `VM.Config.Disk` on the guest plus `Datastore.AllocateSpace` on the storage,
+  detaching and removing need `VM.Config.Disk`.
+
 ## [0.8.0] - 2026-09-30
 
 ### Added

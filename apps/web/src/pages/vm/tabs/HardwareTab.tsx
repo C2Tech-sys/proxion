@@ -1,7 +1,10 @@
 import { useState, type ReactNode } from 'react';
+import { Plus, Trash2, Unplug } from 'lucide-react';
 
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { EmptyState } from '@/components/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EditHardwareButton } from '@/components/hardware/EditHardwareButton';
@@ -9,8 +12,12 @@ import { EditCpuDialog } from '@/components/hardware/EditCpuDialog';
 import { EditMemoryDialog } from '@/components/hardware/EditMemoryDialog';
 import { EditCdromDialog } from '@/components/hardware/EditCdromDialog';
 import { ResizeDiskDialog } from '@/components/hardware/ResizeDiskDialog';
+import { AddDiskDialog } from '@/components/hardware/AddDiskDialog';
+import { DetachDiskDialog } from '@/components/hardware/DetachDiskDialog';
+import { RemoveUnusedDiskDialog } from '@/components/hardware/RemoveUnusedDiskDialog';
 import { PendingBanner } from '@/components/hardware/PendingBanner';
-import { useAuthMe, useVmConfig } from '@/api/hooks';
+import { useAuthMe, useClusterResources, useVmConfig } from '@/api/hooks';
+import { diskCapableStorages } from '@/api/disks';
 import { usePermissions } from '@/api/actionHooks';
 import { usePendingConfig, useResizeDisk } from '@/api/hardwareHooks';
 import { isPendingEntry } from '@/api/hardware';
@@ -43,7 +50,10 @@ type EditTarget =
   | { kind: 'cpu' }
   | { kind: 'memory' }
   | { kind: 'cdrom'; slot: string; volid: string | undefined }
-  | { kind: 'disk'; disk: string; size: string | undefined };
+  | { kind: 'disk'; disk: string; size: string | undefined }
+  | { kind: 'addDisk' }
+  | { kind: 'detach'; slot: string }
+  | { kind: 'removeUnused'; slot: string; volume: string | undefined };
 
 /** Builds one row's pencil, already gated on session mode and the privilege it needs. */
 type ActionFor = (label: string, privilege: string, target: EditTarget) => ReactNode;
@@ -119,9 +129,89 @@ function isResizable(drive: ParsedDrive): boolean {
   return ['ide', 'sata', 'scsi', 'virtio', 'mp'].includes(drive.bus) || drive.key === 'rootfs';
 }
 
+/** The lowest free `unused[n]` key, i.e. where PVE parks the next detached volume. */
+function nextUnusedSlot(config: GuestConfig): string {
+  for (let n = 0; n < 256; n++) {
+    if (!(`unused${n}` in config)) return `unused${n}`;
+  }
+  return 'unused0';
+}
+
+/** The disk lifecycle buttons (add / detach / remove an unused volume): the same gating and
+ * disabled-tooltip convention as `EditHardwareButton`, with their own look. */
+function DiskActionButton({
+  kind,
+  label,
+  disabledReason,
+  onClick,
+}: {
+  kind: 'addDisk' | 'detach' | 'removeUnused';
+  label: string;
+  disabledReason: string | undefined;
+  onClick: () => void;
+}) {
+  const disabled = disabledReason !== undefined;
+  if (kind === 'addDisk') {
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 shrink-0"
+        aria-label={label}
+        disabled={disabled}
+        aria-disabled={disabled || undefined}
+        title={disabledReason}
+        onClick={onClick}
+      >
+        <Plus className="size-3.5" />
+        {label}
+      </Button>
+    );
+  }
+  const Icon = kind === 'detach' ? Unplug : Trash2;
+  const className = kind === 'removeUnused' ? 'size-7 shrink-0 text-destructive hover:text-destructive' : 'size-7 shrink-0';
+  if (disabled) {
+    return (
+      <Button variant="ghost" size="icon" className={className} disabled aria-disabled="true" aria-label={label} title={disabledReason}>
+        <Icon className="size-3.5" />
+      </Button>
+    );
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon" className={className} aria-label={label} onClick={onClick}>
+          <Icon className="size-3.5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** The disks section's header row: its "Add" button lives in the row's action slot. */
+function disksHeaderRow(actionFor: ActionFor, label: string, hint: string): Row {
+  return {
+    label: 'Disks',
+    value: <span className="text-xs text-muted-foreground">{hint}</span>,
+    action: actionFor(label, 'VM.Config.Disk', { kind: 'addDisk' }),
+  };
+}
+
+/** A hard disk's row actions: grow (pencil) and detach. */
+function diskActions(resize: ReactNode, detach: ReactNode): ReactNode {
+  return (
+    <div className="flex shrink-0 items-center">
+      {resize}
+      {detach}
+    </div>
+  );
+}
+
 function qemuRows(config: GuestConfig, actionFor: ActionFor): Row[] {
   const drives = getDrives(config);
-  const disks = drives.filter((d) => d.media !== 'cdrom' && d.bus !== 'efidisk' && d.bus !== 'tpmstate' && !d.volume.includes('cloudinit'));
+  const disks = drives.filter((d) => d.media !== 'cdrom' && d.bus !== 'efidisk' && d.bus !== 'tpmstate' && d.bus !== 'unused' && !d.volume.includes('cloudinit'));
+  const unusedDisks = drives.filter((d) => d.bus === 'unused');
   const cdroms = drives.filter((d) => d.media === 'cdrom' && !d.volume.includes('cloudinit'));
   const cloudInit = drives.find((d) => d.volume.includes('cloudinit'));
   const efidisk = drives.find((d) => d.bus === 'efidisk');
@@ -159,6 +249,8 @@ function qemuRows(config: GuestConfig, actionFor: ActionFor): Row[] {
   if (efidisk) rows.push({ label: 'EFI Disk', value: driveLine(efidisk), keys: [efidisk.key] });
   if (tpm) rows.push({ label: 'TPM State', value: driveLine(tpm), keys: [tpm.key] });
 
+  rows.push(disksHeaderRow(actionFor, 'Add disk', 'Hard disks and unused volumes'));
+
   for (const disk of disks) {
     rows.push({
       label: `Hard Disk (${disk.key})`,
@@ -169,9 +261,25 @@ function qemuRows(config: GuestConfig, actionFor: ActionFor): Row[] {
         </div>
       ),
       keys: [disk.key],
-      ...(isResizable(disk)
-        ? { action: actionFor(`disk ${disk.key}`, 'VM.Config.Disk', { kind: 'disk', disk: disk.key, size: disk.size }) }
-        : {}),
+      action: diskActions(
+        isResizable(disk)
+          ? actionFor(`disk ${disk.key}`, 'VM.Config.Disk', { kind: 'disk', disk: disk.key, size: disk.size })
+          : null,
+        actionFor(`Detach ${disk.key}`, 'VM.Config.Disk', { kind: 'detach', slot: disk.key }),
+      ),
+    });
+  }
+
+  for (const unused of unusedDisks) {
+    rows.push({
+      label: `Unused Disk (${unused.key})`,
+      value: driveLine(unused),
+      keys: [unused.key],
+      action: actionFor(`Remove ${unused.key}`, 'VM.Config.Disk', {
+        kind: 'removeUnused',
+        slot: unused.key,
+        volume: `${unused.storage}:${unused.volume}`,
+      }),
     });
   }
 
@@ -228,6 +336,7 @@ function qemuRows(config: GuestConfig, actionFor: ActionFor): Row[] {
 function lxcRows(config: GuestConfig, actionFor: ActionFor): Row[] {
   const rootfs = getRootfsDrive(config);
   const mounts = getDrives(config).filter((d) => d.bus === 'mp');
+  const unusedDisks = getDrives(config).filter((d) => d.bus === 'unused');
   const nets = getNetSpecs(config);
   const memoryBytes = parseMemory(config.memory);
   const swapBytes = parseMemory(config.swap);
@@ -255,6 +364,8 @@ function lxcRows(config: GuestConfig, actionFor: ActionFor): Row[] {
     { label: 'Features', value: config.features ?? '-', keys: ['features'] },
   ];
 
+  rows.push(disksHeaderRow(actionFor, 'Add mount point', 'Root disk, mount points and unused volumes'));
+
   if (rootfs) {
     rows.push({
       label: 'Root Disk (rootfs)',
@@ -279,7 +390,23 @@ function lxcRows(config: GuestConfig, actionFor: ActionFor): Row[] {
         </span>
       ),
       keys: [mp.key],
-      action: actionFor(`disk ${mp.key}`, 'VM.Config.Disk', { kind: 'disk', disk: mp.key, size: mp.size }),
+      action: diskActions(
+        actionFor(`disk ${mp.key}`, 'VM.Config.Disk', { kind: 'disk', disk: mp.key, size: mp.size }),
+        actionFor(`Detach ${mp.key}`, 'VM.Config.Disk', { kind: 'detach', slot: mp.key }),
+      ),
+    });
+  }
+
+  for (const unused of unusedDisks) {
+    rows.push({
+      label: `Unused Disk (${unused.key})`,
+      value: driveLine(unused),
+      keys: [unused.key],
+      action: actionFor(`Remove ${unused.key}`, 'VM.Config.Disk', {
+        kind: 'removeUnused',
+        slot: unused.key,
+        volume: `${unused.storage}:${unused.volume}`,
+      }),
     });
   }
 
@@ -322,6 +449,7 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
   const auth = useAuthMe();
   const permissions = usePermissions(vmid);
   const pending = usePendingConfig(node, type, vmid);
+  const clusterResources = useClusterResources();
   // Owned here, not by the resize dialog: the dialog unmounts as soon as a resize succeeds, and
   // the hook's delayed re-reads of the config must outlive it.
   const resize = useResizeDisk();
@@ -337,7 +465,21 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
       ? 'Read-only: signed in with a service token'
       : permissions.data?.can(privilege) !== true
         ? `You don't have ${privilege} on this guest`
-        : undefined;
+        : target.kind === 'addDisk' &&
+            clusterResources.data !== undefined &&
+            diskCapableStorages(clusterResources.data, node, type).length === 0
+          ? `No storage on this node can hold ${type === 'qemu' ? 'disk images' : 'container volumes'}`
+          : undefined;
+    if (target.kind === 'addDisk' || target.kind === 'detach' || target.kind === 'removeUnused') {
+      return (
+        <DiskActionButton
+          kind={target.kind}
+          label={label}
+          disabledReason={disabledReason}
+          onClick={() => setEditing(target)}
+        />
+      );
+    }
     const open = () => {
       if (target.kind === 'disk') resetResize();
       setEditing(target);
@@ -437,6 +579,38 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
           disk={editing.disk}
           size={editing.size}
           mutation={resize}
+        />
+      )}
+      {editing?.kind === 'addDisk' && (
+        <AddDiskDialog
+          open
+          onOpenChange={closeDialog}
+          node={node}
+          type={type}
+          vmid={vmid}
+          configKeys={Object.keys(config)}
+        />
+      )}
+      {editing?.kind === 'detach' && (
+        <DetachDiskDialog
+          open
+          onOpenChange={closeDialog}
+          node={node}
+          type={type}
+          vmid={vmid}
+          slot={editing.slot}
+          nextUnusedSlot={nextUnusedSlot(config)}
+        />
+      )}
+      {editing?.kind === 'removeUnused' && (
+        <RemoveUnusedDiskDialog
+          open
+          onOpenChange={closeDialog}
+          node={node}
+          type={type}
+          vmid={vmid}
+          slot={editing.slot}
+          volume={editing.volume}
         />
       )}
     </div>
