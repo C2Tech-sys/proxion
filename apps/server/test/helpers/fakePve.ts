@@ -42,7 +42,38 @@ export interface FakePve {
   /** Every `PUT .../{type}/{vmid}/config` request PVE has received, in order (path + parsed form body). */
   configCalls: Array<{ path: string; body: Record<string, string> }>;
   /** Makes the next matching `PUT .../{type}/{vmid}/config` call fail with the given status/message. */
-  setConfigError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string) => void;
+  setConfigError: (
+    type: 'qemu' | 'lxc',
+    vmid: number,
+    status: number,
+    message: string,
+    errors?: Record<string, string>,
+  ) => void;
+  /** Sets the config `GET .../{type}/{vmid}/config` returns (used by the hardware route's
+   * `balloon <= memory` check against the guest's current memory). Defaults to `{}`. */
+  setGuestConfig: (type: 'qemu' | 'lxc', vmid: number, config: Record<string, unknown>) => void;
+  /** Sets the list `GET .../{type}/{vmid}/pending` returns for a guest. Defaults to `[]`. */
+  setPending: (
+    type: 'qemu' | 'lxc',
+    vmid: number,
+    rows: Array<{ key: string; value?: string; pending?: string; delete?: number }>,
+  ) => void;
+  /** Makes `GET .../{type}/{vmid}/pending` fail with the given status (T48). */
+  setPendingError: (type: 'qemu' | 'lxc', vmid: number, status: number) => void;
+  /** Every `PUT .../{type}/{vmid}/resize` request PVE has received, in order (type + parsed form
+   * body). Used by `hardwareRoutes.test.ts` (T48). */
+  resizeCalls: Array<{ type: 'qemu' | 'lxc'; vmid: number; body: Record<string, string> }>;
+  /** Makes the next `PUT .../{type}/{vmid}/resize` call for `vmid` fail with the given
+   * status/message/errors. */
+  setResizeError: (
+    type: 'qemu' | 'lxc',
+    vmid: number,
+    status: number,
+    message: string,
+    errors?: Record<string, string>,
+  ) => void;
+  /** Whether `PUT .../resize` returns a UPID (the default, like modern PVE) or `null`. */
+  setResizeReturnsUpid: (returnsUpid: boolean) => void;
   /** Every snapshot create/delete/rollback request PVE has received, in order (method + path +
    * parsed form body). Used by `actionsSnapshots.test.ts` to assert exactly what was sent. */
   snapshotCalls: Array<{ method: string; path: string; body: Record<string, string> }>;
@@ -399,7 +430,13 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   // rename/notes route (`src/actions/routes.ts`). Records every call (path + parsed urlencoded
   // body) so tests can assert exactly what the server sent PVE (e.g. `name=` vs `hostname=`).
   const configCalls: Array<{ path: string; body: Record<string, string> }> = [];
-  const configErrors = new Map<string, { status: number; message: string }>();
+  const configErrors = new Map<string, { status: number; message: string; errors?: Record<string, string> }>();
+  const guestConfigs = new Map<string, Record<string, unknown>>();
+  const pendingRows = new Map<string, Array<{ key: string; value?: string; pending?: string; delete?: number }>>();
+  const pendingErrors = new Map<string, number>();
+  const resizeCalls: Array<{ type: 'qemu' | 'lxc'; vmid: number; body: Record<string, string> }> = [];
+  const resizeErrors = new Map<string, { status: number; message: string; errors?: Record<string, string> }>();
+  let resizeReturnsUpid = true;
 
   function configErrorKey(type: 'qemu' | 'lxc', vmid: number): string {
     return `${type}:${vmid}`;
@@ -411,10 +448,43 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       configCalls.push({ path: req.url, body: (req.body ?? {}) as Record<string, string> });
       const failure = configErrors.get(configErrorKey(type, Number(vmid)));
       if (failure) {
-        reply.code(failure.status).send({ data: null, message: failure.message });
+        reply
+          .code(failure.status)
+          .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
         return;
       }
       reply.send({ data: null });
+    });
+    // Current guest config (`GET .../config`), settable via `setGuestConfig` (T48).
+    app.get(`/api2/json/nodes/:node/${type}/:vmid/config`, async (req, reply) => {
+      const { vmid } = req.params as { node: string; vmid: string };
+      reply.send({ data: guestConfigs.get(configErrorKey(type, Number(vmid))) ?? {} });
+    });
+    // Pending config changes (`GET .../pending`), settable via `setPending` (T48).
+    app.get(`/api2/json/nodes/:node/${type}/:vmid/pending`, async (req, reply) => {
+      const { vmid } = req.params as { node: string; vmid: string };
+      const key = configErrorKey(type, Number(vmid));
+      const failureStatus = pendingErrors.get(key);
+      if (failureStatus !== undefined) {
+        reply.code(failureStatus).send({ data: null, message: 'pending unavailable' });
+        return;
+      }
+      reply.send({ data: pendingRows.get(key) ?? [] });
+    });
+    // Disk grow (`PUT .../resize`), recorded and answered with a fake UPID (T48).
+    app.put(`/api2/json/nodes/:node/${type}/:vmid/resize`, async (req, reply) => {
+      const { vmid } = req.params as { node: string; vmid: string };
+      resizeCalls.push({ type, vmid: Number(vmid), body: (req.body ?? {}) as Record<string, string> });
+      const failure = resizeErrors.get(configErrorKey(type, Number(vmid)));
+      if (failure) {
+        reply
+          .code(failure.status)
+          .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
+        return;
+      }
+      reply.send({
+        data: resizeReturnsUpid ? `UPID:fakepve:00000001:00000000:00000000:resize:${vmid}:root@pam:` : null,
+      });
     });
   }
   registerConfigRoute('qemu');
@@ -788,8 +858,42 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     get configCalls() {
       return configCalls;
     },
-    setConfigError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string) => {
-      configErrors.set(configErrorKey(type, vmid), { status, message });
+    setConfigError: (
+      type: 'qemu' | 'lxc',
+      vmid: number,
+      status: number,
+      message: string,
+      errors?: Record<string, string>,
+    ) => {
+      configErrors.set(configErrorKey(type, vmid), { status, message, ...(errors ? { errors } : {}) });
+    },
+    setGuestConfig: (type: 'qemu' | 'lxc', vmid: number, config: Record<string, unknown>) => {
+      guestConfigs.set(configErrorKey(type, vmid), config);
+    },
+    setPending: (
+      type: 'qemu' | 'lxc',
+      vmid: number,
+      rows: Array<{ key: string; value?: string; pending?: string; delete?: number }>,
+    ) => {
+      pendingRows.set(configErrorKey(type, vmid), rows);
+    },
+    setPendingError: (type: 'qemu' | 'lxc', vmid: number, status: number) => {
+      pendingErrors.set(configErrorKey(type, vmid), status);
+    },
+    get resizeCalls() {
+      return resizeCalls;
+    },
+    setResizeError: (
+      type: 'qemu' | 'lxc',
+      vmid: number,
+      status: number,
+      message: string,
+      errors?: Record<string, string>,
+    ) => {
+      resizeErrors.set(configErrorKey(type, vmid), { status, message, ...(errors ? { errors } : {}) });
+    },
+    setResizeReturnsUpid: (returnsUpid: boolean) => {
+      resizeReturnsUpid = returnsUpid;
     },
     get snapshotCalls() {
       return snapshotCalls;
