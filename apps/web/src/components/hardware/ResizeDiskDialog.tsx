@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useResizeDisk, hardwareErrorMessage } from '@/api/hardwareHooks';
+import { hardwareErrorMessage, type useResizeDisk } from '@/api/hardwareHooks';
 import { formatDriveSize } from '@/lib/format';
 import { gibToResizeSize, parseSizeToGiB } from '@/lib/pve-config';
 import type { GuestType } from '@/api/types';
@@ -26,6 +26,10 @@ export interface ResizeDiskDialogProps {
   disk: string;
   /** The drive's current `size=` value as PVE reports it (`32G`). */
   size: string | undefined;
+  /** The resize mutation, owned by the caller (`HardwareTab`) rather than created here: this
+   * dialog unmounts the moment a resize succeeds, and the hook's delayed re-reads must outlive
+   * it. The caller resets it before each open so a previous error doesn't linger. */
+  mutation: ReturnType<typeof useResizeDisk>;
 }
 
 /** Up to 64 TiB in one step -- far beyond any real request, it only stops a typo. */
@@ -46,8 +50,16 @@ function parseAddGiB(text: string): number | undefined {
  *
  * Mount it fresh per open (the Hardware tab renders it conditionally).
  */
-export function ResizeDiskDialog({ open, onOpenChange, node, type, vmid, disk, size }: ResizeDiskDialogProps) {
-  const mutation = useResizeDisk();
+export function ResizeDiskDialog({
+  open,
+  onOpenChange,
+  node,
+  type,
+  vmid,
+  disk,
+  size,
+  mutation,
+}: ResizeDiskDialogProps) {
   const inputId = useId();
   const [addText, setAddText] = useState('');
 

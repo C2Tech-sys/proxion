@@ -317,6 +317,67 @@ describe('guest hardware routes (T48)', () => {
       expect(fakePve.configCalls[0]!.body).toEqual({ ide2: `${VALID_ISO},media=cdrom` });
     });
 
+    it('refuses a cdrom slot that currently holds a disk, without any PUT', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, ALL_HW_PRIVS);
+      fakePve.setGuestConfig('qemu', 100, { scsi0: 'tank:vm-100-disk-0,size=32G', ide2: 'none,media=cdrom' });
+      const res = await patchHardware('/pve1/qemu/100', { cookie, payload: { cdrom: { slot: 'scsi0', iso: null } } });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({
+        error: 'slot-not-cdrom',
+        message: 'Slot scsi0 holds a disk; choose a CD-ROM slot',
+      });
+      expect(fakePve.configCalls).toHaveLength(0);
+    });
+
+    it('accepts a cdrom slot that already holds a CD-ROM (media=cdrom anywhere in the value)', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, ALL_HW_PRIVS);
+      fakePve.setGuestConfig('qemu', 100, {
+        ide2: 'local:iso/old.iso,media=cdrom,size=1G',
+        sata0: 'media=cdrom,none',
+      });
+      const first = await patchHardware('/pve1/qemu/100', {
+        cookie,
+        payload: { cdrom: { slot: 'ide2', iso: VALID_ISO } },
+      });
+      expect(first.statusCode).toBe(200);
+      const second = await patchHardware('/pve1/qemu/100', { cookie, payload: { cdrom: { slot: 'sata0', iso: null } } });
+      expect(second.statusCode).toBe(200);
+      expect(fakePve.configCalls).toHaveLength(2);
+    });
+
+    it('accepts an absent cdrom slot (a new CD-ROM device)', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, ALL_HW_PRIVS);
+      fakePve.setGuestConfig('qemu', 100, { scsi0: 'tank:vm-100-disk-0,size=32G' });
+      const res = await patchHardware('/pve1/qemu/100', {
+        cookie,
+        payload: { cdrom: { slot: 'ide0', iso: VALID_ISO } },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(fakePve.configCalls[0]!.body).toEqual({ ide0: `${VALID_ISO},media=cdrom` });
+    });
+
+    it('accepts ISO/IMG extensions in any case', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, ALL_HW_PRIVS);
+      for (const iso of ['local:iso/Win11.ISO', 'local:iso/disk.Img', 'local:iso/a.iSo']) {
+        const res = await patchHardware('/pve1/qemu/100', { cookie, payload: { cdrom: { slot: 'ide2', iso } } });
+        expect(res.statusCode, iso).toBe(200);
+      }
+      expect(fakePve.configCalls.map((c) => c.body.ide2)).toEqual([
+        'local:iso/Win11.ISO,media=cdrom',
+        'local:iso/disk.Img,media=cdrom',
+        'local:iso/a.iSo,media=cdrom',
+      ]);
+      const bad = await patchHardware('/pve1/qemu/100', {
+        cookie,
+        payload: { cdrom: { slot: 'ide2', iso: 'local:iso/Win11.ISOX' } },
+      });
+      expect(bad.statusCode).toBe(400);
+    });
+
     it('maps a null iso to "none,media=cdrom"', async () => {
       const cookie = await setupSession();
       fakePve.setVmPermissions(100, ALL_HW_PRIVS);

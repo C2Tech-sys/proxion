@@ -287,7 +287,7 @@ export function isMountableIsoVolid(volid: string): boolean {
   return (
     volid.length <= 255 &&
     !volid.includes('..') &&
-    /^[A-Za-z][A-Za-z0-9._-]*:iso\/[A-Za-z0-9][A-Za-z0-9._+-]*\.(iso|img)$/.test(volid)
+    /^[A-Za-z][A-Za-z0-9._-]*:iso\/[A-Za-z0-9][A-Za-z0-9._+-]*\.([iI][sS][oO]|[iI][mM][gG])$/.test(volid)
   );
 }
 

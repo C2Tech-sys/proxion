@@ -12,7 +12,7 @@ import { ResizeDiskDialog } from '@/components/hardware/ResizeDiskDialog';
 import { PendingBanner } from '@/components/hardware/PendingBanner';
 import { useAuthMe, useVmConfig } from '@/api/hooks';
 import { usePermissions } from '@/api/actionHooks';
-import { usePendingConfig } from '@/api/hardwareHooks';
+import { usePendingConfig, useResizeDisk } from '@/api/hardwareHooks';
 import { isPendingEntry } from '@/api/hardware';
 import { USE_FIXTURES } from '@/api/client';
 import { errorMessage } from '@/api/errors';
@@ -322,6 +322,10 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
   const auth = useAuthMe();
   const permissions = usePermissions(vmid);
   const pending = usePendingConfig(node, type, vmid);
+  // Owned here, not by the resize dialog: the dialog unmounts as soon as a resize succeeds, and
+  // the hook's delayed re-reads of the config must outlive it.
+  const resize = useResizeDisk();
+  const resetResize = resize.reset;
   const [editing, setEditing] = useState<EditTarget | null>(null);
 
   // Fixture/demo mode has no real session concept -- it always demonstrates the enabled state,
@@ -334,7 +338,11 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
       : permissions.data?.can(privilege) !== true
         ? `You don't have ${privilege} on this guest`
         : undefined;
-    return <EditHardwareButton label={label} disabledReason={disabledReason} onClick={() => setEditing(target)} />;
+    const open = () => {
+      if (target.kind === 'disk') resetResize();
+      setEditing(target);
+    };
+    return <EditHardwareButton label={label} disabledReason={disabledReason} onClick={open} />;
   };
 
   if (isLoading) {
@@ -428,6 +436,7 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
           vmid={vmid}
           disk={editing.disk}
           size={editing.size}
+          mutation={resize}
         />
       )}
     </div>

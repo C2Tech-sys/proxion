@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -73,9 +74,23 @@ const RESIZE_REFETCH_DELAYS_MS = [2000, 6000];
  * and invalidates this guest's config/pending/status/cluster queries immediately and again at
  * `RESIZE_REFETCH_DELAYS_MS` when a UPID came back. On error: no toast here (the dialog shows the
  * message inline).
+ *
+ * The delayed invalidations are tracked and cleared when the component that called this hook
+ * unmounts, so nothing fires after it is gone. That also means the caller must outlive the
+ * resize dialog for them to run: `HardwareTab` owns the hook and hands the mutation to
+ * `ResizeDiskDialog`, which unmounts as soon as a resize succeeds.
  */
 export function useResizeDisk() {
   const queryClient = useQueryClient();
+  const timers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      for (const timer of pending) clearTimeout(timer);
+      pending.clear();
+    };
+  }, []);
 
   return useMutation({
     mutationFn: (vars: ResizeDiskVars) => resizeDisk(vars.node, vars.type, vars.vmid, vars.body),
@@ -85,7 +100,11 @@ export function useResizeDisk() {
       invalidateGuest(queryClient, vars.node, vars.type, vars.vmid);
       if (asynchronous) {
         for (const delay of RESIZE_REFETCH_DELAYS_MS) {
-          setTimeout(() => invalidateGuest(queryClient, vars.node, vars.type, vars.vmid), delay);
+          const timer = setTimeout(() => {
+            timers.current.delete(timer);
+            invalidateGuest(queryClient, vars.node, vars.type, vars.vmid);
+          }, delay);
+          timers.current.add(timer);
         }
       }
     },

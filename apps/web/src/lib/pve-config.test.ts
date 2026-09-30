@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   cpuHasExtraOptions,
   gibToResizeSize,
+  isMountableIsoVolid,
   parseCpuModel,
   parseSizeToGiB,
   getDrives,
@@ -195,6 +196,21 @@ describe('parseSizeToGiB / gibToResizeSize (T48)', () => {
   it('builds the grow-only resize string', () => {
     expect(gibToResizeSize(10)).toBe('+10G');
     expect(gibToResizeSize(1.5)).toBe('+1536M');
+  });
+});
+
+describe('isMountableIsoVolid (T48)', () => {
+  it('accepts iso/img volumes with any extension case', () => {
+    expect(isMountableIsoVolid('local:iso/debian-12.iso')).toBe(true);
+    expect(isMountableIsoVolid('local:iso/Win11.ISO')).toBe(true);
+    expect(isMountableIsoVolid('nfs-iso:iso/disk.Img')).toBe(true);
+  });
+
+  it('rejects other content, traversal and other extensions', () => {
+    expect(isMountableIsoVolid('local:vztmpl/a.iso')).toBe(false);
+    expect(isMountableIsoVolid('local:iso/a..b.iso')).toBe(false);
+    expect(isMountableIsoVolid('local:iso/a.isox')).toBe(false);
+    expect(isMountableIsoVolid('local:iso/a.iso,media=disk')).toBe(false);
   });
 });
 

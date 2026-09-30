@@ -97,11 +97,15 @@ export function EditMemoryDialog({
     if (text.trim() !== '' && Number.isFinite(gib) && gib >= 0) setMibText(String(Math.round(gib * 1024)));
   }
 
+  // Only what changed is sent, so an untouched memory never shows up as a pending change.
+  const patch: HardwarePatch = {};
+  if (memoryValue !== undefined && memoryValue !== memory) patch.memory = memoryValue;
+  if (isQemu && balloonValue !== undefined && balloonValue !== balloon) patch.balloon = balloonValue;
+  if (!isQemu && swapValue !== undefined && swapValue !== swap) patch.swap = swapValue;
+  const changed = Object.keys(patch).length > 0;
+
   function submit() {
-    if (!valid || mutation.isPending || memoryValue === undefined) return;
-    const patch: HardwarePatch = { memory: memoryValue };
-    if (isQemu && balloonValue !== undefined) patch.balloon = balloonValue;
-    if (!isQemu && swapValue !== undefined) patch.swap = swapValue;
+    if (!valid || !changed || mutation.isPending) return;
     mutation.mutate({ node, type, vmid, patch }, { onSuccess: () => onOpenChange(false) });
   }
 
@@ -213,7 +217,7 @@ export function EditMemoryDialog({
           <Button variant="outline" disabled={mutation.isPending} onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button disabled={!valid || mutation.isPending} onClick={submit}>
+          <Button disabled={!valid || !changed || mutation.isPending} onClick={submit}>
             {mutation.isPending && <Loader2 className="size-4 animate-spin" />}
             Save
           </Button>

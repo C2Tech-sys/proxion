@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 
 import { HardwareTab } from '@/pages/vm/tabs/HardwareTab';
 import { createQueryClient } from '@/api/queryClient';
+import { useResizeDisk } from '@/api/hardwareHooks';
+import { addFixtureStorageContent, patchFixtureGuestConfig } from '@/api/fixtures';
 import type { AuthIdentity } from '@/api/client-types';
 import type { GuestPermissions } from '@/api/actionHooks';
 import type { ClusterResource } from '@/api/types';
@@ -109,6 +111,7 @@ describe('Hardware tab editing', () => {
 
   afterEach(() => {
     state.fixtures = false;
+    patchFixtureGuestConfig('pve1', 'qemu', 100, { balloon: 0 });
     vi.clearAllMocks();
   });
 
@@ -199,6 +202,9 @@ describe('Hardware tab editing', () => {
   });
 
   it('(d) memory dialog: 8 GiB converts to 8192 MiB and the disabled balloon (0) is sent', async () => {
+    // The fixture guest starts with ballooning already disabled; give it a minimum so that
+    // setting it to 0 is a real change (only changed fields are sent).
+    patchFixtureGuestConfig('pve1', 'qemu', 100, { balloon: 2048 });
     renderTab();
     const dialog = await openDialog('Edit memory');
 
@@ -214,6 +220,29 @@ describe('Hardware tab editing', () => {
     await waitFor(() =>
       expect(mockUpdateHardware).toHaveBeenCalledWith('pve1', 'qemu', 100, { memory: 8192, balloon: 0 }),
     );
+  });
+
+  it('(d3) memory dialog: only a changed balloon is sent, without the untouched memory', async () => {
+    patchFixtureGuestConfig('pve1', 'qemu', 100, { balloon: 2048 });
+    renderTab();
+    const dialog = await openDialog('Edit memory');
+
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText('Minimum memory / balloon (MiB)'), { target: { value: '0' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(mockUpdateHardware).toHaveBeenCalledWith('pve1', 'qemu', 100, { balloon: 0 }));
+    expect(mockUpdateHardware).toHaveBeenCalledTimes(1);
+  });
+
+  it('(d4) memory dialog: a changed memory alone does not resend the unchanged balloon', async () => {
+    renderTab();
+    const dialog = await openDialog('Edit memory');
+
+    fireEvent.change(within(dialog).getByLabelText('Memory (MiB)'), { target: { value: '6144' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(mockUpdateHardware).toHaveBeenCalledWith('pve1', 'qemu', 100, { memory: 6144 }));
   });
 
   it('(d2) memory dialog: a balloon above the memory disables Save', async () => {
@@ -260,6 +289,28 @@ describe('Hardware tab editing', () => {
 
     await waitFor(() =>
       expect(mockUpdateHardware).toHaveBeenCalledWith('pve1', 'qemu', 100, { cdrom: { slot: 'ide2', iso: null } }),
+    );
+  });
+
+  it('(e3) CD-ROM dialog: an ISO with an upper-case extension is listed and can be sent', async () => {
+    addFixtureStorageContent('pve1', 'local', {
+      volid: 'local:iso/Win11.ISO',
+      content: 'iso',
+      format: 'iso',
+      size: 5368709120,
+    });
+
+    renderTab();
+    const dialog = await openDialog('Edit CD/DVD drive ide2');
+    await within(dialog).findByRole('option', { name: /Win11\.ISO/ });
+
+    fireEvent.change(within(dialog).getByLabelText('ISO image'), { target: { value: 'local:iso/Win11.ISO' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(mockUpdateHardware).toHaveBeenCalledWith('pve1', 'qemu', 100, {
+        cdrom: { slot: 'ide2', iso: 'local:iso/Win11.ISO' },
+      }),
     );
   });
 
@@ -326,7 +377,7 @@ describe('Hardware tab editing', () => {
     fireEvent.change(within(memory).getByLabelText('Swap (MiB)'), { target: { value: '1024' } });
     fireEvent.click(within(memory).getByRole('button', { name: 'Save' }));
     await waitFor(() =>
-      expect(mockUpdateHardware).toHaveBeenCalledWith('pve2', 'lxc', 200, { memory: 512, swap: 1024 }),
+      expect(mockUpdateHardware).toHaveBeenCalledWith('pve2', 'lxc', 200, { swap: 1024 }),
     );
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 
@@ -344,6 +395,37 @@ describe('Hardware tab editing', () => {
     await waitFor(() =>
       expect(mockResizeDisk).toHaveBeenCalledWith('pve2', 'lxc', 200, { disk: 'rootfs', size: '+2G' }),
     );
+  });
+
+  it('(j) useResizeDisk clears its delayed re-reads when its owner unmounts', async () => {
+    const queryClient = createQueryClient();
+    const scheduled: Array<{ id: unknown; delay: number }> = [];
+    const realSetTimeout = globalThis.setTimeout;
+    const setSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, delay?: number) => {
+      const id = realSetTimeout(fn, delay);
+      if (delay === 2000 || delay === 6000) scheduled.push({ id, delay });
+      return id;
+    }) as typeof setTimeout);
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+
+    const { result, unmount } = renderHook(() => useResizeDisk(), {
+      wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>,
+    });
+    await act(async () => {
+      await result.current.mutateAsync({
+        node: 'pve1',
+        type: 'qemu',
+        vmid: 100,
+        body: { disk: 'scsi0', size: '+1G' },
+      });
+    });
+    expect(scheduled.map((s) => s.delay)).toEqual([2000, 6000]);
+
+    unmount();
+    for (const { id } of scheduled) expect(clearSpy).toHaveBeenCalledWith(id);
+
+    setSpy.mockRestore();
+    clearSpy.mockRestore();
   });
 
   it('(h) fixture mode: after updateHardware the tab shows the new cores value and a pending banner', async () => {

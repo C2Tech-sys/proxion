@@ -24,7 +24,7 @@ const CDROM_SLOT_RE = /^(ide[0-3]|sata[0-5]|scsi(\d|[12]\d|30))$/;
  * no path separators beyond the `iso/` content dir, no spaces, no option separators (`,`), so the
  * value can only ever be appended into the `<slot>: <volid>,media=cdrom` property string as a
  * single volume id. */
-const ISO_VOLID_RE = /^[A-Za-z][A-Za-z0-9._-]*:iso\/[A-Za-z0-9][A-Za-z0-9._+-]*\.(iso|img)$/;
+const ISO_VOLID_RE = /^[A-Za-z][A-Za-z0-9._-]*:iso\/[A-Za-z0-9][A-Za-z0-9._+-]*\.([iI][sS][oO]|[iI][mM][gG])$/;
 const MAX_VOLID_LENGTH = 255;
 
 /** Disks this route may grow: everything with a size except `efidisk0`/`tpmstate0`/`unused*`. */
@@ -156,9 +156,22 @@ function toPveConfig(type: 'qemu' | 'lxc', body: HardwareBody): Record<string, s
 /** The guest's current memory (MiB) for the `balloon <= memory` check when the request doesn't
  * carry a `memory` itself. `undefined` when it can't be read as a plain MiB figure (PVE then does
  * its own validation). PVE's default memory is 512 when the key is absent. */
-async function currentQemuMemory(client: PveClient, node: string, vmid: number): Promise<number | undefined> {
+async function fetchQemuConfig(client: PveClient, node: string, vmid: number): Promise<Record<string, unknown>> {
   const config = await client.get('/nodes/{node}/qemu/{vmid}/config', { node, vmid });
-  const raw: unknown = (config as { memory?: unknown }).memory;
+  return config as Record<string, unknown>;
+}
+
+/** Whether a drive slot may take CD-ROM media: it is absent/empty (a new CD-ROM device) or its
+ * current value already is a CD-ROM (`media=cdrom`). A slot holding a disk must never be
+ * overwritten by a CD-ROM value -- that would detach the disk. */
+function slotAcceptsCdrom(config: Record<string, unknown>, slot: string): boolean {
+  const value = config[slot];
+  if (value === undefined || value === null || value === '') return true;
+  return typeof value === 'string' && /(?:^|,)media=cdrom(?:,|$)/.test(value);
+}
+
+function currentQemuMemory(config: Record<string, unknown>): number | undefined {
+  const raw: unknown = config.memory;
   if (raw === undefined || raw === null) return 512;
   if (typeof raw === 'number') return raw;
   if (typeof raw === 'string') {
@@ -285,17 +298,30 @@ export function registerHardwareRoutes(
         return;
       }
 
-      if (params.type === 'qemu' && body.data.balloon !== undefined && body.data.memory === undefined) {
-        let memory: number | undefined;
+      // The current qemu config is needed for two checks: `balloon` against the current memory
+      // (when the request doesn't carry `memory`), and that a `cdrom.slot` doesn't hold a disk.
+      const needsBalloonCheck =
+        params.type === 'qemu' && body.data.balloon !== undefined && body.data.memory === undefined;
+      const needsSlotCheck = params.type === 'qemu' && body.data.cdrom !== undefined;
+      if (needsBalloonCheck || needsSlotCheck) {
+        let current: Record<string, unknown>;
         try {
-          memory = await currentQemuMemory(client, params.node, params.vmid);
+          current = await fetchQemuConfig(client, params.node, params.vmid);
         } catch (error) {
           if (sendPveError(reply, error)) return;
-          app.log.warn({ err: error }, 'Failed to read current memory for guest hardware update');
+          app.log.warn({ err: error }, 'Failed to read current config for guest hardware update');
           reply.code(502).send({ error: 'pve-unreachable' });
           return;
         }
-        if (memory !== undefined && body.data.balloon > memory) {
+        if (body.data.cdrom !== undefined && !slotAcceptsCdrom(current, body.data.cdrom.slot)) {
+          reply.code(400).send({
+            error: 'slot-not-cdrom',
+            message: `Slot ${body.data.cdrom.slot} holds a disk; choose a CD-ROM slot`,
+          });
+          return;
+        }
+        const memory = needsBalloonCheck ? currentQemuMemory(current) : undefined;
+        if (memory !== undefined && body.data.balloon !== undefined && body.data.balloon > memory) {
           reply.code(400).send({
             error: 'balloon-exceeds-memory',
             message: `The balloon minimum (${body.data.balloon} MiB) cannot exceed the guest's memory (${memory} MiB).`,
