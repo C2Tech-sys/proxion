@@ -11,6 +11,7 @@ import { registerCloneRoutes } from './cloneRoutes.js';
 import { registerDestroyRoutes } from './destroyRoutes.js';
 import { registerHardwareRoutes } from './hardwareRoutes.js';
 import { registerBootOrderRoutes } from './bootOrderRoutes.js';
+import { registerDiskRoutes } from './diskRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -420,4 +421,7 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   registerHardwareRoutes(app, guestActionsRateLimit);
   // Guest boot order (`bootOrderRoutes.ts`) shares the same bucket, same rationale.
   registerBootOrderRoutes(app, guestActionsRateLimit);
+
+  // Guest disk add / detach / remove-unused (`diskRoutes.ts`) shares the same bucket, same rationale.
+  registerDiskRoutes(app, guestActionsRateLimit);
 }
