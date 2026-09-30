@@ -9,7 +9,7 @@ import { createQueryClient } from '@/api/queryClient';
 // See vm-tasks-tab.render.test.tsx's own copy of this constant for why: several of this page's
 // fixture-client queries (status, config, agent, rrd, cluster resources, and this panel's own
 // node-tasks query) stack their simulated delays past the default 1000ms `findBy*` timeout.
-const FIND_TIMEOUT_MS = 5000;
+const FIND_TIMEOUT_MS = 10_000;
 
 /**
  * T17: the VM Summary "Last backup" panel used to read `useTasks()` (the cluster's short
