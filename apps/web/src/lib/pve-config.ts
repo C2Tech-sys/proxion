@@ -297,3 +297,114 @@ export function cpuHasExtraOptions(raw: string | undefined): boolean {
   const parts = raw.split(',').filter((p) => p.length > 0);
   return parts.length > 1;
 }
+
+// --- Boot order editor (T51) ---
+
+export interface GuestBootOrder {
+  /** The boot devices, in priority order (`scsi0`, `ide2`, `net0`, ...). */
+  order: string[];
+  /** `true` when the config uses the legacy `boot: cdn` + `bootdisk` form (saving rewrites it in
+   * the modern `order=` form). */
+  legacy: boolean;
+}
+
+/** A bootable device the editor can list: a disk/CD-ROM slot or a NIC. */
+export interface BootCandidate {
+  key: string;
+  label: string;
+}
+
+const BOOT_DRIVE_BUSES = ['ide', 'sata', 'scsi', 'virtio'];
+const BOOT_BUS_RANK: Record<string, number> = { ide: 0, sata: 1, scsi: 2, virtio: 3, net: 4 };
+
+function isCloudInit(drive: ParsedDrive): boolean {
+  return drive.volume.includes('cloudinit');
+}
+
+/** The disks, CD-ROM drives and NICs of a qemu config that can be put in a boot order. A cloud-init
+ * drive is never bootable; EFI disk, TPM state and unused disks are not bootable devices either. */
+function bootDevices(config: GuestConfig): { disks: ParsedDrive[]; cdroms: ParsedDrive[]; nets: ParsedNetSpec[] } {
+  const drives = getDrives(config).filter((d) => BOOT_DRIVE_BUSES.includes(d.bus) && !isCloudInit(d));
+  return {
+    disks: drives.filter((d) => d.media !== 'cdrom'),
+    cdroms: drives.filter((d) => d.media === 'cdrom'),
+    nets: getNetSpecs(config),
+  };
+}
+
+function byBusAndIndex(a: { key: string }, b: { key: string }): number {
+  const rank = (key: string) => BOOT_BUS_RANK[key.replace(/\d+$/, '')] ?? 99;
+  const index = (key: string) => Number(/\d+$/.exec(key)?.[0] ?? 0);
+  return rank(a.key) - rank(b.key) || index(a.key) - index(b.key);
+}
+
+/**
+ * The guest's boot order from its `boot` (+ legacy `bootdisk`) config values. Modern configs are
+ * `order=scsi0;ide2;net0` (devices not listed are not bootable). The legacy form is letters --
+ * `c` hard disk (the `bootdisk` key), `d` CD-ROM (the first CD/DVD drive), `n` network (the first
+ * NIC) -- in boot priority, e.g. `cdn`; it is mapped onto device keys here so both forms look the
+ * same to the editor (`legacy: true` flags the old one). No `boot` key: nothing is listed.
+ *
+ * Named `parseGuestBootOrder` because `parseBootOrder(raw)` (the string-only parser the Hardware
+ * tab has always used) already exists in this module.
+ */
+export function parseGuestBootOrder(config: GuestConfig): GuestBootOrder {
+  const raw = typeof config.boot === 'string' ? config.boot : undefined;
+  if (!raw) return { order: [], legacy: false };
+
+  const parts = raw.split(',');
+  const explicit = parts.find((p) => p.startsWith('order='));
+  if (explicit) {
+    const order = explicit
+      .slice('order='.length)
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return { order: [...new Set(order)], legacy: false };
+  }
+
+  const letters = (parts.find((p) => p.startsWith('legacy=')) ?? parts[0] ?? '').replace(/^legacy=/, '');
+  const { cdroms, nets } = bootDevices(config);
+  const bootdisk = typeof config.bootdisk === 'string' ? config.bootdisk : undefined;
+  const order: string[] = [];
+  for (const letter of letters) {
+    const key =
+      letter === 'c'
+        ? bootdisk
+        : letter === 'd'
+          ? [...cdroms].sort(byBusAndIndex)[0]?.key
+          : letter === 'n'
+            ? [...nets].sort(byBusAndIndex)[0]?.key
+            : undefined;
+    if (key !== undefined && !order.includes(key)) order.push(key);
+  }
+  return { order, legacy: true };
+}
+
+/**
+ * Every device the boot-order editor can offer, in a stable bus/index order (IDE, SATA, SCSI,
+ * VirtIO, then NICs), with a one-line description: `scsi0 — local-lvm:vm-100-disk-0 (32G)`,
+ * `ide2 — CD/DVD: local:iso/x.iso`, `net0 — virtio, vmbr0`. qemu configs only (a container has no
+ * boot order; callers never ask).
+ */
+export function listBootCandidates(config: GuestConfig): BootCandidate[] {
+  const { disks, cdroms, nets } = bootDevices(config);
+  const candidates: BootCandidate[] = [];
+  for (const disk of disks) {
+    candidates.push({
+      key: disk.key,
+      label: `${disk.key} — ${disk.storage}:${disk.volume}${disk.size ? ` (${disk.size})` : ''}`,
+    });
+  }
+  for (const cdrom of cdroms) {
+    const empty = cdrom.storage === 'none' || cdrom.storage === '' || cdrom.volume === '';
+    candidates.push({
+      key: cdrom.key,
+      label: `${cdrom.key} — CD/DVD: ${empty ? 'No media' : `${cdrom.storage}:${cdrom.volume}`}`,
+    });
+  }
+  for (const net of nets) {
+    candidates.push({ key: net.key, label: `${net.key} — ${net.model ?? 'net'}, ${net.bridge ?? '-'}` });
+  }
+  return candidates.sort(byBusAndIndex);
+}

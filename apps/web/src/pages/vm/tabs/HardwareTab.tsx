@@ -21,13 +21,14 @@ import {
   getDrives,
   getNetSpecs,
   getRootfsDrive,
-  parseBootOrder,
+  parseGuestBootOrder,
   parseMemory,
   type ParsedDrive,
   type ParsedNetSpec,
 } from '@/lib/pve-config';
 import type { VmTabProps } from '@/pages/vm/tabs';
 import type { GuestConfig } from '@/api/types';
+import { BootOrderEditButton } from '@/components/hardware/BootOrderDialog';
 
 interface Row {
   label: string;
@@ -119,7 +120,11 @@ function isResizable(drive: ParsedDrive): boolean {
   return ['ide', 'sata', 'scsi', 'virtio', 'mp'].includes(drive.bus) || drive.key === 'rootfs';
 }
 
-function qemuRows(config: GuestConfig, actionFor: ActionFor): Row[] {
+function qemuRows(
+  config: GuestConfig,
+  actionFor: ActionFor,
+  guest: { node: string; type: 'qemu' | 'lxc'; vmid: number },
+): Row[] {
   const drives = getDrives(config);
   const disks = drives.filter((d) => d.media !== 'cdrom' && d.bus !== 'efidisk' && d.bus !== 'tpmstate' && !d.volume.includes('cloudinit'));
   const cdroms = drives.filter((d) => d.media === 'cdrom' && !d.volume.includes('cloudinit'));
@@ -128,7 +133,7 @@ function qemuRows(config: GuestConfig, actionFor: ActionFor): Row[] {
   const tpm = drives.find((d) => d.bus === 'tpmstate');
   const nets = getNetSpecs(config);
   const memoryBytes = parseMemory(config.memory);
-  const bootOrder = parseBootOrder(config.boot);
+  const { order: bootOrder, legacy: bootLegacy } = parseGuestBootOrder(config);
   const serialKeys = Object.keys(config).filter((k) => /^serial\d+$/.test(k));
   const usbKeys = Object.keys(config).filter((k) => /^usb\d+$/.test(k));
   const pciKeys = Object.keys(config).filter((k) => /^hostpci\d+$/.test(k));
@@ -218,7 +223,30 @@ function qemuRows(config: GuestConfig, actionFor: ActionFor): Row[] {
   }
   if (cloudInit) rows.push({ label: 'CloudInit Drive', value: driveLine(cloudInit), keys: [cloudInit.key] });
 
-  rows.push({ label: 'Boot Order', value: bootOrder.length > 0 ? bootOrder.join(' → ') : '-', keys: ['boot'] });
+  rows.push({
+    label: 'Boot Order',
+    value:
+      bootOrder.length > 0 ? (
+        <ol className="flex flex-wrap items-center gap-1.5" data-testid="boot-order-chips">
+          {bootOrder.map((device, i) => (
+            <li key={device}>
+              <Badge variant="outline">
+                {i + 1}. {device}
+              </Badge>
+            </li>
+          ))}
+          {bootLegacy && (
+            <li className="text-xs text-muted-foreground" title="PVE's legacy boot setting">
+              (legacy)
+            </li>
+          )}
+        </ol>
+      ) : (
+        <span className="text-muted-foreground">No boot device</span>
+      ),
+    keys: ['boot'],
+    action: <BootOrderEditButton node={guest.node} type={guest.type} vmid={guest.vmid} config={config} />,
+  });
   const agentEnabled = config.agent === 1 || String(config.agent ?? '').startsWith('1');
   rows.push({ label: 'QEMU Agent', value: <Flag on={agentEnabled} />, keys: ['agent'] });
 
@@ -355,7 +383,7 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
     return <EmptyState message="No configuration available." />;
   }
 
-  const rows = type === 'qemu' ? qemuRows(config, actionFor) : lxcRows(config, actionFor);
+  const rows = type === 'qemu' ? qemuRows(config, actionFor, { node, type, vmid }) : lxcRows(config, actionFor);
   const pendingKeys = (pending.data ?? []).filter(isPendingEntry).map((entry) => entry.key);
   const closeDialog = (open: boolean) => {
     if (!open) setEditing(null);
