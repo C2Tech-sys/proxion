@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- "Backup now" and "Restore from backup" on a guest's Backups tab: start a
+  vzdump backup (storage, mode, compression, protected, notes, optional
+  retention pruning), and restore a backup over an existing guest (with a
+  typed-VMID confirm and a running-guest guard) or onto a fresh VMID
+  (with a "use next free ID" button), plus a per-row Delete. Session
+  sign-in only, gated on `VM.Backup`/`VM.Allocate`/`Datastore.AllocateSpace`/
+  `Datastore.Allocate` as appropriate -- the shared service token stays
+  read-only here too.
 - The Guests list now supports multi-select bulk power actions: a checkbox column (with a
   select-all-in-view header checkbox) selects guests across the current filtered view, and a
   bulk actions bar starts/shuts down/reboots/stops the whole selection at once, confirming in a

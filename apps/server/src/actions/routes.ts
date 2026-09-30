@@ -6,6 +6,7 @@ import { registerSnapshotRoutes } from './snapshotRoutes.js';
 import { registerMigrateRoutes } from './migrateRoutes.js';
 import { registerNodeRoutes } from './nodeRoutes.js';
 import { registerStorageRoutes } from './storageRoutes.js';
+import { registerBackupRoutes } from './backupRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -400,4 +401,8 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // Storage upload / download-from-URL / delete (`storageRoutes.ts`) share the same bucket, same
   // rationale.
   registerStorageRoutes(app, guestActionsRateLimit);
+
+  // Guest backup (vzdump) start / restore / restore-nextid (`backupRoutes.ts`) share the same
+  // bucket, same rationale.
+  registerBackupRoutes(app, guestActionsRateLimit);
 }

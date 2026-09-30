@@ -127,6 +127,26 @@ export interface FakePve {
    * (storage + decoded volume id). */
   deleteContentCalls: Array<{ storage: string; volume: string }>;
   setDeleteContentError: (storage: string, volume: string, status: number, message: string) => void;
+  /** Every `POST .../vzdump` request PVE has received, in order (parsed form body). Used by
+   * `backupRoutes.test.ts` (T41) to assert exactly what the server sent PVE for a backup start. */
+  vzdumpCalls: Array<{ body: Record<string, string> }>;
+  /** Makes the next `POST .../vzdump` call fail with the given status/message/errors -- same shape
+   * as `setUploadError`. */
+  setVzdumpError: (status: number, message: string, errors?: Record<string, string>) => void;
+  /** Every `POST .../{type}` create/restore request PVE has received, in order (type + parsed form
+   * body). Used by `backupRoutes.test.ts` to assert the qemu (`archive`) vs lxc (`ostemplate` +
+   * `restore`) restore param mapping. */
+  createCalls: Array<{ type: 'qemu' | 'lxc'; body: Record<string, string> }>;
+  /** Makes the next `POST .../{type}` create/restore call for `vmid` fail with the given
+   * status/message/errors. */
+  setCreateError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string, errors?: Record<string, string>) => void;
+  /** Sets the value `GET /cluster/nextid` returns. Defaults to `100`. */
+  setNextId: (vmid: number) => void;
+  /** Marks `vmid` as an existing cluster guest (surfaced via `GET /cluster/resources?type=vm`,
+   * used by the restore route's target-exists check), optionally `running`. Additive to
+   * `setClusterResources` -- a test that already sets full cluster resources via that can just
+   * include a `{ type: 'qemu'|'lxc', vmid, status }` row itself instead. */
+  setExistingGuest: (vmid: number, status: 'running' | 'stopped') => void;
   close: () => Promise<void>;
 }
 
@@ -190,8 +210,25 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   app.get('/api2/json/version', async () => ({ data: { version: '9.0', release: '9.0' } }));
 
   let clusterResources: unknown[] = [];
-  app.get('/api2/json/cluster/resources', async () => ({ data: clusterResources }));
+  // Guests registered via `setExistingGuest` (T41) -- merged onto whatever `setClusterResources`
+  // set, so a test only cares about the one thing it's asserting (either the full resource list,
+  // or just "does this vmid exist"), never both at once.
+  const existingGuestsByVmid = new Map<number, { status: 'running' | 'stopped' }>();
+  app.get('/api2/json/cluster/resources', async () => {
+    const extra = Array.from(existingGuestsByVmid.entries()).map(([vmid, g]) => ({
+      type: 'qemu',
+      vmid,
+      status: g.status,
+    }));
+    return { data: [...clusterResources, ...extra] };
+  });
   app.get('/api2/json/cluster/tasks', async () => ({ data: [] }));
+
+  // `GET /cluster/nextid` -- real PVE's JSON response carries this as a native JSON number (unlike
+  // the form-encoded string values every write route above sees), used by the restore dialog's
+  // "use next free ID" button (`backupRoutes.ts`, T41).
+  let nextId = 100;
+  app.get('/api2/json/cluster/nextid', async () => ({ data: nextId }));
 
   // `GET /nodes/{node}/tasks` -- per-node task history (used by the poller's vzdump-history
   // fetch, T23). Honours `typefilter`/`since`/`limit`; `source` is accepted but every task in
@@ -614,6 +651,53 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     reply.send({ data: 'UPID:fakepve:00000001:00000000:00000000:imgdel:0:root@pam:' });
   });
 
+  // Guest backup start (`POST /nodes/{node}/vzdump`), used by `src/actions/backupRoutes.ts` (T41).
+  // Records every call (parsed form body) and returns a fake UPID on success, same recording
+  // pattern as the power-action/config/snapshot/migrate routes above. Not keyed by vmid -- every
+  // test exercising a PVE-side vzdump failure only ever backs up one guest at a time.
+  const vzdumpCalls: Array<{ body: Record<string, string> }> = [];
+  let vzdumpError: { status: number; message: string; errors?: Record<string, string> } | undefined;
+
+  app.post('/api2/json/nodes/:node/vzdump', async (req, reply) => {
+    vzdumpCalls.push({ body: (req.body ?? {}) as Record<string, string> });
+    if (vzdumpError) {
+      const failure = vzdumpError;
+      reply
+        .code(failure.status)
+        .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
+      return;
+    }
+    reply.send({ data: 'UPID:fakepve:00000001:00000000:00000000:vzdump:0:root@pam:' });
+  });
+
+  // Guest create/restore (`POST /nodes/{node}/qemu`, `POST /nodes/{node}/lxc`), used by the
+  // restore route in `src/actions/backupRoutes.ts` (T41). Records every call (type + parsed form
+  // body) and returns a fake UPID on success, keyed errors by (type, vmid) same as
+  // `actionErrors`/`configErrors` above.
+  const createCalls: Array<{ type: 'qemu' | 'lxc'; body: Record<string, string> }> = [];
+  const createErrors = new Map<string, { status: number; message: string; errors?: Record<string, string> }>();
+
+  function createErrorKey(type: 'qemu' | 'lxc', vmid: number): string {
+    return `${type}:${vmid}`;
+  }
+
+  function registerCreateRoute(type: 'qemu' | 'lxc') {
+    app.post(`/api2/json/nodes/:node/${type}`, async (req, reply) => {
+      const body = (req.body ?? {}) as Record<string, string>;
+      createCalls.push({ type, body });
+      const failure = createErrors.get(createErrorKey(type, Number(body.vmid)));
+      if (failure) {
+        reply
+          .code(failure.status)
+          .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
+        return;
+      }
+      reply.send({ data: `UPID:fakepve:00000001:00000000:00000000:${type === 'qemu' ? 'qmrestore' : 'vzrestore'}:${body.vmid}:root@pam:` });
+    });
+  }
+  registerCreateRoute('qemu');
+  registerCreateRoute('lxc');
+
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
   return {
@@ -734,6 +818,30 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     },
     setDeleteContentError: (storage: string, volume: string, status: number, message: string) => {
       deleteContentErrors.set(`${storage}:${volume}`, { status, message });
+    },
+    get vzdumpCalls() {
+      return vzdumpCalls;
+    },
+    setVzdumpError: (status: number, message: string, errors?: Record<string, string>) => {
+      vzdumpError = { status, message, ...(errors ? { errors } : {}) };
+    },
+    get createCalls() {
+      return createCalls;
+    },
+    setCreateError: (
+      type: 'qemu' | 'lxc',
+      vmid: number,
+      status: number,
+      message: string,
+      errors?: Record<string, string>,
+    ) => {
+      createErrors.set(createErrorKey(type, vmid), { status, message, ...(errors ? { errors } : {}) });
+    },
+    setNextId: (vmid: number) => {
+      nextId = vmid;
+    },
+    setExistingGuest: (vmid: number, status: 'running' | 'stopped') => {
+      existingGuestsByVmid.set(vmid, { status });
     },
     close: () => app.close(),
   };

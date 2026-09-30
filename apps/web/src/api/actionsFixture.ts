@@ -6,9 +6,13 @@ import {
   getFixtureMigratePrecheck,
   addFixtureStorageContent,
   removeFixtureStorageContent,
+  getFixtureGuestByVmid,
+  addFixtureGuest,
+  getFixtureNextId,
 } from '@/api/fixtures';
-import type { GuestType } from '@/api/types';
+import type { BackupContentItem, ClusterResource, GuestType } from '@/api/types';
 import type {
+  BackupGuestBody,
   CreateSnapshotBody,
   DownloadUrlToStorageBody,
   GuestAction,
@@ -19,6 +23,7 @@ import type {
   MigratePrecheck,
   NodeActionCommand,
   NodeActionResult,
+  RestoreGuestBody,
   RollbackSnapshotOptions,
   SnapshotActionResult,
   UploadToStorageOptions,
@@ -289,4 +294,97 @@ export async function fixtureDeleteStorageContent(
 ): Promise<GuestActionResult> {
   removeFixtureStorageContent(node, storage, volid);
   return delay({ upid: fakeUpidFor(node, 0, 'imgdel') });
+}
+
+/** How long `fixtureBackupGuest` simulates PVE's own vzdump taking before the new backup volume
+ * shows up -- close to `fixtureDownloadUrlToStorage`'s own ~1s, matching the ticket's "after ~1s"
+ * for the demo. */
+const BACKUP_DELAY_MS = 1000;
+
+/** A plausible fixture size for a vzdump backup -- close to a real small-guest backup's size. */
+const FIXTURE_BACKUP_SIZE_BYTES = 2_147_483_648;
+
+/** `vzdump`'s own timestamp format (`YYYY_MM_DD-HH_mm_ss`), used in every real backup archive's
+ * filename -- `2024-01-05T03:04:05` -> `2024_01_05-03_04_05`. */
+function vzdumpTimestamp(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${date.getFullYear()}_${pad(date.getMonth() + 1)}_${pad(date.getDate())}` +
+    `-${pad(date.getHours())}_${pad(date.getMinutes())}_${pad(date.getSeconds())}`
+  );
+}
+
+/** Fixture-mode implementation of `backupGuest` (see `src/api/actions.ts`): no real request --
+ * after `BACKUP_DELAY_MS`, appends one realistic backup volume (real-PVE-shaped volid/filename) to
+ * the in-memory fixture storage content (`addFixtureStorageContent`), so the Backups tab's own
+ * `['storage-content', ...]` query picks it up as soon as it's invalidated. `mode`/`compress`/
+ * `prune` have no fixture-visible effect. */
+export async function fixtureBackupGuest(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  body: BackupGuestBody,
+): Promise<GuestActionResult> {
+  await wait(BACKUP_DELAY_MS);
+
+  const filename = `vzdump-${type}-${vmid}-${vzdumpTimestamp(new Date())}.tar.zst`;
+  const item: BackupContentItem = {
+    volid: `${body.storage}:backup/${filename}`,
+    content: 'backup',
+    format: 'tar.zst',
+    size: FIXTURE_BACKUP_SIZE_BYTES,
+    vmid,
+    ctime: Math.floor(Date.now() / 1000),
+    protected: body.protected === true,
+    ...(body.notes !== undefined ? { notes: body.notes } : {}),
+  };
+  addFixtureStorageContent(node, body.storage, item);
+
+  return { upid: fakeUpidFor(node, vmid, 'vzdump') };
+}
+
+/** How long `fixtureRestoreGuest` simulates PVE's own restore taking. */
+const RESTORE_DELAY_MS = 1000;
+
+/** Fixture-mode implementation of `restoreGuest` (see `src/api/actions.ts`): no real request.
+ * Restoring over an existing guest (`targetVmid` already present in the shared in-memory
+ * `resources`) flips its status to `stopped` (or `running`, when `start` was requested) via
+ * `setFixtureGuestStatus`; restoring to a fresh id instead adds a new guest row
+ * (`addFixtureGuest`) -- a copy of the source guest with the new vmid and its name suffixed
+ * `-restored`, so the demo has something plausible to navigate to. `archive`/`storage`/`force`/
+ * `unique`/`unprivileged` have no further fixture-visible effect. */
+export async function fixtureRestoreGuest(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  body: RestoreGuestBody,
+): Promise<GuestActionResult> {
+  await wait(RESTORE_DELAY_MS);
+
+  const targetVmid = body.targetVmid ?? vmid;
+  const existing = getFixtureGuestByVmid(targetVmid);
+
+  if (existing) {
+    setFixtureGuestStatus(existing.node, existing.type as GuestType, targetVmid, body.start ? 'running' : 'stopped');
+  } else {
+    const source = getFixtureGuestByVmid(vmid);
+    const restored: ClusterResource = {
+      ...(source ?? { id: `${type}/${targetVmid}`, type, node, status: 'stopped' }),
+      id: `${type}/${targetVmid}`,
+      type,
+      node,
+      vmid: targetVmid,
+      name: `${source?.name ?? `vm-${vmid}`}-restored`,
+      status: body.start ? 'running' : 'stopped',
+    };
+    addFixtureGuest(restored);
+  }
+
+  return delay({ upid: fakeUpidFor(node, targetVmid, type === 'qemu' ? 'qmrestore' : 'vzrestore') });
+}
+
+/** Fixture-mode implementation of `getRestoreNextId` (see `src/api/actions.ts`): one past the
+ * highest vmid currently in the shared in-memory fixture resources (`getFixtureNextId`). */
+export async function fixtureRestoreNextId(): Promise<number> {
+  return delay(getFixtureNextId());
 }
