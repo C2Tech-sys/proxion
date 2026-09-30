@@ -55,6 +55,23 @@ describe('Guests list bulk power actions (T44)', () => {
     expect(await screen.findByText('2 selected')).toBeInTheDocument();
     // Clicking a row's checkbox must never trigger the row's own "open the guest" navigation.
     expect(router.state.location.pathname).toBe('/guests');
+    expect(guestCheckbox('web-prod-01').closest('tr')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('a keydown bubbling up from the row checkbox does not navigate the row (T44 fix pass)', async () => {
+    const router = renderGuests();
+    await screen.findByRole('table', {}, { timeout: FIND_TIMEOUT_MS });
+
+    const checkbox = guestCheckbox('web-prod-01');
+    checkbox.focus();
+    // Radix's Checkbox calls `preventDefault()` on Enter (so Enter never toggles it -- only Space
+    // does, per the ARIA checkbox pattern) but not `stopPropagation()`; before the fix, this
+    // keydown bubbled up to the row's own `onKeyDown` and navigated to the guest.
+    fireEvent.keyDown(checkbox, { key: 'Enter' });
+
+    expect(router.state.location.pathname).toBe('/guests');
+    // Enter isn't a checkbox's activation key, so it must not have toggled either.
+    expect(checkbox).not.toBeChecked();
   });
 
   it('Shut down: the dialog lists both selected guests, and confirm calls guestAction for each with the shutdown body', async () => {

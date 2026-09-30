@@ -164,6 +164,15 @@ function GuestTableRow({
     event.stopPropagation();
   }
 
+  // Radix's Checkbox calls `preventDefault()` on Enter/Space (so the browser doesn't also submit
+  // a form or scroll the page) but never `stopPropagation()` -- left alone, that keydown still
+  // bubbles from the checkbox up through this cell to the row's own `onKeyDown` below, which would
+  // then "helpfully" navigate to the guest on top of toggling its checkbox. Stopped here instead
+  // of only on `click` (T44 fix pass): keyboard users reach the checkbox by Tab, not by clicking.
+  function stopKeyDown(event: KeyboardEvent<HTMLElement>) {
+    event.stopPropagation();
+  }
+
   function onKeyDown(event: KeyboardEvent<HTMLTableRowElement>) {
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -180,9 +189,10 @@ function GuestTableRow({
         tabIndex={0}
         onClick={open}
         onKeyDown={onKeyDown}
+        aria-selected={selected}
         className="cursor-pointer border-b border-border outline-none transition-colors last:border-0 hover:bg-muted/40 focus-visible:bg-accent/10"
       >
-        <TableCell onClick={stop} className="w-8">
+        <TableCell onClick={stop} onKeyDown={stopKeyDown} className="w-8">
           <Checkbox
             aria-label={`Select ${row.name}`}
             checked={selected}
