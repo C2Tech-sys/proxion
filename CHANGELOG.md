@@ -27,9 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (from the node's bridges), VLAN tag, firewall, rate limit, disconnect and MTU; a
   container picks its interface name, bridge, IPv4 (DHCP / static + gateway /
   manual), IPv6 (SLAAC / DHCP / static + gateway / manual), VLAN tag, firewall, rate
-  limit and MTU. A new device gets a Proxmox-generated MAC (or an override); editing
-  never changes an existing MAC. Session sign-in only, gated on `VM.Config.Network`
+  limit and MTU (`1` = the bridge MTU on a VM). A new device gets a Proxmox-generated MAC
+  (or an override); editing never changes an existing MAC and keeps options the dialog
+  doesn't show (queues, trunks, ...). Session sign-in only, gated on `VM.Config.Network`
   -- the shared service token stays read-only here too.
+
+### Changed
+
+- Web test suite: 30 s test/hook timeouts, 10 s element-wait budgets in the heavy
+  route-level tests, and an opt-in `PROXION_VITEST_WORKERS=<n>` cap so parallel suites
+  on a busy machine stop timing out.
 
 ## [0.8.0] - 2026-09-30
 
