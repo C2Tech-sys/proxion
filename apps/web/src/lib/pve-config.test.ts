@@ -9,6 +9,15 @@ import {
   getDrives,
   getNetSpecs,
   getRootfsDrive,
+  isIPv4,
+  isIPv4Cidr,
+  isIPv6,
+  isIPv6Cidr,
+  isUnicastMac,
+  isValidMac,
+  nextFreeNetSlot,
+  parseNicConfig,
+  unmodeledNicParts,
   parseBootOrder,
   parseGuestBootOrder,
   listBootCandidates,
@@ -293,5 +302,114 @@ describe('parseGuestBootOrder / listBootCandidates (T51)', () => {
 
   it('labels an empty CD-ROM drive "No media"', () => {
     expect(listBootCandidates({ ide2: 'none,media=cdrom' })).toEqual([{ key: 'ide2', label: 'ide2 — CD/DVD: No media' }]);
+  });
+});
+
+describe('network device helpers (T50)', () => {
+  it('parseNicConfig reads every editable qemu field', () => {
+    expect(
+      parseNicConfig(
+        'qemu',
+        'net0',
+        'e1000e=BC:24:11:64:00:01,bridge=vmbr1,tag=20,firewall=1,rate=12.5,link_down=1,mtu=1500',
+      ),
+    ).toEqual({
+      key: 'net0',
+      model: 'e1000e',
+      mac: 'BC:24:11:64:00:01',
+      bridge: 'vmbr1',
+      vlan: 20,
+      firewall: true,
+      rate: 12.5,
+      linkDown: true,
+      mtu: 1500,
+    });
+  });
+
+  it('parseNicConfig handles a bare qemu model (no MAC) and absent options', () => {
+    expect(parseNicConfig('qemu', 'net2', 'virtio,bridge=vmbr0')).toEqual({
+      key: 'net2',
+      model: 'virtio',
+      mac: undefined,
+      bridge: 'vmbr0',
+      vlan: undefined,
+      firewall: false,
+      rate: undefined,
+      linkDown: false,
+      mtu: undefined,
+    });
+  });
+
+  it('parseNicConfig reads every editable lxc field', () => {
+    expect(
+      parseNicConfig(
+        'lxc',
+        'net1',
+        'name=eth1,bridge=vmbr0,firewall=1,hwaddr=BC:24:11:C8:00:01,ip=10.0.0.5/24,gw=10.0.0.1,ip6=auto,type=veth,tag=30',
+      ),
+    ).toMatchObject({
+      key: 'net1',
+      name: 'eth1',
+      bridge: 'vmbr0',
+      firewall: true,
+      mac: 'BC:24:11:C8:00:01',
+      ip: '10.0.0.5/24',
+      gw: '10.0.0.1',
+      ip6: 'auto',
+      gw6: undefined,
+      vlan: 30,
+      linkDown: false,
+    });
+  });
+
+  it('unmodeledNicParts keeps only what the dialog does not model, verbatim and in order', () => {
+    expect(
+      unmodeledNicParts('qemu', 'virtio=BC:24:11:64:00:01,bridge=vmbr0,queues=4,tag=20,trunks=10;20,link_down=1'),
+    ).toEqual(['queues=4', 'trunks=10;20']);
+    expect(unmodeledNicParts('qemu', 'virtio,bridge=vmbr0')).toEqual([]);
+    expect(
+      unmodeledNicParts('lxc', 'name=eth0,bridge=vmbr0,hwaddr=BC:24:11:C8:00:01,ip=dhcp,link_down=1,type=veth'),
+    ).toEqual(['link_down=1', 'type=veth']);
+    expect(unmodeledNicParts('qemu', undefined)).toEqual([]);
+  });
+
+  it('nextFreeNetSlot picks the first gap, and undefined when full', () => {
+    expect(nextFreeNetSlot({ net0: 'a', net1: 'b', net3: 'c' })).toBe('net2');
+    expect(nextFreeNetSlot({})).toBe('net0');
+    const full: GuestConfig = {};
+    for (let n = 0; n < 32; n++) full[`net${n}`] = 'virtio';
+    expect(nextFreeNetSlot(full)).toBeUndefined();
+  });
+
+  it('validates MACs (unicast only for devices)', () => {
+    expect(isValidMac('BC:24:11:64:00:01')).toBe(true);
+    expect(isValidMac('bc:24:11:64:00:01')).toBe(true);
+    expect(isValidMac('BC-24-11-64-00-01')).toBe(false);
+    expect(isValidMac('BC:24:11:64:00')).toBe(false);
+    expect(isUnicastMac('BC:24:11:64:00:01')).toBe(true);
+    expect(isUnicastMac('01:00:5E:00:00:01')).toBe(false);
+    expect(isUnicastMac('03:00:00:00:00:01')).toBe(false);
+  });
+
+  it('validates IPv4 / IPv6 addresses and CIDRs', () => {
+    expect(isIPv4('10.0.0.1')).toBe(true);
+    expect(isIPv4('10.0.0.256')).toBe(false);
+    expect(isIPv4('10.0.0')).toBe(false);
+    expect(isIPv4Cidr('10.0.0.5/24')).toBe(true);
+    expect(isIPv4Cidr('10.0.0.5/33')).toBe(false);
+    expect(isIPv4Cidr('10.0.0.5')).toBe(false);
+    expect(isIPv6('fd00::1')).toBe(true);
+    expect(isIPv6('::1')).toBe(true);
+    expect(isIPv6('::')).toBe(true);
+    expect(isIPv6('2001:db8:0:0:0:0:0:1')).toBe(true);
+    expect(isIPv6('::ffff:10.0.0.1')).toBe(true);
+    expect(isIPv6('fd00:::1')).toBe(false);
+    expect(isIPv6('fd00::1::2')).toBe(false);
+    expect(isIPv6('2001:db8:0:0:0:0:0:0:1')).toBe(false);
+    expect(isIPv6('fd00')).toBe(false);
+    expect(isIPv6('gggg::1')).toBe(false);
+    expect(isIPv6Cidr('fd00::5/64')).toBe(true);
+    expect(isIPv6Cidr('fd00::5/129')).toBe(false);
+    expect(isIPv6Cidr('fd00::5')).toBe(false);
   });
 });

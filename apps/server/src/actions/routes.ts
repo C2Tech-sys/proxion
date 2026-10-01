@@ -12,6 +12,7 @@ import { registerDestroyRoutes } from './destroyRoutes.js';
 import { registerHardwareRoutes } from './hardwareRoutes.js';
 import { registerBootOrderRoutes } from './bootOrderRoutes.js';
 import { registerDiskRoutes } from './diskRoutes.js';
+import { registerNetworkRoutes } from './networkRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -424,4 +425,8 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
 
   // Guest disk add / detach / remove-unused (`diskRoutes.ts`) shares the same bucket, same rationale.
   registerDiskRoutes(app, guestActionsRateLimit);
+
+  // Guest network device add/edit/remove + next free slot (`networkRoutes.ts`) share the same
+  // bucket, same rationale.
+  registerNetworkRoutes(app, guestActionsRateLimit);
 }
