@@ -17,6 +17,7 @@ import { hardwareErrorMessage } from '@/api/hardwareHooks';
 import { useBridges, useNextNicSlot, useUpsertNic } from '@/api/networkHooks';
 import type { NicBody } from '@/api/network';
 import {
+  NIC_MTU_RANGE,
   QEMU_NIC_MODELS,
   isIPv4,
   isIPv4Cidr,
@@ -202,7 +203,7 @@ export function EditNicDialog({ open, onOpenChange, node, type, vmid, nic }: Edi
     name: !isQemu && !isValidLxcIfName(effectiveName) ? 'The interface name must look like eth0.' : undefined,
     vlan: intFieldError(vlanText, 1, 4094, 'VLAN tag'),
     rate: rateFieldError(rateText),
-    mtu: intFieldError(mtuText, 576, 65520, 'MTU'),
+    mtu: intFieldError(mtuText, NIC_MTU_RANGE[type][0], NIC_MTU_RANGE[type][1], 'MTU'),
     mac: overrideMac && !isUnicastMac(macText.trim()) ? 'Enter a unicast MAC like BC:24:11:AA:BB:CC.' : undefined,
     ip4: !isQemu && ip4Mode === 'static' && !isIPv4Cidr(ip4Text.trim()) ? 'Enter an address with prefix, e.g. 10.0.0.5/24.' : undefined,
     gw4:
@@ -280,7 +281,7 @@ export function EditNicDialog({ open, onOpenChange, node, type, vmid, nic }: Edi
           <DialogDescription>
             {isNew
               ? 'Attach this guest to a bridge. The interface appears as a new network adapter.'
-              : 'Changes replace the whole device configuration. Its MAC address stays the same.'}
+              : 'Options not shown here (queues, trunks, ...) are kept as they are. The MAC address stays the same.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -450,7 +451,7 @@ export function EditNicDialog({ open, onOpenChange, node, type, vmid, nic }: Edi
                 aria-invalid={errors.rate !== undefined || undefined}
               />
             </Field>
-            <Field label="MTU" htmlFor={`${id}-mtu`} error={errors.mtu} hint="Optional, 576-65520.">
+            <Field label="MTU" htmlFor={`${id}-mtu`} error={errors.mtu} hint={isQemu ? 'Optional. 1 = use the bridge MTU (VirtIO only).' : 'Optional, 64-65535.'}>
               <Input
                 id={`${id}-mtu`}
                 type="number"

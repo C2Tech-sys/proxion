@@ -4,7 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 
 import { HardwareTab } from '@/pages/vm/tabs/HardwareTab';
 import { createQueryClient } from '@/api/queryClient';
-import { patchFixtureGuestConfig } from '@/api/fixtures';
+import { getFixtureGuestConfig, patchFixtureGuestConfig } from '@/api/fixtures';
 import type { AuthIdentity } from '@/api/client-types';
 import type { GuestPermissions } from '@/api/actionHooks';
 
@@ -109,8 +109,12 @@ describe('Hardware tab network devices', () => {
 
   afterEach(() => {
     state.fixtures = false;
-    // Only the fixture-flow test adds a device to the shared in-memory config.
-    patchFixtureGuestConfig('pve1', 'qemu', 100, { net2: undefined });
+    // Only the fixture-flow test adds a device to the shared in-memory config, and the mtu=1 test
+    // rewrites net0.
+    patchFixtureGuestConfig('pve1', 'qemu', 100, {
+      net0: 'virtio=BC:24:11:64:00:01,bridge=vmbr0,firewall=1',
+      net2: undefined,
+    });
     vi.clearAllMocks();
   });
 
@@ -219,8 +223,13 @@ describe('Hardware tab network devices', () => {
     fireEvent.change(within(dialog).getByLabelText('Rate limit (MB/s)'), { target: { value: '0' } });
     expect(save).toBeDisabled();
     fireEvent.change(within(dialog).getByLabelText('Rate limit (MB/s)'), { target: { value: '' } });
+    // qemu MTU is 1..65520 (1 = bridge MTU); 100 is fine, 0 and 65521 are not.
     fireEvent.change(within(dialog).getByLabelText('MTU'), { target: { value: '100' } });
-    expect(save).toBeDisabled();
+    expect(save).toBeEnabled();
+    for (const value of ['0', '65521']) {
+      fireEvent.change(within(dialog).getByLabelText('MTU'), { target: { value } });
+      expect(save).toBeDisabled();
+    }
     fireEvent.change(within(dialog).getByLabelText('MTU'), { target: { value: '' } });
     expect(save).toBeEnabled();
 
@@ -289,6 +298,32 @@ describe('Hardware tab network devices', () => {
         bridge: 'vmbr0',
         firewall: true,
         vlan: 30,
+      }),
+    );
+    expect(mockUpsertNic.mock.calls[0]![4]).not.toHaveProperty('mac');
+  });
+
+  it('(c3) a NIC already carrying mtu=1 (bridge MTU) opens with 1, stays savable, and the body keeps mtu: 1', async () => {
+    patchFixtureGuestConfig('pve1', 'qemu', 100, { net0: 'virtio=BC:24:11:64:00:01,bridge=vmbr0,firewall=1,mtu=1' });
+
+    renderTab();
+    const dialog = await openDialog('Edit network device net0');
+    await within(dialog).findByRole('option', { name: 'vmbr1' });
+
+    expect(within(dialog).getByLabelText('MTU')).toHaveValue(1);
+    expect(within(dialog).getByText(/1 = use the bridge MTU \(VirtIO only\)/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Options not shown here \(queues, trunks/)).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText('Bridge'), { target: { value: 'vmbr1' } });
+    const save = within(dialog).getByRole('button', { name: 'Save' });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+
+    await waitFor(() =>
+      expect(mockUpsertNic).toHaveBeenCalledWith('pve1', 'qemu', 100, 'net0', {
+        model: 'virtio',
+        bridge: 'vmbr1',
+        firewall: true,
+        mtu: 1,
       }),
     );
     expect(mockUpsertNic.mock.calls[0]![4]).not.toHaveProperty('mac');
@@ -421,6 +456,27 @@ describe('Hardware tab network devices', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove net0' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('net0 does not exist on this guest');
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+  });
+
+  it('(f2) fixture mode: an edit keeps unmodeled options (queues, trunks) and the MAC, like the server', async () => {
+    state.fixtures = true;
+    mockUpsertNic.mockImplementation(state.actual!.upsertNic);
+    mockGetBridges.mockImplementation(state.actual!.getBridges);
+    patchFixtureGuestConfig('pve1', 'qemu', 100, {
+      net0: 'virtio=BC:24:11:64:00:01,bridge=vmbr0,firewall=1,queues=4,trunks=10;20',
+    });
+
+    renderTab();
+    const dialog = await openDialog('Edit network device net0');
+    await within(dialog).findByRole('option', { name: /vmbr1/ });
+    fireEvent.change(within(dialog).getByLabelText('Bridge'), { target: { value: 'vmbr1' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(getFixtureGuestConfig(100)?.net0).toBe(
+        'virtio=BC:24:11:64:00:01,bridge=vmbr1,firewall=1,queues=4,trunks=10;20',
+      ),
+    );
   });
 
   it('(f) fixture mode: after add, the tab shows the new NIC row; remove takes it away again', async () => {

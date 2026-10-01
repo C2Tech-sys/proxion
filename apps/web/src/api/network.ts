@@ -1,7 +1,7 @@
 import { USE_FIXTURES } from '@/api/client';
 import { GuestActionError } from '@/api/actions';
 import { getFixtureGuestByVmid, getFixtureGuestConfig, patchFixtureGuestConfig } from '@/api/fixtures';
-import { nextFreeNetSlot, parseNicConfig } from '@/lib/pve-config';
+import { nextFreeNetSlot, parseNicConfig, unmodeledNicParts } from '@/lib/pve-config';
 import type { GuestType } from '@/api/types';
 
 /**
@@ -119,6 +119,7 @@ export function composeNicValue(
   slot: string,
   body: NicBody,
   mac: string | undefined,
+  extras: readonly string[] = [],
 ): string {
   const parts: string[] = [];
   if (type === 'qemu') {
@@ -137,6 +138,8 @@ export function composeNicValue(
   if (body.rateMbps !== undefined) parts.push(`rate=${body.rateMbps}`);
   if (type === 'qemu' && body.linkDown !== undefined) parts.push(`link_down=${body.linkDown ? 1 : 0}`);
   if (body.mtu !== undefined) parts.push(`mtu=${body.mtu}`);
+  // An edit keeps the existing device's options this body doesn't model (queues, trunks, ...).
+  parts.push(...extras);
   return parts.join(',');
 }
 
@@ -145,10 +148,12 @@ function isFixtureRunning(vmid: number): boolean {
 }
 
 function fixtureUpsertNic(node: string, type: GuestType, vmid: number, slot: string, body: NicBody): NicSaveResult {
-  const existing = getFixtureGuestConfig(vmid)?.[slot];
-  const current = typeof existing === 'string' ? parseNicConfig(type, slot, existing) : undefined;
+  const raw = getFixtureGuestConfig(vmid)?.[slot];
+  const existing = typeof raw === 'string' ? raw : undefined;
+  const current = existing !== undefined ? parseNicConfig(type, slot, existing) : undefined;
   const mac = body.mac ?? current?.mac ?? generateMac();
-  patchFixtureGuestConfig(node, type, vmid, { [slot]: composeNicValue(type, slot, body, mac) });
+  const value = composeNicValue(type, slot, body, mac, unmodeledNicParts(type, existing));
+  patchFixtureGuestConfig(node, type, vmid, { [slot]: value });
   // A running qemu guest hot-plugs a new NIC; editing one (and any lxc change) waits for a restart.
   const held = isFixtureRunning(vmid) && (current !== undefined || type === 'lxc');
   return { ok: true, slot, pending: held ? [slot] : [] };

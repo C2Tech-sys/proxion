@@ -89,11 +89,23 @@ const nicBodySchema = z
     firewall: z.boolean().optional(),
     rateMbps: z.number().positive().max(100000).optional(),
     linkDown: z.boolean().optional(),
-    mtu: z.number().int().min(576).max(65520).optional(),
+    // Superset bounds; the per-type range (`MTU_RANGE`) is checked in the handler.
+    mtu: z.number().int().min(1).max(65535).optional(),
   })
   .strict();
 
 export type NicBody = z.infer<typeof nicBodySchema>;
+
+/** PVE's own `mtu` ranges: qemu-server 1..65520 (`1` = use the bridge MTU, VirtIO only),
+ * pve-container 64..65535. */
+const MTU_RANGE = { qemu: [1, 65520], lxc: [64, 65535] } as const;
+
+/** The `net<n>` keys this route models per guest type. A key=value pair of an existing device
+ * whose key is NOT listed here is carried over unchanged on an edit (queues, trunks, ...). */
+const MODELED_KEYS = {
+  qemu: new Set(['bridge', 'tag', 'firewall', 'rate', 'link_down', 'mtu']),
+  lxc: new Set(['name', 'bridge', 'hwaddr', 'ip', 'gw', 'ip6', 'gw6', 'tag', 'firewall', 'rate', 'mtu']),
+} as const;
 
 const QEMU_ONLY_FIELDS = ['model', 'linkDown'] as const;
 const LXC_ONLY_FIELDS = ['name', 'ip', 'gw', 'ip6', 'gw6'] as const;
@@ -140,15 +152,33 @@ function existingMac(type: 'qemu' | 'lxc', raw: unknown): string | undefined {
 }
 
 /**
+ * The key=value pairs of an existing `net<n>` value that this route does not model for `type`
+ * (qemu `queues`/`trunks`, lxc `link_down`/`trunks`/`type`, anything PVE adds later), verbatim and
+ * in their original order. Keys the body models are never carried over, even when the body omits
+ * them. The first qemu part is the `<model>[=<MAC>]` head and is always modeled.
+ */
+export function unmodeledNetParts(type: 'qemu' | 'lxc', raw: unknown): string[] {
+  if (typeof raw !== 'string') return [];
+  const modeled: ReadonlySet<string> = MODELED_KEYS[type];
+  return raw.split(',').filter((part, index) => {
+    if (part === '' || (type === 'qemu' && index === 0)) return false;
+    const eq = part.indexOf('=');
+    return !modeled.has(eq === -1 ? part : part.slice(0, eq));
+  });
+}
+
+/**
  * Composes the PVE `net<n>` property string, keys in the order PVE documents them, unset fields
  * omitted. `mac` is the address to pin (already resolved against the existing device by the
  * caller); without one qemu gets the bare model (PVE generates a MAC) and lxc gets no `hwaddr`.
+ * `extras` (an edit's unmodeled options, see `unmodeledNetParts`) are appended unchanged.
  */
 export function composeNetValue(
   type: 'qemu' | 'lxc',
   slot: string,
   body: NicBody,
   mac: string | undefined,
+  extras: readonly string[] = [],
 ): string {
   const parts: string[] = [];
   if (type === 'qemu') {
@@ -169,6 +199,7 @@ export function composeNetValue(
   if (body.rateMbps !== undefined) parts.push(`rate=${body.rateMbps}`);
   if (type === 'qemu' && body.linkDown !== undefined) parts.push(`link_down=${body.linkDown ? 1 : 0}`);
   if (body.mtu !== undefined) parts.push(`mtu=${body.mtu}`);
+  parts.push(...extras);
   return parts.join(',');
 }
 
@@ -300,6 +331,11 @@ export function registerNetworkRoutes(
         reply.code(400).send({ error: 'Invalid request body' });
         return;
       }
+      const [mtuMin, mtuMax] = MTU_RANGE[params.type];
+      if (body.mtu !== undefined && (body.mtu < mtuMin || body.mtu > mtuMax)) {
+        reply.code(400).send({ error: 'Invalid request body', message: `mtu must be ${mtuMin}..${mtuMax} for a ${params.type} guest` });
+        return;
+      }
       if (body.gw !== undefined && !(body.ip !== undefined && isIPv4Cidr(body.ip))) {
         reply.code(400).send({ error: 'Invalid request body', message: 'gw needs a static ip (CIDR)' });
         return;
@@ -325,7 +361,7 @@ export function registerNetworkRoutes(
         return;
       }
       const mac = body.mac ?? existingMac(params.type, current[slot]);
-      const value = composeNetValue(params.type, slot, body, mac);
+      const value = composeNetValue(params.type, slot, body, mac, unmodeledNetParts(params.type, current[slot]));
 
       try {
         await callConfigUpdate(client, params.type, params.node, params.vmid, { [slot]: value });

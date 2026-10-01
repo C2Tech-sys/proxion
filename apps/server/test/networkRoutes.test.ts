@@ -145,8 +145,10 @@ describe('guest network device routes (T50)', () => {
     it('rejects out-of-range rate and mtu', async () => {
       await expect400(QEMU, { model: 'virtio', bridge: 'vmbr0', rateMbps: 0 });
       await expect400(QEMU, { model: 'virtio', bridge: 'vmbr0', rateMbps: 100001 });
-      await expect400(QEMU, { model: 'virtio', bridge: 'vmbr0', mtu: 575 });
+      await expect400(QEMU, { model: 'virtio', bridge: 'vmbr0', mtu: 0 });
       await expect400(QEMU, { model: 'virtio', bridge: 'vmbr0', mtu: 65521 });
+      await expect400(LXC, { bridge: 'vmbr0', mtu: 63 });
+      await expect400(LXC, { bridge: 'vmbr0', mtu: 65536 });
     });
 
     it('rejects a bad CIDR / gateway / lxc name', async () => {
@@ -230,6 +232,23 @@ describe('guest network device routes (T50)', () => {
       });
     });
 
+    it('accepts PVE\'s own mtu ranges: qemu 1 (= bridge MTU) and 65520, lxc 64 and 65535', async () => {
+      const cookie = await setupSession();
+      await put('qemu', 100, 'net0', { model: 'virtio', bridge: 'vmbr0', mtu: 1 }, cookie);
+      expect(fakePve.configCalls[0]!.body).toEqual({ net0: 'virtio,bridge=vmbr0,mtu=1' });
+      await put('qemu', 100, 'net0', { model: 'virtio', bridge: 'vmbr0', mtu: 65520 }, cookie);
+      expect(fakePve.configCalls[1]!.body).toEqual({ net0: 'virtio,bridge=vmbr0,mtu=65520' });
+      const lxc64 = await put('lxc', 200, 'net0', { bridge: 'vmbr0', mtu: 64 }, cookie);
+      expect(lxc64.statusCode).toBe(200);
+      expect(fakePve.configCalls[2]!.body).toEqual({ net0: 'name=eth0,bridge=vmbr0,mtu=64' });
+      const lxcMax = await put('lxc', 200, 'net0', { bridge: 'vmbr0', mtu: 65535 }, cookie);
+      expect(lxcMax.statusCode).toBe(200);
+      // qemu tops out at 65520.
+      const qemuOver = await put('qemu', 100, 'net0', { model: 'virtio', bridge: 'vmbr0', mtu: 65521 }, cookie);
+      expect(qemuOver.statusCode).toBe(400);
+      expect(fakePve.configCalls).toHaveLength(4);
+    });
+
     it('an explicit firewall:false is sent as firewall=0', async () => {
       const cookie = await setupSession();
       await put('qemu', 100, 'net1', { model: 'vmxnet3', bridge: 'vmbr0', firewall: false }, cookie);
@@ -293,9 +312,60 @@ describe('guest network device routes (T50)', () => {
         cookie,
         payload: { name: 'eth0', bridge: 'vmbr0', ip: '10.0.0.5/24', gw: '10.0.0.1' },
       });
+      // `type=veth` is not modeled by the body, so it is carried over unchanged.
       expect(fakePve.configCalls[0]!.body).toEqual({
-        net0: `name=eth0,bridge=vmbr0,hwaddr=${MAC},ip=10.0.0.5/24,gw=10.0.0.1`,
+        net0: `name=eth0,bridge=vmbr0,hwaddr=${MAC},ip=10.0.0.5/24,gw=10.0.0.1,type=veth`,
       });
+    });
+
+    it('an edit keeps qemu options the body does not model (queues, trunks), in order, after the composed fields', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, NIC_PRIV);
+      fakePve.setGuestConfig('qemu', 100, { net0: `virtio=${MAC},bridge=vmbr0,queues=4,trunks=10;20` });
+      const res = await call('PUT', '/pve1/qemu/100/network/net0', {
+        cookie,
+        payload: { model: 'virtio', bridge: 'vmbr1' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(fakePve.configCalls[0]!.body).toEqual({
+        net0: `virtio=${MAC},bridge=vmbr1,queues=4,trunks=10;20`,
+      });
+    });
+
+    it('an edit never carries a modeled key over when the body omits it (tag and firewall still drop)', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, NIC_PRIV);
+      fakePve.setGuestConfig('qemu', 100, {
+        net0: `virtio=${MAC},bridge=vmbr0,tag=20,firewall=1,queues=8,mtu=1500,link_down=1`,
+      });
+      await call('PUT', '/pve1/qemu/100/network/net0', {
+        cookie,
+        payload: { model: 'virtio', bridge: 'vmbr0', mtu: 1400 },
+      });
+      expect(fakePve.configCalls[0]!.body).toEqual({ net0: `virtio=${MAC},bridge=vmbr0,mtu=1400,queues=8` });
+    });
+
+    it('an lxc edit keeps link_down and trunks, which the lxc body does not model', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(200, NIC_PRIV);
+      fakePve.setGuestConfig('lxc', 200, {
+        net0: `name=eth0,bridge=vmbr0,hwaddr=${MAC},ip=dhcp,link_down=1,trunks=5;6`,
+      });
+      await call('PUT', '/pve1/lxc/200/network/net0', {
+        cookie,
+        payload: { name: 'eth0', bridge: 'vmbr0', ip: 'dhcp' },
+      });
+      expect(fakePve.configCalls[0]!.body).toEqual({
+        net0: `name=eth0,bridge=vmbr0,hwaddr=${MAC},ip=dhcp,link_down=1,trunks=5;6`,
+      });
+    });
+
+    it('an ADD (slot absent) never carries anything from another slot', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, NIC_PRIV);
+      fakePve.setGuestConfig('qemu', 100, { net0: `virtio=${MAC},bridge=vmbr0,queues=4,trunks=10;20` });
+      await call('PUT', '/pve1/qemu/100/network/net1', { cookie, payload: { model: 'virtio', bridge: 'vmbr0' } });
+      expect(fakePve.configCalls[0]!.body).toEqual({ net1: 'virtio,bridge=vmbr0' });
     });
 
     it('an explicit mac replaces the existing one', async () => {

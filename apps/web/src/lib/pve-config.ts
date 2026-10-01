@@ -430,6 +430,28 @@ export function parseNicConfig(type: 'qemu' | 'lxc', key: string, raw: string): 
   return { ...base, model: model || undefined, mac: mac && isValidMac(mac) ? mac : undefined };
 }
 
+/** PVE's own `mtu` ranges: qemu-server 1..65520 (`1` = use the bridge MTU, VirtIO only),
+ * pve-container 64..65535. Mirrors `networkRoutes.ts`. */
+export const NIC_MTU_RANGE = { qemu: [1, 65520], lxc: [64, 65535] } as const;
+
+const MODELED_NIC_KEYS = {
+  qemu: new Set(['bridge', 'tag', 'firewall', 'rate', 'link_down', 'mtu']),
+  lxc: new Set(['name', 'bridge', 'hwaddr', 'ip', 'gw', 'ip6', 'gw6', 'tag', 'firewall', 'rate', 'mtu']),
+} as const;
+
+/** The key=value pairs of an existing `netN` value that the NIC dialog does not model (qemu
+ * `queues`/`trunks`, lxc `link_down`/`trunks`/`type`, ...), verbatim and in order -- what an edit
+ * keeps. Mirrors `unmodeledNetParts` in `networkRoutes.ts` (the fixture flow uses it). */
+export function unmodeledNicParts(type: 'qemu' | 'lxc', raw: string | undefined): string[] {
+  if (raw === undefined) return [];
+  const modeled: ReadonlySet<string> = MODELED_NIC_KEYS[type];
+  return raw.split(',').filter((part, index) => {
+    if (part === '' || (type === 'qemu' && index === 0)) return false;
+    const eq = part.indexOf('=');
+    return !modeled.has(eq === -1 ? part : part.slice(0, eq));
+  });
+}
+
 /** The lowest unused `net<n>` (0..31) in a guest config, `undefined` when all 32 are taken. */
 export function nextFreeNetSlot(config: GuestConfig): string | undefined {
   for (let n = 0; n < 32; n++) {

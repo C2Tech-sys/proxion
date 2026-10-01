@@ -17,6 +17,7 @@ import {
   isValidMac,
   nextFreeNetSlot,
   parseNicConfig,
+  unmodeledNicParts,
   parseBootOrder,
   parseDriveSpec,
   parseMemory,
@@ -293,6 +294,17 @@ describe('network device helpers (T50)', () => {
       vlan: 30,
       linkDown: false,
     });
+  });
+
+  it('unmodeledNicParts keeps only what the dialog does not model, verbatim and in order', () => {
+    expect(
+      unmodeledNicParts('qemu', 'virtio=BC:24:11:64:00:01,bridge=vmbr0,queues=4,tag=20,trunks=10;20,link_down=1'),
+    ).toEqual(['queues=4', 'trunks=10;20']);
+    expect(unmodeledNicParts('qemu', 'virtio,bridge=vmbr0')).toEqual([]);
+    expect(
+      unmodeledNicParts('lxc', 'name=eth0,bridge=vmbr0,hwaddr=BC:24:11:C8:00:01,ip=dhcp,link_down=1,type=veth'),
+    ).toEqual(['link_down=1', 'type=veth']);
+    expect(unmodeledNicParts('qemu', undefined)).toEqual([]);
   });
 
   it('nextFreeNetSlot picks the first gap, and undefined when full', () => {
