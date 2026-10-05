@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `VM.Config.HWType` (VM tablet/ACPI/KVM/hotplug) or `VM.Config.Network` (container
   hostname/DNS) per field; session sign-in only. Editing the guest agent keeps its
   `type` / `freeze-fs-on-backup` sub-options.
+- A Cloud-Init tab on VMs: view and edit user, password, DNS domain and servers, SSH public
+  keys, package upgrade, type and each network device's IP config (DHCP or static with gateway,
+  IPv4 and IPv6), see the changes PVE holds back as pending, and regenerate the cloud-init
+  image. Session sign-in only, gated on `VM.Config.Cloudinit`; the password is sent to Proxmox
+  to hash and is never logged or shown back. A VM without a Cloud-Init drive gets a hint to add
+  one on the Hardware tab.
 
 ### Fixed
 

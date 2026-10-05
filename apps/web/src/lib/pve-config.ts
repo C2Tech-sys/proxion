@@ -678,3 +678,66 @@ export function parseGuestOptions(config: GuestConfig, type: 'qemu' | 'lxc'): Gu
     searchdomain: type === 'lxc' ? searchdomain : undefined,
   };
 }
+
+// --- Cloud-Init (T54) -------------------------------------------------------------------------
+
+/** The fields of one `ipconfig<n>` value (`ip=10.0.0.5/24,gw=10.0.0.1,ip6=auto`). */
+export interface IpConfigFields {
+  ip?: string | undefined;
+  gw?: string | undefined;
+  ip6?: string | undefined;
+  gw6?: string | undefined;
+}
+
+/** Parses an `ipconfig<n>` value; keys it does not know are ignored. */
+export function parseIpConfig(raw: string | undefined): IpConfigFields {
+  if (raw === undefined || raw === '') return {};
+  const kv = parseKeyValueString(raw);
+  return { ip: kv.ip, gw: kv.gw, ip6: kv.ip6, gw6: kv.gw6 };
+}
+
+/** Composes an `ipconfig<n>` value, keys in PVE's documented order, unset fields omitted. */
+export function composeIpConfig(fields: IpConfigFields): string {
+  const parts: string[] = [];
+  if (fields.ip) parts.push(`ip=${fields.ip}`);
+  if (fields.gw) parts.push(`gw=${fields.gw}`);
+  if (fields.ip6) parts.push(`ip6=${fields.ip6}`);
+  if (fields.gw6) parts.push(`gw6=${fields.gw6}`);
+  return parts.join(',');
+}
+
+/** How the Cloud-Init tab shows one NIC's `ipconfig<n>`: "DHCP" for plain `ip=dhcp`, the composed
+ * string otherwise, "Not configured" when there is none. */
+export function describeIpConfig(raw: string | number | undefined): string {
+  if (raw === undefined || raw === '') return 'Not configured';
+  const composed = composeIpConfig(parseIpConfig(String(raw)));
+  if (composed === '') return 'Not configured';
+  return composed === 'ip=dhcp' ? 'DHCP' : composed;
+}
+
+/** The public keys of a config `sshkeys` value: PVE stores them URL-encoded, one per line. */
+export function decodeSshKeys(raw: string | number | undefined): string[] {
+  if (raw === undefined || raw === '') return [];
+  const text = String(raw);
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(text);
+  } catch {
+    // Not valid percent-encoding (a hand-edited config): show it as stored.
+    decoded = text;
+  }
+  return decoded
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+}
+
+/** Inverse of `decodeSshKeys`, as the server route (and PVE) store it. */
+export function encodeSshKeys(keys: readonly string[]): string {
+  return encodeURIComponent(keys.join('\n'));
+}
+
+/** Whether a qemu config carries a cloud-init drive (a drive whose volume is `...cloudinit`). */
+export function hasCloudInitDrive(config: GuestConfig): boolean {
+  return getDrives(config).some((drive) => drive.volume.includes('cloudinit'));
+}

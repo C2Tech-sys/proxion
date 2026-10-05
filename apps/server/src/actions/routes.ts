@@ -14,6 +14,7 @@ import { registerBootOrderRoutes } from './bootOrderRoutes.js';
 import { registerDiskRoutes } from './diskRoutes.js';
 import { registerNetworkRoutes } from './networkRoutes.js';
 import { registerOptionsRoutes } from './optionsRoutes.js';
+import { registerCloudInitRoutes } from './cloudInitRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -431,4 +432,8 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // bucket, same rationale.
   registerNetworkRoutes(app, guestActionsRateLimit);
   registerOptionsRoutes(app, guestActionsRateLimit);
+
+  // Guest cloud-init edit + image regenerate (`cloudInitRoutes.ts`) share the same bucket, same
+  // rationale.
+  registerCloudInitRoutes(app, guestActionsRateLimit);
 }
