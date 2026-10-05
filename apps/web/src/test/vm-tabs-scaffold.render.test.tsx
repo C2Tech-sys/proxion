@@ -29,12 +29,13 @@ async function tabNames(): Promise<string[]> {
 }
 
 /**
- * The Cloud-Init / Options / Firewall tabs are registered with "Coming soon." stubs so the
- * parallel feature work can each own one component file. Deliberately never lands on the Monitor
+ * The Cloud-Init / Options / Firewall tabs are registered in tabs.ts; each tab component carries a
+ * `data-testid` so this test only checks registration, visibility per guest type and the fallback,
+ * never the tab's content (each feature has its own render test). Deliberately never lands on the Monitor
  * tab (see tab-range-preservation.render.test.tsx for why).
  */
 describe('VM page tab scaffold (fixture mode)', () => {
-  it('shows Cloud-Init, Options and Firewall on a VM in order, and each renders its stub', async () => {
+  it('shows Cloud-Init, Options and Firewall on a VM in order, and each renders its panel', async () => {
     renderAt('/vm/pve1/qemu/100');
 
     const names = await tabNames();
@@ -60,8 +61,8 @@ describe('VM page tab scaffold (fixture mode)', () => {
     ] as const) {
       // Radix's TabsTrigger switches tabs on `mousedown`, not `click`.
       fireEvent.mouseDown(screen.getByRole('tab', { name: label }), { button: 0 });
-      const stub = await screen.findByTestId(testId, undefined, { timeout: FIND_TIMEOUT_MS });
-      expect(within(stub).getByText('Coming soon.')).toBeInTheDocument();
+      const panel = await screen.findByTestId(testId, undefined, { timeout: FIND_TIMEOUT_MS });
+      expect(panel).toBeInTheDocument();
     }
   });
 
