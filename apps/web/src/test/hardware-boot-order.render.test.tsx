@@ -246,7 +246,7 @@ describe('Hardware tab boot order editor', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
-  it('(e2) fixture mode: clearing every device shows "No boot device"', async () => {
+  it('(e2) fixture mode: clearing every device shows the default-order wording', async () => {
     state.fixtures = true;
     mockSetBootOrder.mockImplementation(state.actual!.setBootOrder);
 
@@ -256,7 +256,7 @@ describe('Hardware tab boot order editor', () => {
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /^net0/ }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
 
-    expect(await screen.findByText('No boot device')).toBeInTheDocument();
+    expect(await screen.findByText('Default order (disks, then CD/DVD, then network)')).toBeInTheDocument();
   });
 
   it('(f) an lxc guest has no boot order row or editor', async () => {

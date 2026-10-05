@@ -8,7 +8,7 @@ import { createQueryClient } from '@/api/queryClient';
 
 /** Generous on purpose -- this is a route-level render test against fixture data (see
  *  guests-page.render.test.tsx for the same reasoning). */
-const FIND_TIMEOUT_MS = 5000;
+const FIND_TIMEOUT_MS = 10_000;
 
 function renderStorage(initialEntry: string) {
   const queryClient = createQueryClient();

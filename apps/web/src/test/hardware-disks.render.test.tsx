@@ -410,6 +410,20 @@ describe('Hardware tab disk lifecycle', () => {
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
   });
 
+  it('(d4) detach: a lxc bind mount says it has no volume instead of promising an unused slot', async () => {
+    patchFixtureGuestConfig('pve2', 'lxc', 200, { mp2: '/host/data,mp=/data' });
+    renderTab(LXC);
+    const dialog = await openDialog('Detach mp2', 'alertdialog');
+    expect(
+      within(dialog).getByText(
+        'Detach mp2? A bind mount has no volume; the mount point is simply removed from the container.',
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/kept as unused/)).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Detach' }));
+    await waitFor(() => expect(mockDetachDisk).toHaveBeenCalledWith('pve2', 'lxc', 200, 'mp2'));
+  });
+
   it('(e) remove unused: destroys only after the slot name is typed', async () => {
     patchFixtureGuestConfig('pve1', 'qemu', 100, { unused0: 'tank:vm-100-disk-7' });
     renderTab();

@@ -103,7 +103,7 @@ const MTU_RANGE = { qemu: [1, 65520], lxc: [64, 65535] } as const;
 /** The `net<n>` keys this route models per guest type. A key=value pair of an existing device
  * whose key is NOT listed here is carried over unchanged on an edit (queues, trunks, ...). */
 const MODELED_KEYS = {
-  qemu: new Set(['bridge', 'tag', 'firewall', 'rate', 'link_down', 'mtu']),
+  qemu: new Set(['model', 'macaddr', 'bridge', 'tag', 'firewall', 'rate', 'link_down', 'mtu']),
   lxc: new Set(['name', 'bridge', 'hwaddr', 'ip', 'gw', 'ip6', 'gw6', 'tag', 'firewall', 'rate', 'mtu']),
 } as const;
 
