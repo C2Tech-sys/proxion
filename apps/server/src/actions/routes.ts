@@ -16,6 +16,7 @@ import { registerNetworkRoutes } from './networkRoutes.js';
 import { registerOptionsRoutes } from './optionsRoutes.js';
 import { registerCloudInitRoutes } from './cloudInitRoutes.js';
 import { registerDeviceRoutes } from './deviceRoutes.js';
+import { registerFirewallRoutes } from './firewallRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -441,4 +442,8 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // VM USB/PCI/serial device add/edit/remove + next free slot (`deviceRoutes.ts`) share the same
   // bucket, same rationale.
   registerDeviceRoutes(app, guestActionsRateLimit);
+
+  // Guest firewall rule add/edit/delete/move + options (`firewallRoutes.ts`) share the same bucket,
+  // same rationale.
+  registerFirewallRoutes(app, guestActionsRateLimit);
 }

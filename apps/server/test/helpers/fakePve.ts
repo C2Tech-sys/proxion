@@ -217,6 +217,16 @@ export interface FakePve {
   /** Makes `GET .../qemu/{vmid}/cloudinit` fail with the given status. */
   setCloudInitReadError: (vmid: number, status: number) => void;
   // --- end T54 ---
+  /** Every guest firewall write PVE has received (`POST`/`PUT` `.../{type}/{vmid}/firewall/rules[/{pos}]`,
+   * `PUT .../firewall/options`, `DELETE .../firewall/rules/{pos}`), in order: method + path + the
+   * parsed form body (POST/PUT) or query string (DELETE). Used by `firewallRoutes.test.ts` (T56). */
+  firewallCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }>;
+  /** Makes every guest firewall write to `target` (`rules` = rule POST/PUT/DELETE, `options`) fail
+   * with the given status/message/errors, until called again with `undefined`. */
+  setFirewallError: (
+    target: 'rules' | 'options',
+    failure: { status: number; message: string; errors?: Record<string, string> } | undefined,
+  ) => void;
   close: () => Promise<void>;
 }
 
@@ -890,6 +900,48 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     reply.send({ data: null });
   });
   // --- end T54 ---
+  // --- T56 guest firewall ---
+  // `POST /nodes/{node}/{type}/{vmid}/firewall/rules`, `PUT`/`DELETE .../firewall/rules/{pos}` and
+  // `PUT .../firewall/options`, used by `src/actions/firewallRoutes.ts`. Records every call (method
+  // + path + parsed form body, or the query string for DELETE) and replies with an empty `data` on
+  // success, same recording pattern as the config/snapshot/migrate routes above.
+  const firewallCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }> = [];
+  const firewallErrors = new Map<'rules' | 'options', { status: number; message: string; errors?: Record<string, string> }>();
+
+  function registerFirewallRoutesForType(type: 'qemu' | 'lxc') {
+    const record = (
+      method: 'POST' | 'PUT' | 'DELETE',
+      target: 'rules' | 'options',
+      req: import('fastify').FastifyRequest,
+      reply: import('fastify').FastifyReply,
+    ) => {
+      const body = (method === 'DELETE' ? req.query : req.body) ?? {};
+      firewallCalls.push({ method, path: req.url.split('?')[0]!, body: { ...(body as Record<string, string>) } });
+      const failure = firewallErrors.get(target);
+      if (failure) {
+        reply
+          .code(failure.status)
+          .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
+        return;
+      }
+      reply.send({ data: null });
+    };
+    app.post(`/api2/json/nodes/:node/${type}/:vmid/firewall/rules`, async (req, reply) => {
+      record('POST', 'rules', req, reply);
+    });
+    app.put(`/api2/json/nodes/:node/${type}/:vmid/firewall/rules/:pos`, async (req, reply) => {
+      record('PUT', 'rules', req, reply);
+    });
+    app.delete(`/api2/json/nodes/:node/${type}/:vmid/firewall/rules/:pos`, async (req, reply) => {
+      record('DELETE', 'rules', req, reply);
+    });
+    app.put(`/api2/json/nodes/:node/${type}/:vmid/firewall/options`, async (req, reply) => {
+      record('PUT', 'options', req, reply);
+    });
+  }
+  registerFirewallRoutesForType('qemu');
+  registerFirewallRoutesForType('lxc');
+  // --- end T56 guest firewall ---
 
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
@@ -1111,6 +1163,18 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       cloudInitReadErrors.set(vmid, status);
     },
     // --- end T54 ---
+    // --- T56 guest firewall ---
+    get firewallCalls() {
+      return firewallCalls;
+    },
+    setFirewallError: (
+      target: 'rules' | 'options',
+      failure: { status: number; message: string; errors?: Record<string, string> } | undefined,
+    ) => {
+      if (failure) firewallErrors.set(target, failure);
+      else firewallErrors.delete(target);
+    },
+    // --- end T56 guest firewall ---
     close: () => app.close(),
   };
 }
