@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Firewall tab on VMs and containers: the guest's firewall options (enable, input/output
   policy, DHCP, NDP, router advertisement, MAC and IP filter, log levels) and its rule list with
   add, edit, delete, enable/disable and move up/down, including security-group rules. Enabling the
-  firewall with a DROP input policy asks first, and every change forwards the digest of the last
-  read so a concurrent edit is refused. Session sign-in only, gated on `VM.Config.Network`.
+  firewall with a DROP input policy asks first, and edits, deletes, moves and option changes
+  forward PVE's digest of the last read so a concurrent edit is refused. Session sign-in only, gated on `VM.Config.Network`.
 
 ### Fixed
 

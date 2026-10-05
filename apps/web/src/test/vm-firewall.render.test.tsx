@@ -240,7 +240,7 @@ describe('Firewall tab', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
 
     await waitFor(() =>
-      expect(mockAddRule).toHaveBeenCalledWith('pve1', 'qemu', 100, {
+      expect(mockAddRule.mock.lastCall).toStrictEqual(['pve1', 'qemu', 100, {
         type: 'in',
         action: 'ACCEPT',
         enable: true,
@@ -251,7 +251,7 @@ describe('Firewall tab', () => {
         log: 'info',
         comment: 'ssh from the office',
         pos: 4,
-      }),
+      }]),
     );
     expect(mockAddRule).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -263,6 +263,7 @@ describe('Firewall tab', () => {
     await within(dialog).findByRole('heading', { name: 'Add security group' });
     expect(within(dialog).getByLabelText('Type')).toHaveValue('group');
     await within(dialog).findByRole('option', { name: 'dbservers (Database ports)' });
+    await within(dialog).findByRole('option', { name: 'net1' });
     // No group chosen yet: nothing to save, and a group rule has no protocol/port fields.
     expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
     expect(within(dialog).queryByLabelText('Protocol')).not.toBeInTheDocument();
@@ -272,13 +273,13 @@ describe('Firewall tab', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
 
     await waitFor(() =>
-      expect(mockAddRule).toHaveBeenCalledWith('pve1', 'qemu', 100, {
+      expect(mockAddRule.mock.lastCall).toStrictEqual(['pve1', 'qemu', 100, {
         type: 'group',
         action: 'dbservers',
         enable: true,
         iface: 'net1',
         pos: 4,
-      }),
+      }]),
     );
   });
 
@@ -320,7 +321,7 @@ describe('Firewall tab', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
 
     await waitFor(() =>
-      expect(mockUpdateRule).toHaveBeenCalledWith('pve1', 'qemu', 100, 1, { delete: ['dport'], digest: DIGEST_100 }),
+      expect(mockUpdateRule.mock.lastCall).toStrictEqual(['pve1', 'qemu', 100, 1, { delete: ['dport'], digest: DIGEST_100 }]),
     );
   });
 
@@ -334,11 +335,11 @@ describe('Firewall tab', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('detected modified configuration');
-    expect(mockUpdateRule).toHaveBeenLastCalledWith('pve1', 'qemu', 100, 0, {
+    expect(mockUpdateRule.mock.lastCall).toStrictEqual(['pve1', 'qemu', 100, 0, {
       action: 'DROP',
       comment: 'blocked',
       digest: DIGEST_100,
-    });
+    }]);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
@@ -346,12 +347,12 @@ describe('Firewall tab', () => {
     renderTab();
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Enable rule 2' }));
     await waitFor(() =>
-      expect(mockUpdateRule).toHaveBeenCalledWith('pve1', 'qemu', 100, 2, { enable: true, digest: DIGEST_100 }),
+      expect(mockUpdateRule.mock.lastCall).toStrictEqual(['pve1', 'qemu', 100, 2, { enable: true, digest: DIGEST_100 }]),
     );
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Enable rule 0' }));
     await waitFor(() =>
-      expect(mockUpdateRule).toHaveBeenLastCalledWith('pve1', 'qemu', 100, 0, { enable: false, digest: DIGEST_100 }),
+      expect(mockUpdateRule.mock.lastCall).toStrictEqual(['pve1', 'qemu', 100, 0, { enable: false, digest: DIGEST_100 }]),
     );
   });
 
@@ -363,12 +364,12 @@ describe('Firewall tab', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Move rule 2 up' }));
     await waitFor(() =>
-      expect(mockUpdateRule).toHaveBeenCalledWith('pve1', 'qemu', 100, 2, { moveto: 1, digest: DIGEST_100 }),
+      expect(mockUpdateRule.mock.lastCall).toStrictEqual(['pve1', 'qemu', 100, 2, { moveto: 1, digest: DIGEST_100 }]),
     );
 
     fireEvent.click(await screen.findByRole('button', { name: 'Move rule 1 down' }));
     await waitFor(() =>
-      expect(mockUpdateRule).toHaveBeenLastCalledWith('pve1', 'qemu', 100, 1, { moveto: 2, digest: DIGEST_100 }),
+      expect(mockUpdateRule.mock.lastCall).toStrictEqual(['pve1', 'qemu', 100, 1, { moveto: 2, digest: DIGEST_100 }]),
     );
   });
 
@@ -382,7 +383,7 @@ describe('Firewall tab', () => {
     expect(mockDeleteRule).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete rule' }));
 
-    await waitFor(() => expect(mockDeleteRule).toHaveBeenCalledWith('pve1', 'qemu', 100, 1, DIGEST_100));
+    await waitFor(() => expect(mockDeleteRule.mock.lastCall).toStrictEqual(['pve1', 'qemu', 100, 1, DIGEST_100]));
     expect(mockDeleteRule).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   });
@@ -413,7 +414,7 @@ describe('Firewall tab', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Firewall' }));
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Enable firewall' }));
     await waitFor(() =>
-      expect(mockUpdateOptions).toHaveBeenCalledWith('pve1', 'qemu', 100, { enable: true, digest: DIGEST_100 }),
+      expect(mockUpdateOptions.mock.lastCall).toStrictEqual(['pve1', 'qemu', 100, { enable: true, digest: DIGEST_100 }]),
     );
     expect(mockUpdateOptions).toHaveBeenCalledTimes(1);
   });
@@ -426,20 +427,20 @@ describe('Firewall tab', () => {
 
     fireEvent.change(screen.getByLabelText('Input policy'), { target: { value: 'REJECT' } });
     await waitFor(() =>
-      expect(mockUpdateOptions).toHaveBeenLastCalledWith('pve2', 'lxc', 200, { policy_in: 'REJECT', digest: digest200 }),
+      expect(mockUpdateOptions.mock.lastCall).toStrictEqual(['pve2', 'lxc', 200, { policy_in: 'REJECT', digest: digest200 }]),
     );
     fireEvent.change(screen.getByLabelText('Input log level'), { target: { value: 'warning' } });
     await waitFor(() =>
-      expect(mockUpdateOptions).toHaveBeenLastCalledWith('pve2', 'lxc', 200, { log_level_in: 'warning', digest: digest200 }),
+      expect(mockUpdateOptions.mock.lastCall).toStrictEqual(['pve2', 'lxc', 200, { log_level_in: 'warning', digest: digest200 }]),
     );
     fireEvent.click(screen.getByRole('switch', { name: 'IP filter' }));
     await waitFor(() =>
-      expect(mockUpdateOptions).toHaveBeenLastCalledWith('pve2', 'lxc', 200, { ipfilter: true, digest: digest200 }),
+      expect(mockUpdateOptions.mock.lastCall).toStrictEqual(['pve2', 'lxc', 200, { ipfilter: true, digest: digest200 }]),
     );
 
     fireEvent.click(screen.getByRole('switch', { name: 'Firewall' }));
     await waitFor(() =>
-      expect(mockUpdateOptions).toHaveBeenLastCalledWith('pve2', 'lxc', 200, { enable: false, digest: digest200 }),
+      expect(mockUpdateOptions.mock.lastCall).toStrictEqual(['pve2', 'lxc', 200, { enable: false, digest: digest200 }]),
     );
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
