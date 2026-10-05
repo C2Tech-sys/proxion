@@ -22,6 +22,9 @@ export interface DetachDiskDialogProps {
   vmid: number;
   /** The disk's config key: `scsi1`, `mp0`, ... */
   slot: string;
+  /** The drive's volume reference: `<storage>:<volume>`-style, or a host path (starts with `/`) for a
+   * container bind mount, which has no volume and so leaves no `unused[n]` behind. */
+  volume: string;
   /** The `unused[n]` key PVE will most likely park the volume under (the lowest free one). */
   nextUnusedSlot: string;
 }
@@ -31,7 +34,8 @@ export interface DetachDiskDialogProps {
  * from where it can be removed for good (or re-attached in PVE's own UI). Mount it fresh per open
  * (the Hardware tab renders it conditionally).
  */
-export function DetachDiskDialog({ open, onOpenChange, node, type, vmid, slot, nextUnusedSlot }: DetachDiskDialogProps) {
+export function DetachDiskDialog({ open, onOpenChange, node, type, vmid, slot, volume, nextUnusedSlot }: DetachDiskDialogProps) {
+  const isBindMount = volume.startsWith('/');
   const mutation = useDetachDisk();
   const serverError = mutation.isError ? hardwareErrorMessage(mutation.error, 'The disk could not be detached.') : undefined;
 
@@ -52,7 +56,10 @@ export function DetachDiskDialog({ open, onOpenChange, node, type, vmid, slot, n
         <AlertDialogHeader>
           <AlertDialogTitle>Detach {slot}?</AlertDialogTitle>
           <AlertDialogDescription>
-            Detach {slot}? The disk is kept as {nextUnusedSlot} until you remove it.
+            Detach {slot}?{' '}
+            {isBindMount
+              ? 'A bind mount has no volume; the mount point is simply removed from the container.'
+              : `The disk is kept as ${nextUnusedSlot} until you remove it.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
 

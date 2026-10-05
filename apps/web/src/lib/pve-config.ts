@@ -189,23 +189,6 @@ export function parseNetSpec(key: string, raw: string): ParsedNetSpec {
 }
 
 /**
- * Parses a PVE `boot` config value. Modern configs are `"order=scsi0;net0"`; this returns the
- * ordered device-key list. Legacy configs (`"cdn"`, no `order=` prefix) are returned as their
- * individual single-character device codes since there's no key to look up in `config`.
- */
-export function parseBootOrder(raw: string | undefined): string[] {
-  if (!raw) return [];
-  if (raw.startsWith('order=')) {
-    return raw
-      .slice('order='.length)
-      .split(';')
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }
-  return raw.split('');
-}
-
-/**
  * Parses a PVE `memory` config value -- an integer count of MiB (occasionally a numeric
  * string) -- into a byte count suitable for `formatBytes`. `null` when unset/unparseable.
  */
@@ -546,7 +529,7 @@ export function parseNicConfig(type: 'qemu' | 'lxc', key: string, raw: string): 
 export const NIC_MTU_RANGE = { qemu: [1, 65520], lxc: [64, 65535] } as const;
 
 const MODELED_NIC_KEYS = {
-  qemu: new Set(['bridge', 'tag', 'firewall', 'rate', 'link_down', 'mtu']),
+  qemu: new Set(['model', 'macaddr', 'bridge', 'tag', 'firewall', 'rate', 'link_down', 'mtu']),
   lxc: new Set(['name', 'bridge', 'hwaddr', 'ip', 'gw', 'ip6', 'gw6', 'tag', 'firewall', 'rate', 'mtu']),
 } as const;
 

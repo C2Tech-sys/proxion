@@ -18,7 +18,6 @@ import {
   nextFreeNetSlot,
   parseNicConfig,
   unmodeledNicParts,
-  parseBootOrder,
   parseGuestBootOrder,
   listBootCandidates,
   parseDriveSpec,
@@ -120,24 +119,6 @@ describe('parseNetSpec', () => {
       type: 'veth',
       model: undefined,
     });
-  });
-});
-
-describe('parseBootOrder', () => {
-  it('parses a modern order= boot string', () => {
-    expect(parseBootOrder('order=scsi0;net0')).toEqual(['scsi0', 'net0']);
-  });
-
-  it('parses a single-device order= boot string', () => {
-    expect(parseBootOrder('order=scsi0')).toEqual(['scsi0']);
-  });
-
-  it('returns [] for undefined', () => {
-    expect(parseBootOrder(undefined)).toEqual([]);
-  });
-
-  it('falls back to per-character codes for legacy boot strings', () => {
-    expect(parseBootOrder('cdn')).toEqual(['c', 'd', 'n']);
   });
 });
 
@@ -367,6 +348,7 @@ describe('network device helpers (T50)', () => {
       unmodeledNicParts('qemu', 'virtio=BC:24:11:64:00:01,bridge=vmbr0,queues=4,tag=20,trunks=10;20,link_down=1'),
     ).toEqual(['queues=4', 'trunks=10;20']);
     expect(unmodeledNicParts('qemu', 'virtio,bridge=vmbr0')).toEqual([]);
+    expect(unmodeledNicParts('qemu', 'virtio,macaddr=BC:24:11:64:00:01,bridge=vmbr0')).toEqual([]);
     expect(
       unmodeledNicParts('lxc', 'name=eth0,bridge=vmbr0,hwaddr=BC:24:11:C8:00:01,ip=dhcp,link_down=1,type=veth'),
     ).toEqual(['link_down=1', 'type=veth']);

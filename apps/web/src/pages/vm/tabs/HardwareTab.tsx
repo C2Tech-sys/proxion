@@ -57,7 +57,7 @@ type EditTarget =
   | { kind: 'cdrom'; slot: string; volid: string | undefined }
   | { kind: 'disk'; disk: string; size: string | undefined }
   | { kind: 'addDisk' }
-  | { kind: 'detach'; slot: string }
+  | { kind: 'detach'; slot: string; volume: string }
   | { kind: 'removeUnused'; slot: string; volume: string | undefined };
 
 /** Builds one row's pencil, already gated on session mode and the privilege it needs. */
@@ -290,7 +290,7 @@ function qemuRows(
         isResizable(disk)
           ? actionFor(`disk ${disk.key}`, 'VM.Config.Disk', { kind: 'disk', disk: disk.key, size: disk.size })
           : null,
-        actionFor(`Detach ${disk.key}`, 'VM.Config.Disk', { kind: 'detach', slot: disk.key }),
+        actionFor(`Detach ${disk.key}`, 'VM.Config.Disk', { kind: 'detach', slot: disk.key, volume: disk.volume }),
       ),
     });
   }
@@ -372,7 +372,7 @@ function qemuRows(
           )}
         </ol>
       ) : (
-        <span className="text-muted-foreground">No boot device</span>
+        <span className="text-muted-foreground">Default order (disks, then CD/DVD, then network)</span>
       ),
     keys: ['boot'],
     action: <BootOrderEditButton node={guest.node} type={guest.type} vmid={guest.vmid} config={config} />,
@@ -442,7 +442,7 @@ function lxcRows(config: GuestConfig, actionFor: ActionFor, nicActions: NicActio
       keys: [mp.key],
       action: diskActions(
         actionFor(`disk ${mp.key}`, 'VM.Config.Disk', { kind: 'disk', disk: mp.key, size: mp.size }),
-        actionFor(`Detach ${mp.key}`, 'VM.Config.Disk', { kind: 'detach', slot: mp.key }),
+        actionFor(`Detach ${mp.key}`, 'VM.Config.Disk', { kind: 'detach', slot: mp.key, volume: mp.volume || mp.storage }),
       ),
     });
   }
@@ -679,6 +679,7 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
           type={type}
           vmid={vmid}
           slot={editing.slot}
+          volume={editing.volume}
           nextUnusedSlot={nextUnusedSlot(config)}
         />
       )}

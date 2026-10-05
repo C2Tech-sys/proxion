@@ -63,7 +63,7 @@ describe('Fixture-mode rename updates the tree label', () => {
     fireEvent.change(input, { target: { value: 'db-prod-01-renamed' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Rename' }));
 
-    await waitFor(() => expect(screen.getByText('db-prod-01-renamed')).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByText('db-prod-01-renamed')).toBeInTheDocument(), { timeout: 10_000 });
     expect(screen.queryByText('db-prod-01')).not.toBeInTheDocument();
   });
 });

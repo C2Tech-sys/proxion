@@ -332,6 +332,18 @@ describe('guest network device routes (T50)', () => {
       });
     });
 
+    it('a legacy `<model>,macaddr=<MAC>` value keeps the MAC once and never carries macaddr= over as an extra', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, NIC_PRIV);
+      fakePve.setGuestConfig('qemu', 100, { net0: `virtio,macaddr=${MAC},bridge=vmbr0` });
+      const res = await call('PUT', '/pve1/qemu/100/network/net0', {
+        cookie,
+        payload: { model: 'virtio', bridge: 'vmbr1' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(fakePve.configCalls[0]!.body).toEqual({ net0: `virtio=${MAC},bridge=vmbr1` });
+    });
+
     it('an edit never carries a modeled key over when the body omits it (tag and firewall still drop)', async () => {
       const cookie = await setupSession();
       fakePve.setVmPermissions(100, NIC_PRIV);

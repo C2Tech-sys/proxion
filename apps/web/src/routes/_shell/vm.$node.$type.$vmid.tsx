@@ -11,7 +11,7 @@ import { isNotFoundError, errorMessage } from '@/api/errors';
 import { parseTags } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { isVmRrdTimeframe, type VmRrdTimeframe } from '@/lib/rrd';
-import { VM_TAB_ORDER, VM_TAB_REGISTRY, isVmTab, type VmTab } from '@/pages/vm/tabs';
+import { VM_TAB_REGISTRY, isTabAvailable, isVmTab, vmTabsFor, type VmTab } from '@/pages/vm/tabs';
 import type { GuestType } from '@/api/types';
 
 export const Route = createFileRoute('/_shell/vm/$node/$type/$vmid')({
@@ -32,14 +32,16 @@ export const Route = createFileRoute('/_shell/vm/$node/$type/$vmid')({
   component: VmPage,
 });
 
-const TAB_DEFS = VM_TAB_ORDER.map((value) => ({ value, label: VM_TAB_REGISTRY[value].label }));
-
 function VmPage() {
   const { node, type, vmid } = Route.useParams();
-  const { tab } = Route.useSearch();
+  const { tab: requestedTab } = Route.useSearch();
   const navigate = Route.useNavigate();
   const guestType = type as GuestType;
   const numericVmid = Number(vmid);
+  // A tab this guest type does not have (e.g. `?tab=cloudinit` on a container) falls back to
+  // Summary, exactly like an unknown `tab` value does in `validateSearch`.
+  const tab: VmTab = isTabAvailable(requestedTab, guestType) ? requestedTab : 'summary';
+  const visibleTabs = vmTabsFor(guestType);
 
   function setTab(next: string) {
     // Merge onto the previous search (rather than replacing it outright) so `?range=` -- and
@@ -137,8 +139,8 @@ function VmPage() {
       />
 
       <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 px-4 pt-2">
-        <TabStrip tabs={TAB_DEFS} />
-        {VM_TAB_ORDER.map((value) => {
+        <TabStrip tabs={visibleTabs.map((value) => ({ value, label: VM_TAB_REGISTRY[value].label }))} />
+        {visibleTabs.map((value) => {
           const { component: TabComponent } = VM_TAB_REGISTRY[value];
           return (
             <TabsContent

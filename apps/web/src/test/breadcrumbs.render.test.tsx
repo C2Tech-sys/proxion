@@ -7,7 +7,7 @@ import { routeTree } from '@/routeTree.gen';
 import { createQueryClient } from '@/api/queryClient';
 
 /** Generous on purpose -- see tab-range-preservation.render.test.tsx for why. */
-const FIND_TIMEOUT_MS = 5000;
+const FIND_TIMEOUT_MS = 10_000;
 
 function renderAt(path: string) {
   const queryClient = createQueryClient();

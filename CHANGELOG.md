@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Boot Order row of a VM with no `boot` order now reads "Default order (disks, then
+  CD/DVD, then network)" instead of "No boot device", since PVE still boots using its default.
+- Detaching a container bind mount no longer promises an `unused` volume: the confirmation says
+  a bind mount has no volume and the mount point is simply removed.
+- Editing a network device kept in the legacy `<model>,macaddr=<MAC>` form no longer duplicates
+  the MAC (PVE rejected the repeated key); the MAC is kept once as `<model>=<MAC>`.
+
 ## [0.9.0] - 2026-09-30
 
 ### Added
