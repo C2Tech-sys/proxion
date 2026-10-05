@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A guest Options tab (VM and container), modelled on PVE's Options panel: start at boot,
+  start/shutdown order, protection (with a confirmation), tags, plus the VM's OS type, QEMU
+  guest agent, local-time RTC, tablet pointer, ACPI, KVM and hotplug, and the container's DNS
+  servers and search domain (unprivileged and architecture are shown read-only). Name/hostname
+  reuses the existing rename dialog. Backed by one new allow-listed
+  `PATCH /api/actions/guest/:node/:type/:vmid/options` route that checks `VM.Config.Options`,
+  `VM.Config.HWType` (VM tablet/ACPI/KVM/hotplug) or `VM.Config.Network` (container
+  hostname/DNS) per field; session sign-in only. Editing the guest agent keeps its
+  `type` / `freeze-fs-on-backup` sub-options.
+
 ### Fixed
 
 - The Boot Order row of a VM with no `boot` order now reads "Default order (disks, then

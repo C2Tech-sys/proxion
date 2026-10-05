@@ -23,6 +23,12 @@ import {
   parseDriveSpec,
   parseMemory,
   parseNetSpec,
+  parseAgent,
+  parseGuestOptions,
+  parseHotplug,
+  parseNameservers,
+  parseStartup,
+  parseTags,
 } from '@/lib/pve-config';
 import type { GuestConfig } from '@/api/types';
 
@@ -393,5 +399,95 @@ describe('network device helpers (T50)', () => {
     expect(isIPv6Cidr('fd00::5/64')).toBe(true);
     expect(isIPv6Cidr('fd00::5/129')).toBe(false);
     expect(isIPv6Cidr('fd00::5')).toBe(false);
+  });
+});
+
+describe('parseGuestOptions (T53)', () => {
+  it('parses startup in any order and with any subset of parts', () => {
+    expect(parseStartup('order=3,up=30,down=60')).toStrictEqual({ order: 3, up: 30, down: 60 });
+    expect(parseStartup('down=10,order=1')).toStrictEqual({ order: 1, down: 10 });
+    expect(parseStartup('order=any')).toBeUndefined();
+    expect(parseStartup('')).toBeUndefined();
+    expect(parseStartup(undefined)).toBeUndefined();
+  });
+
+  it('parses the agent property string, the legacy bare flag and numbers', () => {
+    expect(parseAgent('enabled=1,fstrim_cloned_disks=1,type=isa')).toStrictEqual({
+      enabled: true,
+      fstrimClonedDisks: true,
+    });
+    expect(parseAgent('enabled=0')).toStrictEqual({ enabled: false, fstrimClonedDisks: false });
+    expect(parseAgent('1')).toStrictEqual({ enabled: true, fstrimClonedDisks: false });
+    expect(parseAgent('1,fstrim_cloned_disks=1')).toStrictEqual({ enabled: true, fstrimClonedDisks: true });
+    expect(parseAgent(1)).toStrictEqual({ enabled: true, fstrimClonedDisks: false });
+    expect(parseAgent(0)).toStrictEqual({ enabled: false, fstrimClonedDisks: false });
+    expect(parseAgent(undefined)).toStrictEqual({ enabled: false, fstrimClonedDisks: false });
+  });
+
+  it('splits tags on ; , and whitespace', () => {
+    expect(parseTags('prod;web')).toStrictEqual(['prod', 'web']);
+    expect(parseTags('a, b  c;;d')).toStrictEqual(['a', 'b', 'c', 'd']);
+    expect(parseTags('')).toStrictEqual([]);
+    expect(parseTags(undefined)).toStrictEqual([]);
+  });
+
+  it('reads hotplug: absent and 1 are the default set, 0 is none, a list keeps PVE order', () => {
+    expect(parseHotplug(undefined)).toStrictEqual({ items: ['network', 'disk', 'usb'], isDefault: true });
+    expect(parseHotplug('1')).toStrictEqual({ items: ['network', 'disk', 'usb'], isDefault: true });
+    expect(parseHotplug('0')).toStrictEqual({ items: [], isDefault: false });
+    expect(parseHotplug('usb,network,cpu,bogus')).toStrictEqual({
+      items: ['network', 'cpu', 'usb'],
+      isDefault: false,
+    });
+  });
+
+  it('splits nameservers on whitespace and commas', () => {
+    expect(parseNameservers('1.1.1.1 8.8.8.8')).toStrictEqual(['1.1.1.1', '8.8.8.8']);
+    expect(parseNameservers('1.1.1.1,fd00::1')).toStrictEqual(['1.1.1.1', 'fd00::1']);
+    expect(parseNameservers(undefined)).toStrictEqual([]);
+  });
+
+  it('maps a qemu config into typed fields (and leaves the lxc-only ones empty)', () => {
+    const options = parseGuestOptions(
+      { startup: 'order=2', agent: 'enabled=1', tags: 'prod;web', hotplug: 'network,disk', nameserver: '9.9.9.9' },
+      'qemu',
+    );
+    expect(options).toStrictEqual({
+      startup: { order: 2 },
+      agent: { enabled: true, fstrimClonedDisks: false },
+      tags: ['prod', 'web'],
+      hotplug: ['network', 'disk'],
+      hotplugIsDefault: false,
+      nameserver: [],
+      searchdomain: undefined,
+    });
+  });
+
+  it('maps an lxc config into typed fields (and leaves the qemu-only ones undefined)', () => {
+    const options = parseGuestOptions(
+      { startup: 'up=15', tags: 'lab', nameserver: '1.1.1.1 8.8.8.8', searchdomain: 'lan', agent: '1' },
+      'lxc',
+    );
+    expect(options).toStrictEqual({
+      startup: { up: 15 },
+      agent: undefined,
+      tags: ['lab'],
+      hotplug: undefined,
+      hotplugIsDefault: false,
+      nameserver: ['1.1.1.1', '8.8.8.8'],
+      searchdomain: 'lan',
+    });
+  });
+
+  it('an empty config yields no startup, no tags, the default hotplug and a disabled agent', () => {
+    expect(parseGuestOptions({}, 'qemu')).toStrictEqual({
+      startup: undefined,
+      agent: { enabled: false, fstrimClonedDisks: false },
+      tags: [],
+      hotplug: ['network', 'disk', 'usb'],
+      hotplugIsDefault: true,
+      nameserver: [],
+      searchdomain: undefined,
+    });
   });
 });

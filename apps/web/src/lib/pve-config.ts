@@ -553,3 +553,128 @@ export function nextFreeNetSlot(config: GuestConfig): string | undefined {
   }
   return undefined;
 }
+
+// --- Guest Options tab (T53) ---------------------------------------------------------------
+
+/** The hotplug categories PVE's `hotplug` option can hold, in PVE's own order. */
+export const HOTPLUG_ITEMS = ['network', 'disk', 'cpu', 'memory', 'usb', 'cloudinit'] as const;
+export type HotplugItem = (typeof HOTPLUG_ITEMS)[number];
+
+/** What PVE hotplugs when the `hotplug` key is absent (or the legacy `1`). */
+export const DEFAULT_HOTPLUG: readonly HotplugItem[] = ['network', 'disk', 'usb'];
+
+/** A parsed `startup` property string (`order=3,up=30,down=60`); every part is optional. */
+export interface ParsedStartup {
+  order?: number;
+  up?: number;
+  down?: number;
+}
+
+/** A parsed qemu `agent` property string (`enabled=1,fstrim_cloned_disks=1,type=isa`). */
+export interface ParsedAgent {
+  enabled: boolean;
+  fstrimClonedDisks: boolean;
+}
+
+/** The typed view of a guest config's Options-tab property strings. */
+export interface GuestOptions {
+  /** `undefined` when the guest has no `startup` set (PVE's default order, any). */
+  startup: ParsedStartup | undefined;
+  /** qemu only: `undefined` for an lxc guest. An absent `agent` key reads as disabled. */
+  agent: ParsedAgent | undefined;
+  /** Tags in config order; `[]` when none. */
+  tags: string[];
+  /** qemu only: the categories PVE will hotplug (absent / `1` = the default set, `0` = none);
+   * `undefined` for an lxc guest. */
+  hotplug: HotplugItem[] | undefined;
+  /** qemu only: whether `hotplug` is unset (so the list above is PVE's default, not a choice). */
+  hotplugIsDefault: boolean;
+  /** lxc only: the configured DNS servers; `[]` when none (the container uses the host's). */
+  nameserver: string[];
+  /** lxc only. */
+  searchdomain: string | undefined;
+}
+
+function toKeyValue(part: string): [string, string] {
+  const eq = part.indexOf('=');
+  return eq === -1 ? [part, ''] : [part.slice(0, eq), part.slice(eq + 1)];
+}
+
+/** Parses `order=3,up=30,down=60` (any subset, any order); unknown parts are ignored. */
+export function parseStartup(raw: string | number | undefined): ParsedStartup | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  const out: ParsedStartup = {};
+  for (const part of String(raw).split(',')) {
+    const [key, value] = toKeyValue(part.trim());
+    if (!/^\d+$/.test(value)) continue;
+    const n = Number(value);
+    if (key === 'order') out.order = n;
+    else if (key === 'up') out.up = n;
+    else if (key === 'down') out.down = n;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Parses a qemu `agent` value: the legacy bare `1`/`0` (a number or string), or a property string
+ * with `enabled=`/`fstrim_cloned_disks=`. Other sub-options (`type`, `freeze-fs-on-backup`) are
+ * not modeled here -- the server keeps them on edit. */
+export function parseAgent(raw: string | number | undefined): ParsedAgent {
+  const out: ParsedAgent = { enabled: false, fstrimClonedDisks: false };
+  if (raw === undefined) return out;
+  for (const part of String(raw).split(',')) {
+    const trimmed = part.trim();
+    if (trimmed === '1' || trimmed === '0') {
+      out.enabled = trimmed === '1';
+      continue;
+    }
+    const [key, value] = toKeyValue(trimmed);
+    if (key === 'enabled') out.enabled = truthy(value);
+    else if (key === 'fstrim_cloned_disks') out.fstrimClonedDisks = truthy(value);
+  }
+  return out;
+}
+
+/** Splits a `tags` value (`a;b`, PVE also accepts `,` and spaces) into its non-empty tags. */
+export function parseTags(raw: string | number | undefined): string[] {
+  if (raw === undefined) return [];
+  return String(raw)
+    .split(/[;,\s]+/)
+    .filter((tag) => tag !== '');
+}
+
+/** Parses qemu's `hotplug`: absent or the legacy `1` is PVE's default set, `0` is none. */
+export function parseHotplug(raw: string | number | undefined): { items: HotplugItem[]; isDefault: boolean } {
+  if (raw === undefined || String(raw).trim() === '' || String(raw).trim() === '1') {
+    return { items: [...DEFAULT_HOTPLUG], isDefault: true };
+  }
+  const wanted = new Set(
+    String(raw)
+      .split(',')
+      .map((item) => item.trim()),
+  );
+  return { items: HOTPLUG_ITEMS.filter((item) => wanted.has(item)), isDefault: false };
+}
+
+/** Splits lxc's `nameserver` (space-separated; PVE also accepts `,`/`;`) into its addresses. */
+export function parseNameservers(raw: string | number | undefined): string[] {
+  if (raw === undefined) return [];
+  return String(raw)
+    .split(/[\s,;]+/)
+    .filter((server) => server !== '');
+}
+
+/** Reads the Options tab's property-string fields out of a guest config into typed fields. */
+export function parseGuestOptions(config: GuestConfig, type: 'qemu' | 'lxc'): GuestOptions {
+  const hotplug = type === 'qemu' ? parseHotplug(config.hotplug) : undefined;
+  const searchdomain =
+    typeof config.searchdomain === 'string' && config.searchdomain !== '' ? config.searchdomain : undefined;
+  return {
+    startup: parseStartup(config.startup),
+    agent: type === 'qemu' ? parseAgent(config.agent) : undefined,
+    tags: parseTags(config.tags),
+    hotplug: hotplug?.items,
+    hotplugIsDefault: hotplug?.isDefault ?? false,
+    nameserver: type === 'lxc' ? parseNameservers(config.nameserver) : [],
+    searchdomain: type === 'lxc' ? searchdomain : undefined,
+  };
+}
