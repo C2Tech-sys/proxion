@@ -81,8 +81,9 @@ function RuleActionButton({
  * conditions, a disabled one carrying the reason as its tooltip. Aliases, IP sets, the firewall log
  * and the datacenter/node firewall are not part of this tab.
  *
- * Every change forwards the digest of the last read, so editing a firewall someone else just
- * changed is rejected by PVE rather than silently overwriting their rules.
+ * Edits, deletes, moves and option changes forward the digest of the last read, so editing a
+ * firewall someone else just changed is rejected by PVE rather than silently overwriting their
+ * rules (adding a rule appends and needs no digest).
  */
 export function FirewallTab({ node, type, vmid }: VmTabProps) {
   const auth = useAuthMe();
