@@ -203,6 +203,20 @@ export interface FakePve {
     message: string,
     errors?: Record<string, string>,
   ) => void;
+  // --- T54 cloud-init ---
+  /** Every `PUT .../qemu/{vmid}/cloudinit` (regenerate the cloud-init image) request PVE has
+   * received, in order. Used by `cloudInitRoutes.test.ts` (T54). */
+  cloudInitRegenerateCalls: Array<{ vmid: number; body: Record<string, string> }>;
+  /** Makes the next `PUT .../qemu/{vmid}/cloudinit` call for `vmid` fail with the given status/message. */
+  setCloudInitRegenerateError: (vmid: number, status: number, message: string) => void;
+  /** Sets the per-key list `GET .../qemu/{vmid}/cloudinit` returns. Defaults to `[]`. */
+  setCloudInitRows: (
+    vmid: number,
+    rows: Array<{ key: string; value?: string; pending?: string; delete?: number }>,
+  ) => void;
+  /** Makes `GET .../qemu/{vmid}/cloudinit` fail with the given status. */
+  setCloudInitReadError: (vmid: number, status: number) => void;
+  // --- end T54 ---
   close: () => Promise<void>;
 }
 
@@ -848,6 +862,35 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   registerDestroyRoute('qemu');
   registerDestroyRoute('lxc');
 
+  // --- T54 cloud-init ---
+  // `GET /nodes/{node}/qemu/{vmid}/cloudinit` (the per-key current/pending list) and
+  // `PUT .../cloudinit` (regenerate the image), used by `src/actions/cloudInitRoutes.ts`.
+  const cloudInitRegenerateCalls: Array<{ vmid: number; body: Record<string, string> }> = [];
+  const cloudInitRegenerateErrors = new Map<number, { status: number; message: string }>();
+  const cloudInitRows = new Map<number, Array<{ key: string; value?: string; pending?: string; delete?: number }>>();
+  const cloudInitReadErrors = new Map<number, number>();
+
+  app.get('/api2/json/nodes/:node/qemu/:vmid/cloudinit', async (req, reply) => {
+    const { vmid } = req.params as { node: string; vmid: string };
+    const failureStatus = cloudInitReadErrors.get(Number(vmid));
+    if (failureStatus !== undefined) {
+      reply.code(failureStatus).send({ data: null, message: 'cloudinit unavailable' });
+      return;
+    }
+    reply.send({ data: cloudInitRows.get(Number(vmid)) ?? [] });
+  });
+  app.put('/api2/json/nodes/:node/qemu/:vmid/cloudinit', async (req, reply) => {
+    const { vmid } = req.params as { node: string; vmid: string };
+    cloudInitRegenerateCalls.push({ vmid: Number(vmid), body: (req.body ?? {}) as Record<string, string> });
+    const failure = cloudInitRegenerateErrors.get(Number(vmid));
+    if (failure) {
+      reply.code(failure.status).send({ data: null, message: failure.message });
+      return;
+    }
+    reply.send({ data: null });
+  });
+  // --- end T54 ---
+
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
   return {
@@ -1051,6 +1094,23 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     ) => {
       destroyErrors.set(`${type}:${vmid}`, { status, message, ...(errors ? { errors } : {}) });
     },
+    // --- T54 cloud-init ---
+    get cloudInitRegenerateCalls() {
+      return cloudInitRegenerateCalls;
+    },
+    setCloudInitRegenerateError: (vmid: number, status: number, message: string) => {
+      cloudInitRegenerateErrors.set(vmid, { status, message });
+    },
+    setCloudInitRows: (
+      vmid: number,
+      rows: Array<{ key: string; value?: string; pending?: string; delete?: number }>,
+    ) => {
+      cloudInitRows.set(vmid, rows);
+    },
+    setCloudInitReadError: (vmid: number, status: number) => {
+      cloudInitReadErrors.set(vmid, status);
+    },
+    // --- end T54 ---
     close: () => app.close(),
   };
 }

@@ -23,6 +23,12 @@ import {
   parseDriveSpec,
   parseMemory,
   parseNetSpec,
+  composeIpConfig,
+  decodeSshKeys,
+  describeIpConfig,
+  encodeSshKeys,
+  hasCloudInitDrive,
+  parseIpConfig,
 } from '@/lib/pve-config';
 import type { GuestConfig } from '@/api/types';
 
@@ -393,5 +399,49 @@ describe('network device helpers (T50)', () => {
     expect(isIPv6Cidr('fd00::5/64')).toBe(true);
     expect(isIPv6Cidr('fd00::5/129')).toBe(false);
     expect(isIPv6Cidr('fd00::5')).toBe(false);
+  });
+});
+
+describe('cloud-init helpers (T54)', () => {
+  it('parses and composes an ipconfig value, keys in PVE order', () => {
+    expect(parseIpConfig('ip=10.0.0.5/24,gw=10.0.0.1,ip6=auto')).toStrictEqual({
+      ip: '10.0.0.5/24',
+      gw: '10.0.0.1',
+      ip6: 'auto',
+      gw6: undefined,
+    });
+    expect(parseIpConfig(undefined)).toStrictEqual({});
+    expect(composeIpConfig({ gw6: 'fe80::1', ip6: 'fd00::5/64', gw: '10.0.0.1', ip: '10.0.0.5/24' })).toBe(
+      'ip=10.0.0.5/24,gw=10.0.0.1,ip6=fd00::5/64,gw6=fe80::1',
+    );
+    expect(composeIpConfig({})).toBe('');
+  });
+
+  it('describes an ipconfig: DHCP, the composed string, or not configured', () => {
+    expect(describeIpConfig('ip=dhcp')).toBe('DHCP');
+    expect(describeIpConfig('ip=dhcp,ip6=auto')).toBe('ip=dhcp,ip6=auto');
+    expect(describeIpConfig('ip=10.0.0.5/24,gw=10.0.0.1')).toBe('ip=10.0.0.5/24,gw=10.0.0.1');
+    expect(describeIpConfig(undefined)).toBe('Not configured');
+    expect(describeIpConfig('')).toBe('Not configured');
+  });
+
+  it('decodes and encodes the URL-encoded sshkeys value', () => {
+    const keys = ['ssh-ed25519 AAAAC3Nza admin@lab', 'ssh-rsa AAAAB3+/abc= ops'];
+    const encoded = encodeSshKeys(keys);
+    expect(encoded).toBe(encodeURIComponent(keys.join('\n')));
+    expect(encoded).toContain('%0A');
+    expect(decodeSshKeys(encoded)).toStrictEqual(keys);
+    // PVE leaves a trailing newline on what it stores.
+    expect(decodeSshKeys(`${encoded}%0A`)).toStrictEqual(keys);
+    expect(decodeSshKeys(undefined)).toStrictEqual([]);
+    expect(decodeSshKeys('%E0%A4%A')).toStrictEqual(['%E0%A4%A']);
+  });
+
+  it('detects a cloud-init drive by its volume name', () => {
+    expect(hasCloudInitDrive({ ide3: 'tank:vm-100-cloudinit,media=cdrom' })).toBe(true);
+    expect(
+      hasCloudInitDrive({ ide2: 'local:iso/debian.iso,media=cdrom', scsi0: 'tank:vm-100-disk-0,size=32G' }),
+    ).toBe(false);
+    expect(hasCloudInitDrive({})).toBe(false);
   });
 });

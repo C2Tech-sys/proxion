@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A Cloud-Init tab on VMs: view and edit user, password, DNS domain and servers, SSH public
+  keys, package upgrade, type and each network device's IP config (DHCP or static with gateway,
+  IPv4 and IPv6), see the changes PVE holds back as pending, and regenerate the cloud-init
+  image. Session sign-in only, gated on `VM.Config.Cloudinit`; the password is sent to Proxmox
+  to hash and is never logged or shown back. A VM without a Cloud-Init drive gets a hint to add
+  one on the Hardware tab.
+
 ### Fixed
 
 - The Boot Order row of a VM with no `boot` order now reads "Default order (disks, then

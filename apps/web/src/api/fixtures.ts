@@ -617,3 +617,49 @@ export function patchFixtureGuestConfig(
 export function getFixtureGuestConfig(vmid: number): GuestConfig | undefined {
   return configs[String(vmid)];
 }
+
+// --- T54 cloud-init ---------------------------------------------------------------------------
+
+/**
+ * Demo state for the Cloud-Init tab (T54): per guest, the cloud-init config keys PVE would hold
+ * back as "pending" (a change made while the guest runs) until the image is regenerated. The
+ * settings themselves live in the guest's fixture config (`ciuser`, `ipconfig0`, `sshkeys`, ...),
+ * written through `patchFixtureGuestConfig`; a typed password is never stored -- the config only
+ * ever holds PVE's own `********` mask, same as a real `GET .../config`.
+ */
+export const fixtureCloudInit = {
+  pending: new Map<number, Set<string>>(),
+  /** How many times each guest's image was regenerated in this session. */
+  regenerated: new Map<number, number>(),
+};
+
+/** Replaces one guest's held-back cloud-init keys. */
+export function setFixtureCloudInitPending(vmid: number, keys: Iterable<string>): void {
+  const next = new Set(keys);
+  if (next.size === 0) fixtureCloudInit.pending.delete(vmid);
+  else fixtureCloudInit.pending.set(vmid, next);
+}
+
+/** The cloud-init keys currently held back for one guest, in insertion order. */
+export function getFixtureCloudInitPending(vmid: number): string[] {
+  return [...(fixtureCloudInit.pending.get(vmid) ?? [])];
+}
+
+/** Marks one guest's cloud-init image as regenerated: PVE applies every held-back value. */
+export function regenerateFixtureCloudInit(vmid: number): void {
+  fixtureCloudInit.pending.delete(vmid);
+  fixtureCloudInit.regenerated.set(vmid, (fixtureCloudInit.regenerated.get(vmid) ?? 0) + 1);
+}
+
+// The demo's VM 100 already carries a cloud-init drive (`ide3`); give it settings too, so the
+// Cloud-Init tab shows a populated panel. Appended here rather than edited into `configs.json`.
+patchFixtureGuestConfig('pve1', 'qemu', 100, {
+  ciuser: 'debian',
+  cipassword: '********',
+  searchdomain: 'lab.example.com',
+  nameserver: '10.0.20.2 10.0.20.3',
+  sshkeys: encodeURIComponent(
+    'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoFixtureKeyOnlyNotARealKey000000000000 admin@lab',
+  ),
+  ipconfig0: 'ip=10.0.20.15/24,gw=10.0.20.1',
+});
