@@ -13,6 +13,7 @@ import { registerHardwareRoutes } from './hardwareRoutes.js';
 import { registerBootOrderRoutes } from './bootOrderRoutes.js';
 import { registerDiskRoutes } from './diskRoutes.js';
 import { registerNetworkRoutes } from './networkRoutes.js';
+import { registerDeviceRoutes } from './deviceRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -429,4 +430,8 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // Guest network device add/edit/remove + next free slot (`networkRoutes.ts`) share the same
   // bucket, same rationale.
   registerNetworkRoutes(app, guestActionsRateLimit);
+
+  // VM USB/PCI/serial device add/edit/remove + next free slot (`deviceRoutes.ts`) share the same
+  // bucket, same rationale.
+  registerDeviceRoutes(app, guestActionsRateLimit);
 }

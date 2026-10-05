@@ -617,3 +617,68 @@ export function patchFixtureGuestConfig(
 export function getFixtureGuestConfig(vmid: number): GuestConfig | undefined {
   return configs[String(vmid)];
 }
+
+// --- T55: USB / PCI / serial device pickers ---------------------------------------------------
+
+/** One USB device `GET /nodes/{node}/hardware/usb` lists (the fields the picker shows). */
+export interface HostUsbDevice {
+  /** `vendid:prodid`, e.g. `1d6b:0003`. */
+  id: string;
+  vendid: string;
+  prodid: string;
+  manufacturer?: string;
+  product?: string;
+  /** `bus-port`, e.g. `1-2` (absent for a root hub). */
+  usbpath?: string;
+  speed?: number;
+}
+
+/** One PCI device `GET /nodes/{node}/hardware/pci` lists. */
+export interface HostPciDevice {
+  /** `0000:01:00.0`. */
+  id: string;
+  class?: string;
+  vendor_name?: string;
+  device_name?: string;
+  iommugroup: number;
+}
+
+/** One cluster-wide hardware mapping (`/cluster/mapping/usb|pci`). */
+export interface HardwareMapping {
+  id: string;
+  description?: string;
+}
+
+export const fixtureHostUsb: HostUsbDevice[] = [
+  { id: '1d6b:0003', vendid: '1d6b', prodid: '0003', manufacturer: 'Linux Foundation', product: '3.0 root hub', speed: 5000 },
+  { id: '046d:c52b', vendid: '046d', prodid: 'c52b', manufacturer: 'Logitech, Inc.', product: 'Unifying Receiver', usbpath: '1-2', speed: 12 },
+  { id: '0781:5581', vendid: '0781', prodid: '5581', manufacturer: 'SanDisk Corp.', product: 'Ultra', usbpath: '2-1.3', speed: 5000 },
+];
+
+export const fixtureHostPci: HostPciDevice[] = [
+  { id: '0000:00:02.0', class: '0x030000', vendor_name: 'Intel Corporation', device_name: 'UHD Graphics 630', iommugroup: 0 },
+  { id: '0000:01:00.0', class: '0x030000', vendor_name: 'NVIDIA Corporation', device_name: 'GA102 [GeForce RTX 3090]', iommugroup: 1 },
+  { id: '0000:01:00.1', class: '0x040300', vendor_name: 'NVIDIA Corporation', device_name: 'GA102 High Definition Audio Controller', iommugroup: 1 },
+  { id: '0000:03:00.0', class: '0x010802', vendor_name: 'Samsung Electronics Co Ltd', device_name: 'NVMe SSD Controller 980', iommugroup: 2 },
+];
+
+export const fixtureUsbMappings: HardwareMapping[] = [
+  { id: 'mykeyboard', description: 'Front-desk keyboard' },
+  { id: 'license-dongle', description: 'Accounting license key' },
+];
+
+export const fixturePciMappings: HardwareMapping[] = [{ id: 'gpu0', description: 'RTX 3090 (passthrough)' }];
+
+let hostListsForbidden = false;
+
+/**
+ * Test/demo-only (T55): when on, the host USB/PCI lists and the hardware mappings answer as if the
+ * caller lacked `Sys.Modify` / `Mapping.Audit` (the device dialogs then fall back to manual entry).
+ */
+export function setFixtureHostListsForbidden(forbidden: boolean): void {
+  hostListsForbidden = forbidden;
+}
+
+export function areFixtureHostListsForbidden(): boolean {
+  return hostListsForbidden;
+}
