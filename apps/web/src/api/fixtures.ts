@@ -25,6 +25,7 @@ import type {
   TaskLogLine,
 } from '@/api/types';
 import type { MigratePrecheck } from '@/api/actions';
+import type { FirewallRule } from '@/api/firewall';
 import { computeAlerts } from '@proxion/core';
 import type { ApiClient, HealthResponse, NodeTaskParams, ThumbnailCacheEntry } from '@/api/client-types';
 import { NotFoundError } from '@/api/errors';
@@ -616,4 +617,141 @@ export function patchFixtureGuestConfig(
 /** Test/demo-only lookup (T48): one guest's current fixture config, or `undefined` if none. */
 export function getFixtureGuestConfig(vmid: number): GuestConfig | undefined {
   return configs[String(vmid)];
+}
+
+// --- T56 guest firewall ---------------------------------------------------------------------
+
+/** One guest's firewall in the demo: the options (PVE's wire shape: 0/1 for booleans), the rules in
+ * evaluation order, and the config digest every read carries (bumped on every change). */
+export interface FixtureFirewallEntry {
+  options: Record<string, number | string>;
+  rules: FirewallRule[];
+  digest: string;
+  version: number;
+}
+
+function initialFixtureFirewall(): Record<string, FixtureFirewallEntry> {
+  const entry = (
+    vmid: number,
+    options: Record<string, number | string>,
+    rules: Array<Omit<FirewallRule, 'pos' | 'digest'>>,
+  ): FixtureFirewallEntry => ({
+    options,
+    rules: rules.map((rule, pos) => ({ ...rule, pos })),
+    digest: `fixture-fw-${vmid}-1`,
+    version: 1,
+  });
+  return {
+    '100': entry(
+      100,
+      { enable: 0, policy_in: 'DROP', policy_out: 'ACCEPT', dhcp: 1, ndp: 1, macfilter: 1, log_level_in: 'nolog' },
+      [
+        { type: 'in', action: 'ACCEPT', enable: 1, macro: 'SSH', source: '10.0.0.0/24', comment: 'SSH from the office' },
+        { type: 'in', action: 'ACCEPT', enable: 1, proto: 'tcp', dport: '80,443', comment: 'Web' },
+        { type: 'in', action: 'ACCEPT', enable: 0, proto: 'icmp', comment: 'Ping' },
+        { type: 'group', action: 'webservers', enable: 1, iface: 'net0' },
+      ],
+    ),
+    '200': entry(
+      200,
+      { enable: 1, policy_in: 'DROP', policy_out: 'ACCEPT', radv: 0, log_level_out: 'info' },
+      [
+        { type: 'out', action: 'DROP', enable: 1, proto: 'tcp', dport: '25', log: 'info', comment: 'No outbound SMTP' },
+        { type: 'in', action: 'ACCEPT', enable: 1, proto: 'tcp', dport: '80,443', comment: 'Reverse proxy' },
+        { type: 'in', action: 'ACCEPT', enable: 1, proto: 'udp', source: '192.168.0.0/16', dport: '53', iface: 'net0' },
+      ],
+    ),
+  };
+}
+
+let fixtureFirewall = initialFixtureFirewall();
+
+/** The demo's cluster security groups (the group-rule picker's options). */
+export const FIXTURE_SECURITY_GROUPS: Array<{ group: string; comment?: string }> = [
+  { group: 'dbservers', comment: 'Database ports' },
+  { group: 'webservers', comment: 'HTTP and HTTPS' },
+];
+
+/** The demo's firewall macros (the macro picker's options). */
+export const FIXTURE_FIREWALL_MACROS: Array<{ macro: string; descr?: string }> = [
+  { macro: 'DNS', descr: 'Domain Name System' },
+  { macro: 'HTTP', descr: 'Hypertext Transfer Protocol' },
+  { macro: 'HTTPS', descr: 'Hypertext Transfer Protocol over SSL/TLS' },
+  { macro: 'MySQL', descr: 'MySQL server' },
+  { macro: 'Ping', descr: 'ICMP echo request' },
+  { macro: 'PostgreSQL', descr: 'PostgreSQL server' },
+  { macro: 'RDP', descr: 'Microsoft Remote Desktop Protocol' },
+  { macro: 'SMTP', descr: 'Simple Mail Transfer Protocol' },
+  { macro: 'SSH', descr: 'Secure shell' },
+];
+
+/** Test/demo-only lookup (T56): one guest's fixture firewall (an empty one for a guest without one). */
+export function getFixtureFirewall(vmid: number): FixtureFirewallEntry {
+  return fixtureFirewall[String(vmid)] ?? { options: {}, rules: [], digest: `fixture-fw-${vmid}-1`, version: 1 };
+}
+
+function touchFixtureFirewall(vmid: number, mutate: (entry: FixtureFirewallEntry) => void): void {
+  const key = String(vmid);
+  const entry = fixtureFirewall[key] ?? { options: {}, rules: [], digest: '', version: 0 };
+  mutate(entry);
+  entry.rules = entry.rules.map((rule, pos) => ({ ...rule, pos }));
+  entry.version += 1;
+  entry.digest = `fixture-fw-${vmid}-${entry.version}`;
+  fixtureFirewall[key] = entry;
+}
+
+function stripUndefined<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
+}
+
+/** Test/demo-only mutator (T56): inserts a rule at `pos` (default: the end), renumbering. */
+export function addFixtureFirewallRule(vmid: number, rule: Omit<FirewallRule, 'pos' | 'digest'>, pos?: number): void {
+  touchFixtureFirewall(vmid, (entry) => {
+    const at = pos === undefined ? entry.rules.length : Math.min(Math.max(pos, 0), entry.rules.length);
+    entry.rules.splice(at, 0, { ...stripUndefined(rule), pos: at });
+  });
+}
+
+/** Test/demo-only mutator (T56): applies `patch`, clears the `clear` fields, and optionally moves
+ * the rule to `moveto`. `false` when no rule sits at `pos`. */
+export function updateFixtureFirewallRule(
+  vmid: number,
+  pos: number,
+  patch: Partial<Omit<FirewallRule, 'pos' | 'digest'>>,
+  clear: string[],
+  moveto?: number,
+): boolean {
+  if (getFixtureFirewall(vmid).rules[pos] === undefined) return false;
+  touchFixtureFirewall(vmid, (entry) => {
+    const next: Record<string, unknown> = { ...entry.rules[pos], ...stripUndefined(patch) };
+    for (const field of clear) delete next[field];
+    entry.rules.splice(pos, 1);
+    const at = moveto === undefined ? pos : Math.min(Math.max(moveto, 0), entry.rules.length);
+    entry.rules.splice(at, 0, next as unknown as FirewallRule);
+  });
+  return true;
+}
+
+/** Test/demo-only mutator (T56): removes the rule at `pos`; `false` when there is none. */
+export function deleteFixtureFirewallRule(vmid: number, pos: number): boolean {
+  if (getFixtureFirewall(vmid).rules[pos] === undefined) return false;
+  touchFixtureFirewall(vmid, (entry) => {
+    entry.rules.splice(pos, 1);
+  });
+  return true;
+}
+
+/** Test/demo-only mutator (T56): merges options; booleans are stored 0/1 like PVE reports them. */
+export function patchFixtureFirewallOptions(vmid: number, patch: Record<string, boolean | string | undefined>): void {
+  touchFixtureFirewall(vmid, (entry) => {
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) continue;
+      entry.options[key] = typeof value === 'boolean' ? (value ? 1 : 0) : value;
+    }
+  });
+}
+
+/** Test-only (T56): puts every guest's fixture firewall back to its initial state. */
+export function resetFixtureFirewall(): void {
+  fixtureFirewall = initialFixtureFirewall();
 }

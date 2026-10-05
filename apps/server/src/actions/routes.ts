@@ -13,6 +13,7 @@ import { registerHardwareRoutes } from './hardwareRoutes.js';
 import { registerBootOrderRoutes } from './bootOrderRoutes.js';
 import { registerDiskRoutes } from './diskRoutes.js';
 import { registerNetworkRoutes } from './networkRoutes.js';
+import { registerFirewallRoutes } from './firewallRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -429,4 +430,8 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // Guest network device add/edit/remove + next free slot (`networkRoutes.ts`) share the same
   // bucket, same rationale.
   registerNetworkRoutes(app, guestActionsRateLimit);
+
+  // Guest firewall rule add/edit/delete/move + options (`firewallRoutes.ts`) share the same bucket,
+  // same rationale.
+  registerFirewallRoutes(app, guestActionsRateLimit);
 }

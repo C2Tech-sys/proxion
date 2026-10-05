@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A Firewall tab on VMs and containers: the guest's firewall options (enable, input/output
+  policy, DHCP, NDP, router advertisement, MAC and IP filter, log levels) and its rule list with
+  add, edit, delete, enable/disable and move up/down, including security-group rules. Enabling the
+  firewall with a DROP input policy asks first, and every change forwards the digest of the last
+  read so a concurrent edit is refused. Session sign-in only, gated on `VM.Config.Network`.
+
 ### Fixed
 
 - The Boot Order row of a VM with no `boot` order now reads "Default order (disks, then
