@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-05
+
 ### Added
 
 - A guest Options tab (VM and container), modelled on PVE's Options panel: start at boot,
@@ -456,7 +458,8 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/C2Tech-sys/proxion/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/C2Tech-sys/proxion/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/C2Tech-sys/proxion/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/C2Tech-sys/proxion/compare/v0.6.0...v0.7.0
