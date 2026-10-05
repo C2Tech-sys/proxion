@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   image. Session sign-in only, gated on `VM.Config.Cloudinit`; the password is sent to Proxmox
   to hash and is never logged or shown back. A VM without a Cloud-Init drive gets a hint to add
   one on the Hardware tab.
+- Add, edit and remove a VM's USB devices, PCI passthrough devices and serial ports from its
+  Hardware tab ("Add device" menu in a new Devices row, plus a pencil and a remove button on each
+  device row; serial ports are add/remove only). USB: Spice port, host vendor:device ID, host
+  port or a mapped device, with USB 3; PCI: a host device (picked from the node's list grouped by
+  IOMMU group, or typed) or a mapped device, with All functions, PCI-Express, ROM-Bar, Primary
+  GPU and MDev type; serial: a socket. Session sign-in only, gated on `VM.Config.HWType`; raw
+  USB/PCI devices still need root@pam in Proxmox, whose error is shown as-is. The host and mapping
+  pickers fall back to typing when the account lacks `Sys.Modify` / `Mapping.Audit`. Options the
+  dialogs don't show (a PCI ROM file, vendor overrides, ...) are kept on edit. Containers are
+  unchanged.
 
 ### Fixed
 

@@ -35,6 +35,16 @@ import {
   encodeSshKeys,
   hasCloudInitDrive,
   parseIpConfig,
+  isValidDeviceMapping,
+  isValidMdevType,
+  isValidPciId,
+  isValidUsbPort,
+  isValidUsbVendorId,
+  nextFreeDeviceSlot,
+  parseHostPciConfig,
+  parseSerialConfig,
+  parseUsbConfig,
+  unmodeledDeviceParts,
 } from '@/lib/pve-config';
 import type { GuestConfig } from '@/api/types';
 
@@ -539,5 +549,97 @@ describe('cloud-init helpers (T54)', () => {
       hasCloudInitDrive({ ide2: 'local:iso/debian.iso,media=cdrom', scsi0: 'tank:vm-100-disk-0,size=32G' }),
     ).toBe(false);
     expect(hasCloudInitDrive({})).toBe(false);
+  });
+});
+
+describe('device config parsing (T55)', () => {
+  it('parseUsbConfig classifies every source and reads usb3', () => {
+    expect(parseUsbConfig('usb0', 'host=spice')).toStrictEqual({ key: 'usb0', source: 'spice', usb3: false });
+    expect(parseUsbConfig('usb1', 'host=1d6b:0003,usb3=1')).toStrictEqual({
+      key: 'usb1',
+      source: 'vendor',
+      id: '1d6b:0003',
+      usb3: true,
+    });
+    expect(parseUsbConfig('usb2', 'host=1-2.3')).toStrictEqual({ key: 'usb2', source: 'port', port: '1-2.3', usb3: false });
+    expect(parseUsbConfig('usb3', 'mapping=mykeyboard,usb3=1')).toStrictEqual({
+      key: 'usb3',
+      source: 'mapping',
+      mapping: 'mykeyboard',
+      usb3: true,
+    });
+    // The legacy form with no `host=` key.
+    expect(parseUsbConfig('usb4', '046d:c52b')).toStrictEqual({ key: 'usb4', source: 'vendor', id: '046d:c52b', usb3: false });
+    expect(parseUsbConfig('usb5', 'something=else').source).toBe('unknown');
+  });
+
+  it('parseHostPciConfig reads the id, mapping and flags', () => {
+    expect(parseHostPciConfig('hostpci0', '0000:01:00.0,pcie=1,rombar=0,x-vga=1')).toStrictEqual({
+      key: 'hostpci0',
+      source: 'raw',
+      id: '0000:01:00.0',
+      allFunctions: false,
+      pcie: true,
+      rombar: false,
+      xVga: true,
+      mdev: undefined,
+    });
+    expect(parseHostPciConfig('hostpci1', 'host=01:00,mdev=nvidia-63')).toMatchObject({
+      source: 'raw',
+      id: '01:00',
+      allFunctions: true,
+      pcie: false,
+      rombar: true,
+      mdev: 'nvidia-63',
+    });
+    expect(parseHostPciConfig('hostpci2', 'mapping=gpu0,pcie=1')).toMatchObject({
+      source: 'mapping',
+      mapping: 'gpu0',
+      pcie: true,
+    });
+    expect(parseHostPciConfig('hostpci3', 'pcie=1').source).toBe('unknown');
+  });
+
+  it('parseSerialConfig keeps the target verbatim', () => {
+    expect(parseSerialConfig('serial0', 'socket')).toStrictEqual({ key: 'serial0', target: 'socket' });
+    expect(parseSerialConfig('serial1', '/dev/ttyS0').target).toBe('/dev/ttyS0');
+  });
+
+  it('nextFreeDeviceSlot picks the first gap per kind, and undefined when full', () => {
+    expect(nextFreeDeviceSlot({ usb0: 'a', usb2: 'b' }, 'usb')).toBe('usb1');
+    expect(nextFreeDeviceSlot({ hostpci0: 'a' }, 'pci')).toBe('hostpci1');
+    expect(nextFreeDeviceSlot({}, 'serial')).toBe('serial0');
+    const full: GuestConfig = {};
+    for (let n = 0; n < 14; n++) full[`usb${n}`] = 'host=spice';
+    for (let n = 0; n < 16; n++) full[`hostpci${n}`] = '01:00';
+    for (let n = 0; n < 4; n++) full[`serial${n}`] = 'socket';
+    expect(nextFreeDeviceSlot(full, 'usb')).toBeUndefined();
+    expect(nextFreeDeviceSlot(full, 'pci')).toBeUndefined();
+    expect(nextFreeDeviceSlot(full, 'serial')).toBeUndefined();
+  });
+
+  it('unmodeledDeviceParts keeps what the dialogs do not model, in order', () => {
+    expect(unmodeledDeviceParts('pci', '0000:01:00.0,pcie=1,romfile=gpu.rom,x-vga=1,vendor-id=0x10de')).toEqual([
+      'romfile=gpu.rom',
+      'vendor-id=0x10de',
+    ]);
+    expect(unmodeledDeviceParts('pci', 'host=01:00,pcie=1')).toEqual([]);
+    expect(unmodeledDeviceParts('usb', 'host=1d6b:0003,usb3=1')).toEqual([]);
+    expect(unmodeledDeviceParts('pci', undefined)).toEqual([]);
+  });
+
+  it('validates device identifiers like the server', () => {
+    expect(isValidPciId('0000:01:00.0')).toBe(true);
+    expect(isValidPciId('01:00')).toBe(true);
+    expect(isValidPciId('01:00.8')).toBe(false);
+    expect(isValidPciId('01:00,pcie=1')).toBe(false);
+    expect(isValidUsbVendorId('1d6b:0003')).toBe(true);
+    expect(isValidUsbVendorId('1d6b-0003')).toBe(false);
+    expect(isValidUsbPort('1-2.3')).toBe(true);
+    expect(isValidUsbPort('1')).toBe(false);
+    expect(isValidDeviceMapping('gpu0')).toBe(true);
+    expect(isValidDeviceMapping('0gpu')).toBe(false);
+    expect(isValidMdevType('i915-GVTg_V5_4')).toBe(true);
+    expect(isValidMdevType('a b')).toBe(false);
   });
 });

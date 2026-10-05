@@ -741,3 +741,142 @@ export function encodeSshKeys(keys: readonly string[]): string {
 export function hasCloudInitDrive(config: GuestConfig): boolean {
   return getDrives(config).some((drive) => drive.volume.includes('cloudinit'));
 }
+
+// --- USB, PCI and serial device editing (T55) -------------------------------------------------
+// The editable shape of `usbN`, `hostpciN` and `serialN` values, plus validators that mirror
+// `apps/server/src/actions/deviceRoutes.ts` exactly.
+
+export type DeviceKind = 'usb' | 'pci' | 'serial';
+
+/** `0000:01:00.0`, `01:00.0` or `01:00` (all functions). Mirrors the server. */
+export const PCI_ID_PATTERN = /^([0-9a-f]{4}:)?[0-9a-f]{2}:[0-9a-f]{2}(\.[0-7])?$/;
+export const USB_VENDOR_PATTERN = /^[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$/;
+export const USB_PORT_PATTERN = /^\d+-\d+(\.\d+)*$/;
+export const DEVICE_MAPPING_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+export const MDEV_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
+
+export function isValidPciId(value: string): boolean {
+  return PCI_ID_PATTERN.test(value);
+}
+export function isValidUsbVendorId(value: string): boolean {
+  return USB_VENDOR_PATTERN.test(value);
+}
+export function isValidUsbPort(value: string): boolean {
+  return USB_PORT_PATTERN.test(value);
+}
+export function isValidDeviceMapping(value: string): boolean {
+  return DEVICE_MAPPING_PATTERN.test(value);
+}
+export function isValidMdevType(value: string): boolean {
+  return MDEV_PATTERN.test(value);
+}
+
+/** How a USB device is attached. `unknown` is a value this UI can't classify (kept readable). */
+export type UsbSource = 'spice' | 'vendor' | 'port' | 'mapping' | 'unknown';
+
+export interface UsbFields {
+  key: string;
+  source: UsbSource;
+  /** `vendid:prodid` when `source` is `vendor`. */
+  id?: string | undefined;
+  /** `bus-port` when `source` is `port`. */
+  port?: string | undefined;
+  mapping?: string | undefined;
+  usb3: boolean;
+}
+
+/** The leading part of a value may carry no `key=` (PVE's default key is `host`). */
+function leadingHost(raw: string, kv: Record<string, string>): string | undefined {
+  if (kv.host !== undefined) return kv.host;
+  const first = raw.split(',')[0] ?? '';
+  return first !== '' && !first.includes('=') ? first : undefined;
+}
+
+/** Parses one `usbN` value (`host=1d6b:0003,usb3=1`, `host=spice`, `host=1-2.3`, `mapping=kbd`,
+ * or the legacy bare `1d6b:0003`). */
+export function parseUsbConfig(key: string, raw: string): UsbFields {
+  const kv = parseKeyValueString(raw);
+  const usb3 = truthy(kv.usb3);
+  if (kv.mapping !== undefined && kv.mapping !== '') {
+    return { key, source: 'mapping', mapping: kv.mapping, usb3 };
+  }
+  const host = leadingHost(raw, kv);
+  if (host === 'spice') return { key, source: 'spice', usb3 };
+  if (host !== undefined && USB_VENDOR_PATTERN.test(host)) return { key, source: 'vendor', id: host, usb3 };
+  if (host !== undefined && USB_PORT_PATTERN.test(host)) return { key, source: 'port', port: host, usb3 };
+  return { key, source: 'unknown', usb3 };
+}
+
+export type PciSource = 'raw' | 'mapping' | 'unknown';
+
+export interface PciFields {
+  key: string;
+  source: PciSource;
+  /** The device address as stored (`0000:01:00.0` or `01:00`). A `;`-joined multi-device value is
+   * kept verbatim here (the dialog's validation then asks for a single address). */
+  id?: string | undefined;
+  mapping?: string | undefined;
+  /** An address without a `.function` passes every function through. */
+  allFunctions: boolean;
+  pcie: boolean;
+  /** PVE's default is on; only an explicit `rombar=0` turns it off. */
+  rombar: boolean;
+  xVga: boolean;
+  mdev?: string | undefined;
+}
+
+/** Parses one `hostpciN` value (`0000:01:00.0,pcie=1,x-vga=1`, `host=01:00`, `mapping=gpu0,...`). */
+export function parseHostPciConfig(key: string, raw: string): PciFields {
+  const kv = parseKeyValueString(raw);
+  const common = {
+    pcie: truthy(kv.pcie),
+    rombar: kv.rombar === undefined ? true : truthy(kv.rombar),
+    xVga: truthy(kv['x-vga']),
+    mdev: kv.mdev || undefined,
+  };
+  if (kv.mapping !== undefined && kv.mapping !== '') {
+    return { key, source: 'mapping', mapping: kv.mapping, allFunctions: false, ...common };
+  }
+  const host = leadingHost(raw, kv);
+  if (host === undefined || host === '') return { key, source: 'unknown', allFunctions: false, ...common };
+  return { key, source: 'raw', id: host, allFunctions: !host.includes('.'), ...common };
+}
+
+export interface SerialFields {
+  key: string;
+  /** `socket`, or a host device path such as `/dev/ttyS0`. */
+  target: string;
+}
+
+export function parseSerialConfig(key: string, raw: string): SerialFields {
+  return { key, target: raw };
+}
+
+const DEVICE_SLOT_COUNTS: Record<DeviceKind, number> = { usb: 14, pci: 16, serial: 4 };
+const DEVICE_SLOT_PREFIX: Record<DeviceKind, string> = { usb: 'usb', pci: 'hostpci', serial: 'serial' };
+
+/** The lowest unused slot of `kind` (`usb0..13`, `hostpci0..15`, `serial0..3`), `undefined` when all are taken. */
+export function nextFreeDeviceSlot(config: GuestConfig, kind: DeviceKind): string | undefined {
+  for (let n = 0; n < DEVICE_SLOT_COUNTS[kind]; n++) {
+    const slot = `${DEVICE_SLOT_PREFIX[kind]}${n}`;
+    if (config[slot] === undefined) return slot;
+  }
+  return undefined;
+}
+
+const MODELED_DEVICE_KEYS = {
+  usb: new Set(['host', 'mapping', 'usb3']),
+  pci: new Set(['host', 'mapping', 'pcie', 'rombar', 'x-vga', 'mdev']),
+} as const;
+
+/** The key=value pairs of an existing `usbN` / `hostpciN` value the device dialogs do not model
+ * (`romfile`, `vendor-id`, ...), verbatim and in order -- what an edit keeps. Mirrors
+ * `unmodeledDeviceParts` in `deviceRoutes.ts` (the fixture flow uses it). */
+export function unmodeledDeviceParts(kind: 'usb' | 'pci', raw: string | undefined): string[] {
+  if (raw === undefined) return [];
+  const modeled: ReadonlySet<string> = MODELED_DEVICE_KEYS[kind];
+  return raw.split(',').filter((part) => {
+    const eq = part.indexOf('=');
+    return part !== '' && eq !== -1 && !modeled.has(part.slice(0, eq));
+  });
+}

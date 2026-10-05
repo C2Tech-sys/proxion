@@ -18,6 +18,12 @@ import { RemoveUnusedDiskDialog } from '@/components/hardware/RemoveUnusedDiskDi
 import { PendingBanner } from '@/components/hardware/PendingBanner';
 import { AddNicButton, EditNicDialog } from '@/components/hardware/EditNicDialog';
 import { RemoveNicButton, RemoveNicDialog } from '@/components/hardware/RemoveNicDialog';
+import { AddDeviceMenu } from '@/components/devices/AddDeviceMenu';
+import { AddSerialDialog } from '@/components/devices/AddSerialDialog';
+import { EditPciDialog } from '@/components/devices/EditPciDialog';
+import { EditUsbDialog } from '@/components/devices/EditUsbDialog';
+import { RemoveDeviceDialog } from '@/components/devices/RemoveDeviceDialog';
+import { describePci, describeSerial, describeUsb } from '@/components/devices/describe';
 import { useAuthMe, useClusterResources, useVmConfig } from '@/api/hooks';
 import { diskCapableStorages } from '@/api/disks';
 import { usePermissions } from '@/api/actionHooks';
@@ -31,11 +37,17 @@ import {
   getNetSpecs,
   getRootfsDrive,
   parseGuestBootOrder,
+  parseHostPciConfig,
   parseMemory,
   parseNicConfig,
+  parseSerialConfig,
+  parseUsbConfig,
+  type DeviceKind,
   type NicFields,
   type ParsedDrive,
   type ParsedNetSpec,
+  type PciFields,
+  type UsbFields,
 } from '@/lib/pve-config';
 import type { VmTabProps } from '@/pages/vm/tabs';
 import type { GuestConfig } from '@/api/types';
@@ -71,6 +83,28 @@ type NicTarget = { kind: 'add' } | { kind: 'edit'; nic: NicFields } | { kind: 'r
 interface NicActions {
   add: () => ReactNode;
   row: (nic: NicFields) => ReactNode;
+}
+
+/** What an open device dialog is for (T55): adding one of the three kinds, editing a USB/PCI
+ * device, or removing any of them. */
+type DeviceTarget =
+  | { kind: 'add'; device: DeviceKind }
+  | { kind: 'editUsb'; usb: UsbFields }
+  | { kind: 'editPci'; pci: PciFields }
+  | { kind: 'remove'; slot: string; value: string };
+
+/** The Devices section's actions, already gated on session mode and `VM.Config.HWType`: the
+ * "Add device" menu of its header row, and the edit pencil (not for serial) + remove trash of a
+ * device row. */
+interface DeviceActions {
+  add: () => ReactNode;
+  row: (kind: DeviceKind, slot: string, raw: string) => ReactNode;
+}
+
+/** `usb0`, `usb10`, ... sorted by their number. */
+function sortedSlots(keys: string[]): string[] {
+  const n = (key: string) => Number(key.replace(/^\D+/, ''));
+  return [...keys].sort((a, b) => n(a) - n(b));
 }
 
 function Flag({ on }: { on: boolean | undefined }) {
@@ -233,6 +267,7 @@ function qemuRows(
   actionFor: ActionFor,
   guest: { node: string; type: 'qemu' | 'lxc'; vmid: number },
   nicActions: NicActions,
+  deviceActions: DeviceActions,
 ): Row[] {
   const drives = getDrives(config);
   const disks = drives.filter((d) => d.media !== 'cdrom' && d.bus !== 'efidisk' && d.bus !== 'tpmstate' && d.bus !== 'unused' && !d.volume.includes('cloudinit'));
@@ -338,18 +373,37 @@ function qemuRows(
     });
   }
 
-  if (serialKeys.length > 0) {
+  rows.push({
+    label: 'Devices',
+    value: <span className="text-xs text-muted-foreground">Serial ports, USB and PCI devices</span>,
+    action: deviceActions.add(),
+  });
+  for (const key of sortedSlots(serialKeys)) {
+    const raw = String(config[key]);
     rows.push({
-      label: 'Serial Port(s)',
-      value: serialKeys.map((k) => `${k}: ${String(config[k])}`).join(', '),
-      keys: serialKeys,
+      label: `Serial Port (${key})`,
+      value: <span title={raw}>{describeSerial(parseSerialConfig(key, raw))}</span>,
+      keys: [key],
+      action: deviceActions.row('serial', key, raw),
     });
   }
-  if (usbKeys.length > 0) {
-    rows.push({ label: 'USB Device(s)', value: usbKeys.map((k) => `${k}: ${String(config[k])}`).join(', '), keys: usbKeys });
+  for (const key of sortedSlots(usbKeys)) {
+    const raw = String(config[key]);
+    rows.push({
+      label: `USB Device (${key})`,
+      value: <span title={raw}>{describeUsb(parseUsbConfig(key, raw), raw)}</span>,
+      keys: [key],
+      action: deviceActions.row('usb', key, raw),
+    });
   }
-  if (pciKeys.length > 0) {
-    rows.push({ label: 'PCI Device(s)', value: pciKeys.map((k) => `${k}: ${String(config[k])}`).join(', '), keys: pciKeys });
+  for (const key of sortedSlots(pciKeys)) {
+    const raw = String(config[key]);
+    rows.push({
+      label: `PCI Device (${key})`,
+      value: <span title={raw}>{describePci(parseHostPciConfig(key, raw), raw)}</span>,
+      keys: [key],
+      action: deviceActions.row('pci', key, raw),
+    });
   }
   if (cloudInit) rows.push({ label: 'CloudInit Drive', value: driveLine(cloudInit), keys: [cloudInit.key] });
 
@@ -508,6 +562,7 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
   const resetResize = resize.reset;
   const [editing, setEditing] = useState<EditTarget | null>(null);
   const [nicTarget, setNicTarget] = useState<NicTarget | null>(null);
+  const [deviceTarget, setDeviceTarget] = useState<DeviceTarget | null>(null);
 
   // Fixture/demo mode has no real session concept -- it always demonstrates the enabled state,
   // same as the object header's own quick actions.
@@ -564,6 +619,41 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
     ),
   };
 
+  // USB, PCI and serial devices (qemu only): one privilege for add, edit and remove alike.
+  const deviceDisabledReason = !isSessionMode
+    ? 'Read-only: signed in with a service token'
+    : permissions.data?.can('VM.Config.HWType') !== true
+      ? "You don't have VM.Config.HWType on this guest"
+      : undefined;
+  const deviceActions: DeviceActions = {
+    add: () => (
+      <AddDeviceMenu disabledReason={deviceDisabledReason} onPick={(device) => setDeviceTarget({ kind: 'add', device })} />
+    ),
+    row: (kind, slot, raw) => (
+      <div className="flex shrink-0 items-center">
+        {kind === 'usb' && (
+          <EditHardwareButton
+            label={`USB device ${slot}`}
+            disabledReason={deviceDisabledReason}
+            onClick={() => setDeviceTarget({ kind: 'editUsb', usb: parseUsbConfig(slot, raw) })}
+          />
+        )}
+        {kind === 'pci' && (
+          <EditHardwareButton
+            label={`PCI device ${slot}`}
+            disabledReason={deviceDisabledReason}
+            onClick={() => setDeviceTarget({ kind: 'editPci', pci: parseHostPciConfig(slot, raw) })}
+          />
+        )}
+        <RemoveNicButton
+          slot={slot}
+          disabledReason={deviceDisabledReason}
+          onClick={() => setDeviceTarget({ kind: 'remove', slot, value: raw })}
+        />
+      </div>
+    ),
+  };
+
   if (isLoading) {
     return <Skeleton className="h-64" />;
   }
@@ -574,13 +664,19 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
     return <EmptyState message="No configuration available." />;
   }
 
-  const rows = type === 'qemu' ? qemuRows(config, actionFor, { node, type, vmid }, nicActions) : lxcRows(config, actionFor, nicActions);
+  const rows =
+    type === 'qemu'
+      ? qemuRows(config, actionFor, { node, type, vmid }, nicActions, deviceActions)
+      : lxcRows(config, actionFor, nicActions);
   const pendingKeys = (pending.data ?? []).filter(isPendingEntry).map((entry) => entry.key);
   const closeDialog = (open: boolean) => {
     if (!open) setEditing(null);
   };
   const closeNicDialog = (open: boolean) => {
     if (!open) setNicTarget(null);
+  };
+  const closeDeviceDialog = (open: boolean) => {
+    if (!open) setDeviceTarget(null);
   };
 
   return (
@@ -708,6 +804,31 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
           type={type}
           vmid={vmid}
           slot={nicTarget.slot}
+        />
+      )}
+      {deviceTarget?.kind === 'add' && deviceTarget.device === 'usb' && (
+        <EditUsbDialog open onOpenChange={closeDeviceDialog} node={node} vmid={vmid} />
+      )}
+      {deviceTarget?.kind === 'add' && deviceTarget.device === 'pci' && (
+        <EditPciDialog open onOpenChange={closeDeviceDialog} node={node} vmid={vmid} />
+      )}
+      {deviceTarget?.kind === 'add' && deviceTarget.device === 'serial' && (
+        <AddSerialDialog open onOpenChange={closeDeviceDialog} node={node} vmid={vmid} />
+      )}
+      {deviceTarget?.kind === 'editUsb' && (
+        <EditUsbDialog open onOpenChange={closeDeviceDialog} node={node} vmid={vmid} device={deviceTarget.usb} />
+      )}
+      {deviceTarget?.kind === 'editPci' && (
+        <EditPciDialog open onOpenChange={closeDeviceDialog} node={node} vmid={vmid} device={deviceTarget.pci} />
+      )}
+      {deviceTarget?.kind === 'remove' && (
+        <RemoveDeviceDialog
+          open
+          onOpenChange={closeDeviceDialog}
+          node={node}
+          vmid={vmid}
+          slot={deviceTarget.slot}
+          value={deviceTarget.value}
         />
       )}
     </div>
