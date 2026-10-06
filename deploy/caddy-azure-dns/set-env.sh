@@ -41,6 +41,11 @@ if [ -z "$VALUE" ]; then
   exit 1
 fi
 
+# Compose reads env_file values with dotenv rules: an unquoted value is interpolated, so a
+# password containing `$abc` silently loses `$abc` ("The "abc" variable is not set" at deploy
+# time) and ` #` starts a comment. A single-quoted value is taken literally; only a single
+# quote inside it needs escaping (`\'`). Every value is written that way.
+QUOTED="'${VALUE//\'/\\\'}'"
 # Rewrite via a temp file so the value never touches a shell command line or sed
 # expression (no quoting or metacharacter problems, no traces in history).
 TMP="$(mktemp "${ENV_FILE}.XXXXXX")"
@@ -48,14 +53,14 @@ trap 'rm -f "$TMP"' EXIT
 FOUND=no
 while IFS= read -r line || [ -n "$line" ]; do
   if [[ "$line" == "${KEY}="* ]]; then
-    printf '%s=%s\n' "$KEY" "$VALUE" >> "$TMP"
+    printf '%s=%s\n' "$KEY" "$QUOTED" >> "$TMP"
     FOUND=yes
   else
     printf '%s\n' "$line" >> "$TMP"
   fi
 done < "$ENV_FILE"
 if [ "$FOUND" = no ]; then
-  printf '%s=%s\n' "$KEY" "$VALUE" >> "$TMP"
+  printf '%s=%s\n' "$KEY" "$QUOTED" >> "$TMP"
 fi
 chmod 600 "$TMP"
 mv "$TMP" "$ENV_FILE"
