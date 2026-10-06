@@ -14,6 +14,8 @@ export interface NotifyStatusResponse {
   configured: { webhook: boolean; email: boolean };
   minSeverity: 'warning' | 'error';
   includeResolved: boolean;
+  /** Present when a `PROXION_NOTIFY_*` value was invalid and notifications are therefore disabled (secret-free, one line). */
+  error?: string;
 }
 
 /**
@@ -40,6 +42,7 @@ export default async function notifyRoutes(app: FastifyInstance): Promise<void> 
       minSeverity: config.PROXION_NOTIFY_MIN_SEVERITY,
       includeResolved: config.PROXION_NOTIFY_INCLUDE_RESOLVED,
     };
+    if (config.notifyConfigError) body.error = config.notifyConfigError;
     reply.send(body);
   });
 
@@ -57,7 +60,10 @@ export default async function notifyRoutes(app: FastifyInstance): Promise<void> 
         return;
       }
       if (!app.notifier) {
-        reply.code(400).send({ error: 'not-configured' });
+        const { notifyConfigError } = app.proxionConfig;
+        reply.code(400).send(
+          notifyConfigError ? { error: 'not-configured', message: notifyConfigError } : { error: 'not-configured' },
+        );
         return;
       }
 

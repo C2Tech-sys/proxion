@@ -107,25 +107,43 @@ const envSchema = z
     // on a constrained link. Uploads are always streamed through, never buffered, so this bounds
     // request duration/bandwidth, not this process's memory.
     PROXION_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(32 * 1024 * 1024 * 1024),
+  })
+  .superRefine((config, ctx) => {
+    const hasId = Boolean(config.PVE_TOKEN_ID);
+    const hasSecret = Boolean(config.PVE_TOKEN_SECRET);
+    if (hasId !== hasSecret) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [hasId ? 'PVE_TOKEN_SECRET' : 'PVE_TOKEN_ID'],
+        message: 'PVE_TOKEN_ID and PVE_TOKEN_SECRET must both be set, or both left unset',
+      });
+    }
+  });
 
-    // --- Alert notifications (T43): webhook + email channels, fed by the poller's alerts
-    // snapshot (see notify/notifier.ts). Every field here is optional -- a deployment with none
-    // of them set simply has no notification channels configured, and /api/notify/status
-    // reports that.
-    PROXION_NOTIFY_WEBHOOK_URL: z
-      .string()
-      .refine(
-        (value) => {
-          try {
-            const url = new URL(value);
-            return url.protocol === 'http:' || url.protocol === 'https:';
-          } catch {
-            return false;
-          }
-        },
-        { message: 'PROXION_NOTIFY_WEBHOOK_URL must be an absolute http(s) URL' },
-      )
-      .optional(),
+function httpUrlSchema(message: string) {
+  return z.string().refine(
+    (value) => {
+      try {
+        const url = new URL(value);
+        return url.protocol === 'http:' || url.protocol === 'https:';
+      } catch {
+        return false;
+      }
+    },
+    { message },
+  );
+}
+
+/**
+ * Notification settings (T43) are optional extras, validated separately from `envSchema` so a
+ * typo in one of them can never stop the server from booting (T59): `loadConfig` turns a
+ * failure here into `Config.notifyConfigError` plus an all-defaults (no channels) config
+ * instead of a throw. Every field is optional -- a deployment with none of them set simply has
+ * no notification channels configured, and /api/notify/status reports that.
+ */
+const notifySchema = z
+  .object({
+    PROXION_NOTIFY_WEBHOOK_URL: httpUrlSchema('PROXION_NOTIFY_WEBHOOK_URL must be an absolute http(s) URL').optional(),
     PROXION_NOTIFY_WEBHOOK_FORMAT: z
       .enum(['generic', 'discord', 'slack', 'ntfy', 'gotify'])
       .default('generic'),
@@ -162,32 +180,9 @@ const envSchema = z
     PROXION_NOTIFY_SITE_NAME: z.string().min(1).default('Proxion'),
     // Used to build a deep link into a notification's body/message when set (e.g.
     // "https://proxion.example.com"); omitted from messages entirely when unset.
-    PROXION_PUBLIC_URL: z
-      .string()
-      .refine(
-        (value) => {
-          try {
-            const url = new URL(value);
-            return url.protocol === 'http:' || url.protocol === 'https:';
-          } catch {
-            return false;
-          }
-        },
-        { message: 'PROXION_PUBLIC_URL must be an absolute http(s) URL' },
-      )
-      .optional(),
+    PROXION_PUBLIC_URL: httpUrlSchema('PROXION_PUBLIC_URL must be an absolute http(s) URL').optional(),
   })
   .superRefine((config, ctx) => {
-    const hasId = Boolean(config.PVE_TOKEN_ID);
-    const hasSecret = Boolean(config.PVE_TOKEN_SECRET);
-    if (hasId !== hasSecret) {
-      ctx.addIssue({
-        code: 'custom',
-        path: [hasId ? 'PVE_TOKEN_SECRET' : 'PVE_TOKEN_ID'],
-        message: 'PVE_TOKEN_ID and PVE_TOKEN_SECRET must both be set, or both left unset',
-      });
-    }
-
     // Email channel: SMTP_URL, EMAIL_FROM and EMAIL_TO are all-or-nothing -- any one set without
     // the others is very likely a half-finished config, not an intentional partial setup.
     const emailFields: Array<['PROXION_NOTIFY_SMTP_URL' | 'PROXION_NOTIFY_EMAIL_FROM' | 'PROXION_NOTIFY_EMAIL_TO', string | undefined]> = [
@@ -210,6 +205,43 @@ const envSchema = z
     }
   });
 
+/** Keys whose values may carry credentials (webhook/SMTP URLs embed tokens or user:pass) -- never echoed in an error message. */
+const NOTIFY_SECRET_KEYS: ReadonlySet<string> = new Set([
+  'PROXION_NOTIFY_WEBHOOK_URL',
+  'PROXION_NOTIFY_WEBHOOK_TOKEN',
+  'PROXION_NOTIFY_SMTP_URL',
+]);
+const NOTIFY_ECHO_MAX = 40;
+
+/**
+ * One-line, secret-free summary of a failed `notifySchema` parse: each offending key with what
+ * it expects (e.g. `PROXION_NOTIFY_WEBHOOK_FORMAT: expected one of generic|discord|slack|ntfy|gotify
+ * (got "proxion-alertxnt")`). The invalid value is quoted (truncated to 40 chars) only for keys
+ * outside `NOTIFY_SECRET_KEYS`.
+ */
+function formatNotifyError(error: z.ZodError, env: NodeJS.ProcessEnv): string {
+  const parts: string[] = [];
+  for (const issue of error.issues) {
+    const key = String(issue.path[0] ?? '');
+    let message: string;
+    if (issue.code === 'invalid_value' && issue.values.length > 0) {
+      message = `expected one of ${issue.values.map(String).join('|')}`;
+    } else {
+      message = issue.message;
+    }
+    // Custom refine messages already lead with their key(s); everything else gets prefixed.
+    let line = message.startsWith('PROXION_') || !key ? message : `${key}: ${message}`;
+    const rawValue = key ? env[key] : undefined;
+    if (rawValue !== undefined && !NOTIFY_SECRET_KEYS.has(key) && issue.code !== 'custom') {
+      const flat = rawValue.replace(/\s+/g, ' ').trim();
+      const shown = flat.length > NOTIFY_ECHO_MAX ? `${flat.slice(0, NOTIFY_ECHO_MAX)}…` : flat;
+      line += ` (got "${shown}")`;
+    }
+    if (!parts.includes(line)) parts.push(line);
+  }
+  return parts.join('; ').replace(/\s+/g, ' ');
+}
+
 /**
  * `SESSION_SECRET` is optional on input but always populated by `loadConfig`
  * (generated when absent outside production); `PROXION_COOKIE_SECURE` is
@@ -218,7 +250,14 @@ const envSchema = z
 export type Config = Omit<
   z.infer<typeof envSchema>,
   'SESSION_SECRET' | 'PROXION_COOKIE_SECURE' | 'PROXION_AGENTS'
-> & {
+> & z.infer<typeof notifySchema> & {
+  /**
+   * Set (one line, secret-free) when any `PROXION_NOTIFY_*` / `PROXION_PUBLIC_URL` value failed
+   * validation. The notification fields then hold their no-channel defaults, so notifications
+   * are off but the server still boots; `buildApp` logs it as a warning and
+   * `GET /api/notify/status` surfaces it to the Preferences page.
+   */
+  notifyConfigError?: string;
   SESSION_SECRET: string;
   PROXION_COOKIE_SECURE: boolean;
   /** Parsed from `PROXION_AGENTS`: node name -> agent base URL (no trailing slash). Empty when unset. */
@@ -296,6 +335,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   const raw = parsed.data;
 
+  // Notification settings never fail startup (T59): on any error, drop every channel (partial
+  // validity is deliberately not attempted) and carry a secret-free message instead.
+  const notifyParsed = notifySchema.safeParse(env);
+  const notify = notifyParsed.success ? notifyParsed.data : notifySchema.parse({});
+  const notifyConfigError = notifyParsed.success ? undefined : formatNotifyError(notifyParsed.error, env);
+
   let sessionSecret = raw.SESSION_SECRET;
   if (!sessionSecret) {
     if (raw.NODE_ENV === 'production') {
@@ -357,6 +402,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   return {
     ...rest,
+    ...notify,
+    ...(notifyConfigError !== undefined ? { notifyConfigError } : {}),
     SESSION_SECRET: sessionSecret,
     PROXION_COOKIE_SECURE: cookieSecure,
     PROXION_DATA_DIR: dataDir,

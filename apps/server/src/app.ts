@@ -79,8 +79,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   // --- Alert notifications (T43) -- one channel per configured webhook/SMTP target, and a
   // Notifier only when at least one exists (a deployment with none configured just never
   // decorates `app.notifier`; see notify/routes.ts's `not-configured` response). ---
+  // A bad PROXION_NOTIFY_* value (`config.notifyConfigError`, T59) disables notifications with
+  // one loud warning instead of ever stopping the server; `loadConfig` has already dropped every
+  // channel field in that case, so the channel list below is empty by construction.
   const notifyChannels: NotifyChannel[] = [];
-  if (config.PROXION_NOTIFY_WEBHOOK_URL) {
+  if (config.PROXION_NOTIFY_WEBHOOK_URL && !config.notifyConfigError) {
     notifyChannels.push(
       createWebhookChannel({
         url: config.PROXION_NOTIFY_WEBHOOK_URL,
@@ -89,7 +92,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       }),
     );
   }
-  if (config.PROXION_NOTIFY_SMTP_URL && config.PROXION_NOTIFY_EMAIL_FROM && config.PROXION_NOTIFY_EMAIL_TO) {
+  if (
+    !config.notifyConfigError &&
+    config.PROXION_NOTIFY_SMTP_URL &&
+    config.PROXION_NOTIFY_EMAIL_FROM &&
+    config.PROXION_NOTIFY_EMAIL_TO
+  ) {
     notifyChannels.push(
       createEmailChannel({
         smtpUrl: config.PROXION_NOTIFY_SMTP_URL,
@@ -99,14 +107,18 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     );
   }
   // Host names only -- never the webhook URL/token or the SMTP connection string.
-  app.log.info(
-    {
-      channels: notifyChannels.length > 0 ? notifyChannels.map((c) => ({ name: c.name, host: c.host })) : [],
-    },
-    notifyChannels.length > 0
-      ? 'Proxion notification channels configured'
-      : 'Proxion notification channels: none configured',
-  );
+  if (config.notifyConfigError) {
+    app.log.warn(`Notifications disabled: ${config.notifyConfigError}`);
+  } else {
+    app.log.info(
+      {
+        channels: notifyChannels.length > 0 ? notifyChannels.map((c) => ({ name: c.name, host: c.host })) : [],
+      },
+      notifyChannels.length > 0
+        ? 'Proxion notification channels configured'
+        : 'Proxion notification channels: none configured',
+    );
+  }
 
   const notifier =
     notifyChannels.length > 0

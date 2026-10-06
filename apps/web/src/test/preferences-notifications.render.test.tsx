@@ -121,6 +121,31 @@ describe('Preferences page: Notifications section', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows the server-reported config error in red and disables the test button (T59)', async () => {
+    getPrefsMock.mockResolvedValue(prefs(false));
+    const message = 'PROXION_NOTIFY_WEBHOOK_FORMAT: expected one of generic|discord|slack|ntfy|gotify (got "nope")';
+    getNotifyStatusMock.mockResolvedValue(notifyStatus({ error: message }));
+
+    renderPreferences();
+    await screen.findByRole('heading', { name: 'Preferences' }, { timeout: FIND_TIMEOUT_MS });
+
+    const alert = await screen.findByRole('alert', {}, { timeout: FIND_TIMEOUT_MS });
+    expect(alert).toHaveTextContent(`Notifications are disabled: ${message} — fix proxion.env and redeploy.`);
+    expect(alert).toHaveClass('text-destructive');
+    expect(screen.getByRole('button', { name: 'Send test notification' })).toBeDisabled();
+  });
+
+  it('does not show the error line when the status has no error', async () => {
+    getPrefsMock.mockResolvedValue(prefs(false));
+    getNotifyStatusMock.mockResolvedValue(notifyStatus({ configured: { webhook: true, email: false } }));
+
+    renderPreferences();
+    await screen.findByRole('heading', { name: 'Preferences' }, { timeout: FIND_TIMEOUT_MS });
+
+    expect(await screen.findByText('Configured: Webhook')).toBeInTheDocument();
+    expect(screen.queryByText(/Notifications are disabled/)).not.toBeInTheDocument();
+  });
+
   it('token mode: the test button is disabled with the standard read-only tooltip', async () => {
     getPrefsMock.mockResolvedValue(prefs(true));
     getNotifyStatusMock.mockResolvedValue(notifyStatus({ configured: { webhook: true, email: false } }));

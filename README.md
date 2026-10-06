@@ -293,7 +293,8 @@ The webhook token and the SMTP URL's embedded credentials are never written to t
 
 The Preferences page shows which channels are configured and has a "Send test notification"
 button (a signed-in session only; disabled with a shared service token, same as every other write
-in token mode) -- `GET /api/notify/status` / `POST /api/notify/test`.
+in token mode) -- `GET /api/notify/status` / `POST /api/notify/test`. A bad notification value
+disables notifications and shows why on the Preferences page; it never stops the server.
 
 ## Security model
 

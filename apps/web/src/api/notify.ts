@@ -10,6 +10,8 @@ export interface NotifyStatus {
   configured: { webhook: boolean; email: boolean };
   minSeverity: 'warning' | 'error';
   includeResolved: boolean;
+  /** Present when the server disabled notifications over an invalid `PROXION_NOTIFY_*` value (T59); one line, secret-free. Never set in fixture mode. */
+  error?: string;
 }
 
 /** One entry per channel the server has configured -- `'ok'` or a short, already-sanitised
