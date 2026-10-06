@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   subject is `[site] headline — first alert`, and "Send test" sends two realistic sample alerts.
   No env variable, channel selection or route changes.
 
+### Fixed
+
+- Deploy kit: `set-env.sh` writes values single-quoted so Docker Compose never interpolates a
+  `$` inside a secret (an SMTP password containing `$abc` used to be silently truncated).
+
 ## [0.10.0] - 2026-10-05
 
 ### Added
