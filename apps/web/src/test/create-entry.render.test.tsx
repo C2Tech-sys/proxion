@@ -99,8 +99,9 @@ describe('Create entry points', () => {
 
     const dialog = await screen.findByTestId('create-vm-dialog');
     expect(within(dialog).getByText('Create virtual machine')).toBeInTheDocument();
-    expect(within(dialog).getByText('Coming soon.')).toBeInTheDocument();
-    expect(within(dialog).getByText('No node selected yet.')).toBeInTheDocument();
+    // The VM dialog is now the real wizard (T61): it opens on its General step, with no node preset.
+    expect(within(dialog).getByRole('region', { name: 'General' })).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Creates a new VM on /)).not.toBeInTheDocument();
     expect(useCreateStore.getState().open).toEqual({ kind: 'qemu' });
     expect(screen.queryByTestId('create-ct-dialog')).not.toBeInTheDocument();
   });
@@ -126,7 +127,7 @@ describe('Create entry points', () => {
     fireEvent.click(within(menu).getByRole('menuitem', { name: /Create VM here/ }));
 
     const dialog = await screen.findByTestId('create-vm-dialog');
-    expect(within(dialog).getByText('Node: pve1')).toBeInTheDocument();
+    expect(within(dialog).getByText(/Creates a new VM on pve1/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
 
     await waitFor(() => expect(screen.queryByTestId('create-vm-dialog')).not.toBeInTheDocument());

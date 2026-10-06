@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Create VM wizard: eight steps (General, OS, System, Disks, CPU, Memory, Network, Confirm) that
+  mirror PVE's, opened from the top bar's Create menu or a node's context menu. One request to a
+  new allow-listed route, `POST /api/actions/guest/:node/qemu/create`, composes the whole VM (ISO
+  or no media, q35/OVMF with an EFI disk, optional TPM 2.0, one disk, CPU, memory, one NIC, boot
+  order) from a strict typed body, then Proxion follows the task and opens the new VM. Needs a
+  signed-in session, `VM.Allocate` on the new VMID and `Datastore.AllocateSpace` on every storage a
+  new volume goes on (`Datastore.Audit` or `Datastore.AllocateSpace` on the ISO's storage); a VMID
+  already in use is refused with 409 before PVE is called. The shared service token stays
+  read-only.
+
 ### Changed
 
 - An invalid `PROXION_NOTIFY_*` / `PROXION_PUBLIC_URL` value no longer crash-loops the server at
