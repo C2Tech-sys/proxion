@@ -880,3 +880,18 @@ export function unmodeledDeviceParts(kind: 'usb' | 'pci', raw: string | undefine
     return part !== '' && eq !== -1 && !modeled.has(part.slice(0, eq));
   });
 }
+
+/**
+ * Whether `name` is an ISO/image file name the Create VM route will accept in the `ide2` property
+ * string: 1..255 characters, ending in `.iso`/`.img`, no `/`, `,`, `=`, control characters or
+ * `..`, no leading/trailing whitespace (inner spaces are fine, PVE allows them).
+ *
+ * KEEP IN STEP WITH `isSafeIsoName` in `apps/server/src/actions/createVmRoutes.ts`.
+ */
+export function isSafeIsoName(name: string): boolean {
+  if (name.length < 1 || name.length > 255) return false;
+  if (name !== name.trim()) return false;
+  // eslint-disable-next-line no-control-regex
+  if (/[/,=\x00-\x1f\x7f]/.test(name) || name.includes('..')) return false;
+  return /\.(iso|img)$/i.test(name);
+}

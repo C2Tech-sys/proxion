@@ -877,3 +877,14 @@ export function resetFixtureFirewall(): void {
 export function setFixtureGuestConfigRecord(vmid: number, config: GuestConfig): void {
   configs[String(vmid)] = config;
 }
+
+// --- T61 create VM ---
+
+/**
+ * Test/demo-only mutator (T61): stores a complete config for a guest that has none yet (a freshly
+ * created VM -- `addFixtureGuest` only adds the cluster-resource row, and `patchFixtureGuestConfig`
+ * is a no-op without an existing config). Replaces whatever config `vmid` had.
+ */
+export function addFixtureGuestConfig(vmid: number, config: GuestConfig): void {
+  configs[String(vmid)] = { ...config };
+}

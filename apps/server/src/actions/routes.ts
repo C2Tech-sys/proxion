@@ -14,6 +14,7 @@ import { registerBootOrderRoutes } from './bootOrderRoutes.js';
 import { registerDiskRoutes } from './diskRoutes.js';
 import { registerNetworkRoutes } from './networkRoutes.js';
 import { registerCreateCtRoutes } from './createCtRoutes.js';
+import { registerCreateVmRoutes } from './createVmRoutes.js';
 import { registerOptionsRoutes } from './optionsRoutes.js';
 import { registerCloudInitRoutes } from './cloudInitRoutes.js';
 import { registerDeviceRoutes } from './deviceRoutes.js';
@@ -440,6 +441,9 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   registerTemplateRoutes(app, guestActionsRateLimit);
   // Create container wizard (`createCtRoutes.ts`) shares the same bucket, same rationale.
   registerCreateCtRoutes(app, guestActionsRateLimit);
+  // Create VM wizard (`POST /api/actions/guest/:node/qemu/create`) (`createVmRoutes.ts`) shares the
+  // same bucket, same rationale.
+  registerCreateVmRoutes(app, guestActionsRateLimit);
   registerOptionsRoutes(app, guestActionsRateLimit);
 
   // Guest cloud-init edit + image regenerate (`cloudInitRoutes.ts`) share the same bucket, same
