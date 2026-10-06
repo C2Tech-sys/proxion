@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Alert } from '@proxion/core';
+import { summaryHeadline } from '../src/notify/format.js';
 import { Notifier } from '../src/notify/notifier.js';
 import type { NotifyChannel, NotifyMessage } from '../src/notify/types.js';
 
@@ -347,5 +348,109 @@ describe('Notifier', () => {
     for (const call of allLogCalls) {
       expect(JSON.stringify(call)).not.toContain('secret-token-should-not-be-logged');
     }
+  });
+
+  it('enriches guest events with guestName/guestType from the resources snapshot, and never throws for a vanished guest', async () => {
+    const channel = fakeChannel('webhook');
+    const resources = [{ type: 'qemu', vmid: 100, node: 'c2dc2', name: 'web-prod-01' }];
+    const notifier = await Notifier.create({
+      ...BASE_OPTIONS,
+      dataDir,
+      channels: [channel],
+      log: fakeLogger(),
+      publicUrl: 'https://proxion.example.com',
+      getResources: () => resources,
+    });
+    notifier.onAlerts([]);
+    await notifier.flushForTest();
+    channel.send.mockClear();
+
+    notifier.onAlerts([
+      alert({ id: 'backup:c2dc2:100:u1', kind: 'backup', severity: 'error', title: 'Backup failed', node: 'c2dc2', vmid: '100' }),
+      alert({ id: 'backup:c2dc2:999:u2', kind: 'backup', severity: 'error', title: 'Gone guest', node: 'c2dc2', vmid: '999' }),
+      alert({ id: 'storage:c2dc2:local', kind: 'storage', severity: 'error', title: 'Storage full', node: 'c2dc2' }),
+    ]);
+    await notifier.flushForTest();
+    await advanceAndFlush(notifier, BASE_OPTIONS.debounceMs);
+
+    const events = (channel.send.mock.calls[0]![0] as NotifyMessage).events;
+    expect(events[0]).toMatchObject({ vmid: '100', guestName: 'web-prod-01', guestType: 'qemu' });
+    expect(events[0]?.url).toBe('https://proxion.example.com/vm/c2dc2/qemu/100?tab=summary');
+    expect(events[1]?.guestName).toBeUndefined();
+    expect(events[1]?.guestType).toBeUndefined();
+    expect(events[2]?.guestName).toBeUndefined();
+  });
+
+  it('survives a throwing getResources (events are sent without guest names)', async () => {
+    const channel = fakeChannel('webhook');
+    const notifier = await Notifier.create({
+      ...BASE_OPTIONS,
+      dataDir,
+      channels: [channel],
+      log: fakeLogger(),
+      getResources: () => {
+        throw new Error('no snapshot');
+      },
+    });
+    notifier.onAlerts([]);
+    await notifier.flushForTest();
+    channel.send.mockClear();
+
+    notifier.onAlerts([alert({ id: 'q', kind: 'task', severity: 'error', title: 'Q', vmid: '100', node: 'n' })]);
+    await notifier.flushForTest();
+    await advanceAndFlush(notifier, BASE_OPTIONS.debounceMs);
+    const events = (channel.send.mock.calls[0]![0] as NotifyMessage).events;
+    expect(events).toHaveLength(1);
+    expect(events[0]?.guestName).toBeUndefined();
+  });
+
+  it('sendTest sends two realistic sample events (failure + all-clear) with a "Test notification" headline', async () => {
+    const channel = fakeChannel('webhook');
+    const notifier = await Notifier.create({
+      ...BASE_OPTIONS,
+      dataDir,
+      channels: [channel],
+      log: fakeLogger(),
+      publicUrl: 'https://proxion.example.com/',
+      clock: () => 1_791_302_280_000, // 2026-10-06 15:58:00 UTC
+    });
+
+    await expect(notifier.sendTest()).resolves.toEqual({ webhook: 'ok' });
+
+    const message = channel.send.mock.calls[0]![0] as NotifyMessage;
+    expect(message.kind).toBe('test');
+    expect(summaryHeadline(message).startsWith('Test notification')).toBe(true);
+    expect(message.events).toEqual([
+      {
+        type: 'opened',
+        severity: 'error',
+        kind: 'backup',
+        title: 'Backup of web-prod-01 (VM 100) failed on c2dc2',
+        detail: 'vzdump exited with status 1 — see the task log',
+        node: 'c2dc2',
+        vmid: '100',
+        guestName: 'web-prod-01',
+        guestType: 'qemu',
+        at: 1_791_302_280,
+        url: 'https://proxion.example.com/',
+      },
+      {
+        type: 'resolved',
+        severity: 'healed',
+        kind: 'storage',
+        title: 'Storage "local-lvm" on c2dc2 is back under 90%',
+        node: 'c2dc2',
+        at: 1_791_302_280,
+        url: 'https://proxion.example.com/',
+      },
+    ]);
+  });
+
+  it('sendTest leaves the url off when no PROXION_PUBLIC_URL is configured', async () => {
+    const channel = fakeChannel('webhook');
+    const notifier = await Notifier.create({ ...BASE_OPTIONS, dataDir, channels: [channel], log: fakeLogger() });
+    await notifier.sendTest();
+    const message = channel.send.mock.calls[0]![0] as NotifyMessage;
+    expect(message.events.every((event) => event.url === undefined)).toBe(true);
   });
 });

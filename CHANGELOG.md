@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Alert notifications are formatted per channel instead of plain text: email is an HTML message
+  with a card per alert and an "Open in Proxion" button (plain-text alternative kept), Discord
+  gets embeds, Slack gets blocks, ntfy and Gotify get Markdown with a click action, and the
+  generic webhook gains `headline`, `highestSeverity`, `sentAt` and per-event
+  `guestName`/`guestType`/`label`/`color`. Events now carry the guest's name and type, the email
+  subject is `[site] headline — first alert`, and "Send test" sends two realistic sample alerts.
+  No env variable, channel selection or route changes.
+
 ## [0.10.0] - 2026-10-05
 
 ### Added

@@ -27,6 +27,12 @@ export interface NotifyEvent {
   detail?: string | undefined;
   node?: string | undefined;
   vmid?: string | undefined;
+  /** The guest's display name, resolved from the `/cluster/resources` snapshot when the event is
+   *  created (see `format.ts`'s `enrichEvent`) -- `undefined` when the alert isn't about a guest or
+   *  the guest has since gone. Only ever used for presentation. */
+  guestName?: string | undefined;
+  /** `'qemu'` (shown as "VM") or `'lxc'` (shown as "CT"), resolved alongside `guestName`. */
+  guestType?: 'qemu' | 'lxc' | undefined;
   /** Unix epoch seconds. */
   at: number;
   /** Deep link into the app for this alert, when `PROXION_PUBLIC_URL` is configured -- see

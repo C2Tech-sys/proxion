@@ -1,5 +1,5 @@
 import nodemailer, { type Transporter } from 'nodemailer';
-import { plainTextBody, summaryHeadline } from '../format.js';
+import { htmlBody, plainTextBody, subjectLine } from '../format.js';
 import type { NotifyChannel, NotifyMessage } from '../types.js';
 
 export interface EmailChannelOptions {
@@ -14,19 +14,11 @@ export interface EmailChannelOptions {
   transport?: Transporter;
 }
 
-function subjectFor(message: NotifyMessage): string {
-  const n = message.events.length;
-  const first = message.events[0]?.title;
-  if (message.kind === 'test') return `[${message.siteName}] Test notification`;
-  if (n === 0) return `[${message.siteName}] ${summaryHeadline(message)}`;
-  return `[${message.siteName}] ${n} alert(s): ${first}`;
-}
-
 /**
- * The email notification channel: one plain-text message per notification batch, sent via
- * nodemailer. `options.transport` lets tests inject `nodemailer.createTransport({ jsonTransport:
- * true })` (or any stub `Transporter`) -- the SMTP URL is otherwise only ever parsed by
- * nodemailer itself, never logged (see `NotifyChannel.host`).
+ * The email notification channel: one message per notification batch (a designed HTML body plus a
+ * plain-text alternative), sent via nodemailer. `options.transport` lets tests inject
+ * `nodemailer.createTransport({ jsonTransport: true })` (or any stub `Transporter`) -- the SMTP URL
+ * is otherwise only ever parsed by nodemailer itself, never logged (see `NotifyChannel.host`).
  */
 export function createEmailChannel(options: EmailChannelOptions): NotifyChannel {
   const transport = options.transport ?? nodemailer.createTransport(options.smtpUrl);
@@ -41,8 +33,9 @@ export function createEmailChannel(options: EmailChannelOptions): NotifyChannel 
       await transport.sendMail({
         from: options.from,
         to: options.to,
-        subject: subjectFor(message),
+        subject: subjectLine(message),
         text: plainTextBody(message),
+        html: htmlBody(message),
       });
     },
   };
