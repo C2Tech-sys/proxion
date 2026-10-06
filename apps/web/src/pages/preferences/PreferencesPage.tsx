@@ -81,11 +81,14 @@ const TOKEN_MODE_TOOLTIP = 'Read-only: signed in with a service token';
 function NotificationsSection({
   readOnly,
   configured,
+  error,
   onSendTest,
   sending,
 }: {
   readOnly: boolean;
   configured: { webhook: boolean; email: boolean } | undefined;
+  /** Set when the server disabled notifications over an invalid `PROXION_NOTIFY_*` value (T59). */
+  error: string | undefined;
   onSendTest: () => void;
   sending: boolean;
 }) {
@@ -98,7 +101,7 @@ function NotificationsSection({
     <Button
       variant="outline"
       size="sm"
-      disabled={readOnly || !hasAnyChannel || sending}
+      disabled={readOnly || !hasAnyChannel || sending || Boolean(error)}
       title={!readOnly && !hasAnyChannel ? 'No notification channels are configured' : undefined}
       onClick={onSendTest}
     >
@@ -108,6 +111,11 @@ function NotificationsSection({
 
   return (
     <div className="flex flex-col divide-y divide-border">
+      {error ? (
+        <p role="alert" className="py-2 text-sm text-destructive">
+          Notifications are disabled: {error} — fix proxion.env and redeploy.
+        </p>
+      ) : null}
       <PrefRow
         label="Channels"
         description={
@@ -339,6 +347,7 @@ export function PreferencesPage() {
           <NotificationsSection
             readOnly={readOnly}
             configured={notifyStatus?.configured}
+            error={notifyStatus?.error}
             onSendTest={() => sendTest.mutate()}
             sending={sendTest.isPending}
           />

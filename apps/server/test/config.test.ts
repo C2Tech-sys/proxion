@@ -244,4 +244,87 @@ describe('loadConfig', () => {
       ).toBe(3000);
     });
   });
+
+  describe('notification settings never fail startup (T59)', () => {
+    const ENV = { ...BASE_ENV, NODE_ENV: 'test' } as const;
+
+    it('a good notification config loads with no error', () => {
+      const config = loadConfig({
+        ...ENV,
+        PROXION_NOTIFY_WEBHOOK_URL: 'https://hooks.example.com/x',
+        PROXION_NOTIFY_WEBHOOK_FORMAT: 'discord',
+      });
+      expect(config.notifyConfigError).toBeUndefined();
+      expect(config.PROXION_NOTIFY_WEBHOOK_URL).toBe('https://hooks.example.com/x');
+      expect(config.PROXION_NOTIFY_WEBHOOK_FORMAT).toBe('discord');
+    });
+
+    it('an invalid webhook format does not throw: it sets notifyConfigError naming the key and the allowed values', () => {
+      const config = loadConfig({
+        ...ENV,
+        PROXION_NOTIFY_WEBHOOK_URL: 'https://hooks.example.com/x',
+        PROXION_NOTIFY_WEBHOOK_FORMAT: 'proxion-alertxnt',
+      });
+      expect(config.notifyConfigError).toBe(
+        'PROXION_NOTIFY_WEBHOOK_FORMAT: expected one of generic|discord|slack|ntfy|gotify (got "proxion-alertxnt")',
+      );
+      // Partial validity is not attempted: the otherwise-valid webhook URL is dropped too.
+      expect(config.PROXION_NOTIFY_WEBHOOK_URL).toBeUndefined();
+      expect(config.PROXION_NOTIFY_WEBHOOK_FORMAT).toBe('generic');
+      expect(config.notifyConfigError).not.toContain('\n');
+    });
+
+    it('an invalid SMTP URL is named but its value (which may hold credentials) is never echoed', () => {
+      const config = loadConfig({
+        ...ENV,
+        PROXION_NOTIFY_SMTP_URL: 'http://user:hunter2@mail.example.com',
+        PROXION_NOTIFY_EMAIL_FROM: 'a@example.com',
+        PROXION_NOTIFY_EMAIL_TO: 'b@example.com',
+      });
+      expect(config.notifyConfigError).toContain('PROXION_NOTIFY_SMTP_URL');
+      expect(config.notifyConfigError).not.toContain('hunter2');
+      expect(config.notifyConfigError).not.toContain('mail.example.com');
+      expect(config.PROXION_NOTIFY_SMTP_URL).toBeUndefined();
+    });
+
+    it('an invalid webhook URL value is never echoed', () => {
+      const config = loadConfig({
+        ...ENV,
+        PROXION_NOTIFY_WEBHOOK_URL: 'ftp://secret-host.example.com/tokenabc123',
+      });
+      expect(config.notifyConfigError).toContain('PROXION_NOTIFY_WEBHOOK_URL');
+      expect(config.notifyConfigError).not.toContain('tokenabc123');
+      expect(config.notifyConfigError).not.toContain('secret-host');
+    });
+
+    it('quotes a non-secret invalid value truncated to 40 chars', () => {
+      const config = loadConfig({ ...ENV, PROXION_NOTIFY_MIN_SEVERITY: 'x'.repeat(100) });
+      expect(config.notifyConfigError).toBe(
+        `PROXION_NOTIFY_MIN_SEVERITY: expected one of warning|error (got "${'x'.repeat(40)}…")`,
+      );
+    });
+
+    it('a half-finished email config disables notifications instead of throwing', () => {
+      const config = loadConfig({ ...ENV, PROXION_NOTIFY_EMAIL_TO: 'b@example.com' });
+      expect(config.notifyConfigError).toMatch(/must all be set together/);
+      expect(config.PROXION_NOTIFY_EMAIL_TO).toBeUndefined();
+    });
+
+    it('an invalid PROXION_PUBLIC_URL or numeric value is reported, not thrown', () => {
+      const config = loadConfig({
+        ...ENV,
+        PROXION_PUBLIC_URL: 'not a url',
+        PROXION_NOTIFY_DEBOUNCE_MS: 'soon',
+      });
+      expect(config.notifyConfigError).toContain('PROXION_PUBLIC_URL');
+      expect(config.notifyConfigError).toContain('PROXION_NOTIFY_DEBOUNCE_MS');
+    });
+
+    it('core settings still fail hard even when a notification value is also bad', () => {
+      expect(() =>
+        loadConfig({ NODE_ENV: 'test', PVE_URL: 'not-a-url', PROXION_NOTIFY_WEBHOOK_FORMAT: 'nope' }),
+      ).toThrow(/PVE_URL/);
+      expect(() => loadConfig({ ...ENV, PORT: 'abc' })).toThrow(/PORT/);
+    });
+  });
 });

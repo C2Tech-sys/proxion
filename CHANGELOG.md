@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- An invalid `PROXION_NOTIFY_*` / `PROXION_PUBLIC_URL` value no longer crash-loops the server at
+  boot: notifications are disabled with one startup warning (`Notifications disabled: <key and
+  allowed values>`, never echoing webhook/SMTP URLs or tokens), `GET /api/notify/status` reports
+  the `error`, and the Preferences page shows it and disables "Send test notification". Core
+  settings (PVE URL, token, session secret, ports, TLS pin, agents) still fail hard.
+
 ## [0.10.3] - 2026-10-06
 
 ### Fixed

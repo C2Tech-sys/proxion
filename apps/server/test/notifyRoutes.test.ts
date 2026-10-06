@@ -1,6 +1,7 @@
+import fs from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
@@ -158,6 +159,84 @@ describe('/api/notify', () => {
     const body = res.json() as { results: { webhook: string } };
     expect(body.results.webhook).not.toBe('ok');
     expect(body.results.webhook).toContain('503');
+  });
+
+  describe('an invalid PROXION_NOTIFY_* value (T59)', () => {
+    const BAD = { PROXION_NOTIFY_WEBHOOK_FORMAT: 'proxion-alertxnt' };
+    const MESSAGE =
+      'PROXION_NOTIFY_WEBHOOK_FORMAT: expected one of generic|discord|slack|ntfy|gotify (got "proxion-alertxnt")';
+
+    it('still boots, GET /api/notify/status carries the error, and nothing is configured', async () => {
+      webhookTarget = await startFakeWebhookTarget();
+      await setup({ ...BAD, PROXION_NOTIFY_WEBHOOK_URL: webhookTarget.baseUrl });
+      expect(app.notifier).toBeUndefined();
+      const cookie = await loginCookie();
+      const res = await app.inject({ method: 'GET', url: '/api/notify/status', headers: { cookie } });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        configured: { webhook: false, email: false },
+        minSeverity: 'warning',
+        includeResolved: true,
+        error: MESSAGE,
+      });
+    });
+
+    it('POST /api/notify/test is 400 not-configured (with the message)', async () => {
+      await setup(BAD);
+      const cookie = await loginCookie();
+      const res = await app.inject({ method: 'POST', url: '/api/notify/test', headers: { cookie } });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({ error: 'not-configured', message: MESSAGE });
+    });
+
+    it('a good config has no `error` key in the status body', async () => {
+      await setup();
+      const cookie = await loginCookie();
+      const res = await app.inject({ method: 'GET', url: '/api/notify/status', headers: { cookie } });
+      expect(res.json()).not.toHaveProperty('error');
+    });
+
+    it('logs exactly one startup warning, "Notifications disabled: <message>"', async () => {
+      // The app logger is `silent` under NODE_ENV=test, so build with `development` (info level)
+      // and capture what pino's stdout destination (sonic-boom) hands to fs.write/fs.writeSync.
+      const chunks: string[] = [];
+      const record = (data: unknown) => {
+        if (typeof data === 'string') chunks.push(data);
+        else if (Buffer.isBuffer(data)) chunks.push(data.toString('utf8'));
+      };
+      // Swallowed rather than passed through, so the captured lines don't also spam the test output.
+      const byteLength = (data: unknown) => Buffer.byteLength(typeof data === 'string' ? data : (data as Buffer));
+      const syncSpy = vi.spyOn(fs, 'writeSync').mockImplementation(((...args: unknown[]) => {
+        record(args[1]);
+        return byteLength(args[1]);
+      }) as typeof fs.writeSync);
+      const asyncSpy = vi.spyOn(fs, 'write').mockImplementation(((...args: unknown[]) => {
+        record(args[1]);
+        const callback = args[args.length - 1];
+        if (typeof callback === 'function') callback(null, byteLength(args[1]));
+      }) as typeof fs.write);
+      fakePve = await startFakePve();
+      try {
+        app = await buildApp({
+          config: loadConfig({ NODE_ENV: 'development', SESSION_SECRET: 'x'.repeat(32), PVE_URL: fakePve.url, ...BAD }),
+        });
+        // Let an asynchronous (non-sync) destination flush before the spies come off.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      } finally {
+        syncSpy.mockRestore();
+        asyncSpy.mockRestore();
+      }
+      const lines = chunks
+        .join('')
+        .split('\n')
+        .filter((line) => line.startsWith('{'));
+      const warns = lines
+        .map((line) => JSON.parse(line) as { level: number; msg: string })
+        .filter((entry) => entry.msg.startsWith('Notifications disabled'));
+      expect(warns).toHaveLength(1);
+      expect(warns[0]).toMatchObject({ level: 40, msg: `Notifications disabled: ${MESSAGE}` });
+      expect(lines.join('')).not.toContain('Proxion notification channels');
+    });
   });
 
   it('rate-limits POST /api/notify/test to 5/min per session', async () => {
