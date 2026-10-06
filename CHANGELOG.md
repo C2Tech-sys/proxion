@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Notification emails: the "Open in Proxion" button no longer clips its label in Outlook desktop
+  (96-DPI Office block, VML namespaces, a wider fixed-height VML button with exact line height).
+
 ## [0.10.1] - 2026-10-06
 
 ### Changed

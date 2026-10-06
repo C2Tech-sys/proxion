@@ -325,10 +325,10 @@ function htmlButton(href: string, color: string): string {
   const url = escapeHtml(href);
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:14px;"><tr><td>` +
-    `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${url}" style="height:40px;v-text-anchor:middle;width:170px;" arcsize="15%" stroke="f" fillcolor="${color}"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:14px;font-weight:600;">Open in Proxion</center></v:roundrect><![endif]-->` +
+    `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${url}" style="height:44px;v-text-anchor:middle;width:220px;" arcsize="14%" stroke="f" fillcolor="${color}"><w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Arial,sans-serif;font-size:14px;font-weight:600;line-height:44px;mso-line-height-rule:exactly;white-space:nowrap;">Open in Proxion</center></v:roundrect><![endif]-->` +
     `<!--[if !mso]><!-->` +
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${color}" style="background-color:${color};border-radius:6px;">` +
-    `<a href="${url}" style="display:inline-block;padding:10px 20px;font-family:${FONT_STACK};font-size:14px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;">Open in Proxion</a>` +
+    `<a href="${url}" style="display:inline-block;padding:12px 24px;font-family:${FONT_STACK};font-size:14px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;white-space:nowrap;mso-padding-alt:0;">Open in Proxion</a>` +
     `</td></tr></table>` +
     `<!--<![endif]-->` +
     `</td></tr></table>`
@@ -386,8 +386,11 @@ export function htmlBody(message: NotifyMessage): string {
 
   return (
     `<!DOCTYPE html>` +
-    `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+    `<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light">` +
+    // Outlook (Word engine) at 120/144 DPI scales text but not VML/px widths unless told to lay out
+    // at 96 DPI -- without this the button text overflows its VML box (seen on Chris's Outlook).
+    `<!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->` +
     `<title>${site}: ${headline}</title></head>` +
     `<body style="margin:0;padding:0;background-color:#F1F5F9;">` +
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F1F5F9;"><tr><td align="center" style="padding:24px 12px;">` +
