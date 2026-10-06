@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-10-06
+
 ### Fixed
 
 - Notification emails: the Outlook button label sat below the button edge (Word's engine
@@ -488,7 +490,8 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.10.3...HEAD
+[0.10.3]: https://github.com/C2Tech-sys/proxion/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/C2Tech-sys/proxion/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/C2Tech-sys/proxion/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/C2Tech-sys/proxion/compare/v0.9.0...v0.10.0
