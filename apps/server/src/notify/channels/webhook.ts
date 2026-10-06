@@ -269,7 +269,13 @@ function buildRequest(
           Tags: ntfyTags(message),
           Markdown: 'yes',
           ...(click
-            ? { Click: asciiHeader(click), Actions: asciiHeader(`view, Open in Proxion, ${click}, clear=true`) }
+            ? {
+                Click: asciiHeader(click),
+                // `Actions` is comma/semicolon-delimited, so those must not appear raw in the url.
+                Actions: asciiHeader(
+                  `view, Open in Proxion, ${click.replace(/,/g, '%2C').replace(/;/g, '%3B')}, clear=true`,
+                ),
+              }
             : {}),
         },
       };

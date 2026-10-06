@@ -305,11 +305,12 @@ export function markdownBody(message: NotifyMessage): string {
     .map((event) => {
       const tail: string[] = [];
       const meta = eventMeta(event);
-      if (meta) tail.push(escapeMarkdown(meta));
+      if (meta) tail.push(escapeMarkdown(singleLine(meta)));
       const url = safeUrl(event.url);
       if (url) tail.push(`[Open](${url.replace(/\(/g, '%28').replace(/\)/g, '%29').replace(/\s/g, '%20')})`);
-      const line = `- **${typeLabel(event.type)}** ${escapeMarkdown(event.title)}${tail.length > 0 ? ` — ${tail.join(' — ')}` : ''}`;
-      return event.detail ? `${line}\n  ${escapeMarkdown(event.detail)}` : line;
+      const line = `- **${typeLabel(event.type)}** ${escapeMarkdown(singleLine(event.title))}${tail.length > 0 ? ` — ${tail.join(' — ')}` : ''}`;
+      const detail = event.detail ? singleLine(event.detail) : '';
+      return detail ? `${line}\n  ${escapeMarkdown(detail)}` : line;
     })
     .join('\n');
 }
@@ -377,7 +378,8 @@ export function htmlBody(message: NotifyMessage): string {
 
   const firstUrl = message.events.map((event) => safeUrl(event.url)).find((url) => url !== undefined);
   const origin = firstUrl ? new URL(firstUrl).origin : undefined;
-  const sentBy = `Sent by Proxion · ${site}`;
+  const sentBy =
+    message.siteName.trim().toLowerCase() === 'proxion' ? 'Sent by Proxion' : `Sent by Proxion · ${site}`;
   const footer = origin
     ? `<a href="${escapeHtml(origin)}" style="color:${MUTED_SOFT};text-decoration:underline;">${sentBy}</a>`
     : sentBy;

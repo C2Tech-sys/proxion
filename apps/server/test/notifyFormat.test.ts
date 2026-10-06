@@ -151,6 +151,17 @@ describe('format helpers', () => {
       expect(body).not.toContain('[Open]');
     });
 
+    it('collapses newlines in titles, details and meta so one event is always one bullet', () => {
+      const body = markdownBody(
+        msg([ev({ title: 'x\r\n- **RESOLVED** forged', detail: 'd\n- **NEW** forged2', node: 'n\n- forged3' })]),
+      );
+      const bullets = body.split('\n').filter((line) => line.startsWith('- '));
+      expect(bullets).toHaveLength(1);
+      expect(body.split('\n')).toHaveLength(2); // the bullet + the single-line detail continuation
+      expect(body.split('\n')[1]!.startsWith('  ')).toBe(true);
+      expect(markdownBody(msg([ev({ title: 'x\r\n- **RESOLVED** forged', at: Number.NaN })])).split('\n')).toHaveLength(1);
+    });
+
     it('falls back to the headline when there are no events', () => {
       expect(markdownBody(msg([], { kind: 'summary' }))).toBe('Proxion notifications are active; no current alerts');
     });
@@ -221,7 +232,9 @@ describe('format helpers', () => {
       expect(html).not.toContain('Open in Proxion');
       expect(html).not.toContain('<v:roundrect');
       expect(html).not.toContain('javascript:');
-      expect(html).toContain('Sent by Proxion · Proxion');
+      // Default site name: no redundant "· Proxion".
+      expect(html).toContain('Sent by Proxion<');
+      expect(html).not.toContain('Sent by Proxion ·');
       expect(html).not.toContain('<a href');
     });
 
@@ -474,6 +487,15 @@ describe('ntfy request', () => {
     expect(captured.headers['Tags']).toBe('red_circle,computer');
     expect(captured.headers['content-type']).toBe('text/plain; charset=utf-8');
     expect(captured.body).toBe(markdownBody(msg([GUEST_EVENT])));
+  });
+
+  it('percent-encodes , and ; in the Actions url only (Click keeps the url as is)', async () => {
+    const url = 'https://proxion.example.com/vm/n/qemu/1?a=1,2;b=3';
+    const captured = await send('ntfy', msg([ev({ url })]));
+    expect(captured.headers['Click']).toBe(url);
+    expect(captured.headers['Actions']).toBe(
+      'view, Open in Proxion, https://proxion.example.com/vm/n/qemu/1?a=1%2C2%3Bb=3, clear=true',
+    );
   });
 
   it('omits Click and Actions without a url, and drops `computer` when no event has a vmid', async () => {
