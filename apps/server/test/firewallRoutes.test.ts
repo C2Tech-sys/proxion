@@ -315,6 +315,12 @@ describe('guest firewall routes (T56)', () => {
       await expect400({ enable: true, digest: 'bad digest!' });
     });
 
+    it('rejects a fractional or negative pos in the path without reaching PVE', async () => {
+      await expect400({ enable: true }, '/pve1/qemu/100/firewall/rules/1.5');
+      await expect400({ enable: true }, '/pve1/qemu/100/firewall/rules/-1');
+      await expect400({ enable: true }, '/pve1/qemu/100/firewall/rules/1000001');
+    });
+
     it('rejects a mismatched type/action and a field both set and deleted', async () => {
       await expect400({ type: 'group', action: 'DROP' });
       await expect400({ action: 'bad name!' });
@@ -396,6 +402,15 @@ describe('guest firewall routes (T56)', () => {
       const res = await call('DELETE', RULE, { cookie });
       expect(res.statusCode).toBe(200);
       expect(fakePve.firewallCalls[0]!.body).toStrictEqual({});
+    });
+
+    it('rejects a fractional or negative pos in the path without reaching PVE', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, FW_PRIV);
+      expect((await call('DELETE', '/pve1/qemu/100/firewall/rules/1.5', { cookie })).statusCode).toBe(400);
+      expect((await call('DELETE', '/pve1/qemu/100/firewall/rules/-1', { cookie })).statusCode).toBe(400);
+      expect((await call('DELETE', '/pve1/qemu/100/firewall/rules/1000001', { cookie })).statusCode).toBe(400);
+      expect(fakePve.firewallCalls).toHaveLength(0);
     });
 
     it('rejects a bad digest and an unknown query key without reaching PVE', async () => {

@@ -107,6 +107,27 @@ describe('guest USB/PCI/serial device routes (T55)', () => {
       expect(del.json()).toEqual({ error: 'forbidden', missing: 'VM.Config.HWType' });
       expect(fakePve.configCalls).toHaveLength(0);
     });
+
+    it('checks the privilege before reading the guest config (no config GET for PUT or DELETE)', async () => {
+      const cookie = await setupSession();
+      fakePve.setGuestConfig('qemu', 100, { usb0: 'host=spice' });
+
+      // Control: with the privilege, both routes read the current config exactly once.
+      fakePve.setVmPermissions(100, HW_PRIV);
+      expect((await call('PUT', '/pve1/qemu/100/devices/usb0', { cookie, payload: USB })).statusCode).toBe(200);
+      expect(fakePve.configGetCalls).toStrictEqual([{ type: 'qemu', vmid: 100 }]);
+      expect((await call('DELETE', '/pve1/qemu/100/devices/usb0', { cookie })).statusCode).toBe(200);
+      expect(fakePve.configGetCalls).toHaveLength(2);
+
+      // Without it, both are refused before any config GET (and any PUT) reaches PVE.
+      const getsBefore = fakePve.configGetCalls.length;
+      const putsBefore = fakePve.configCalls.length;
+      fakePve.setVmPermissions(100, { 'VM.Config.HWType': false });
+      expect((await call('PUT', '/pve1/qemu/100/devices/usb0', { cookie, payload: USB })).statusCode).toBe(403);
+      expect((await call('DELETE', '/pve1/qemu/100/devices/usb0', { cookie })).statusCode).toBe(403);
+      expect(fakePve.configGetCalls).toHaveLength(getsBefore);
+      expect(fakePve.configCalls).toHaveLength(putsBefore);
+    });
   });
 
   describe('validation (400)', () => {

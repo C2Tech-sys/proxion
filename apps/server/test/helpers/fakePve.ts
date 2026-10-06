@@ -41,6 +41,9 @@ export interface FakePve {
   ) => void;
   /** Every `PUT .../{type}/{vmid}/config` request PVE has received, in order (path + parsed form body). */
   configCalls: Array<{ path: string; body: Record<string, string> }>;
+  /** Every `GET .../{type}/{vmid}/config` request PVE has received, in order (type + vmid), so a
+   * test can prove a request was refused before the config was ever read. */
+  configGetCalls: Array<{ type: 'qemu' | 'lxc'; vmid: number }>;
   /** Makes the next matching `PUT .../{type}/{vmid}/config` call fail with the given status/message. */
   setConfigError: (
     type: 'qemu' | 'lxc',
@@ -468,6 +471,7 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   // body) so tests can assert exactly what the server sent PVE (e.g. `name=` vs `hostname=`).
   const configCalls: Array<{ path: string; body: Record<string, string> }> = [];
   const configErrors = new Map<string, { status: number; message: string; errors?: Record<string, string> }>();
+  const configGetCalls: Array<{ type: 'qemu' | 'lxc'; vmid: number }> = [];
   const guestConfigs = new Map<string, Record<string, unknown>>();
   const pendingRows = new Map<string, Array<{ key: string; value?: string; pending?: string; delete?: number }>>();
   const pendingErrors = new Map<string, number>();
@@ -495,6 +499,7 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     // Current guest config (`GET .../config`), settable via `setGuestConfig` (T48).
     app.get(`/api2/json/nodes/:node/${type}/:vmid/config`, async (req, reply) => {
       const { vmid } = req.params as { node: string; vmid: string };
+      configGetCalls.push({ type, vmid: Number(vmid) });
       reply.send({ data: guestConfigs.get(configErrorKey(type, Number(vmid))) ?? {} });
     });
     // Pending config changes (`GET .../pending`), settable via `setPending` (T48).
@@ -990,6 +995,9 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     },
     get configCalls() {
       return configCalls;
+    },
+    get configGetCalls() {
+      return configGetCalls;
     },
     setConfigError: (
       type: 'qemu' | 'lxc',
