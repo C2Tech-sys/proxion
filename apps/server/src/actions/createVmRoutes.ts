@@ -26,9 +26,22 @@ const NODE_NAME_RE = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
 const STORAGE_ID_RE = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
 const storageIdSchema = z.string().regex(STORAGE_ID_RE);
 
-/** An ISO file name inside `<storage>:iso/`: no `/`, `,`, `;`, `=` or whitespace, never leading with
- * a dot, so it can only ever be one segment of the `ide2` property string. */
-const ISO_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9._+()@~-]{0,254}$/;
+/**
+ * Whether `name` is an ISO/image file name this route will place in the `ide2` property string.
+ * PVE's own volname rule is "anything but `/`, ending in .iso/.img", so spaces are fine; what is
+ * refused is everything that could break the `<volid>,media=cdrom` string or walk the path: `,`,
+ * `=`, `/`, control characters and `..`, plus leading/trailing whitespace. 1..255 characters.
+ *
+ * KEEP IN STEP WITH `isSafeIsoName` in `apps/web/src/lib/pve-config.ts` (the wizard greys out
+ * entries this would refuse).
+ */
+export function isSafeIsoName(name: string): boolean {
+  if (name.length < 1 || name.length > 255) return false;
+  if (name !== name.trim()) return false;
+  // eslint-disable-next-line no-control-regex
+  if (/[/,=\x00-\x1f\x7f]/.test(name) || name.includes('..')) return false;
+  return /\.(iso|img)$/i.test(name);
+}
 
 const POOL_RE = /^[A-Za-z][A-Za-z0-9_-]{0,62}$/;
 const TAG_RE = /^[a-z0-9_][a-z0-9_\-+.]*$/i;
@@ -159,7 +172,7 @@ function crossFieldError(body: CreateBody): string | undefined {
   if (os.media === 'iso' && !os.volid.startsWith(`${os.storage}:iso/`)) {
     return `volid must start with ${os.storage}:iso/`;
   }
-  if (os.media === 'iso' && !ISO_FILE_RE.test(os.volid.slice(`${os.storage}:iso/`.length))) {
+  if (os.media === 'iso' && !isSafeIsoName(os.volid.slice(`${os.storage}:iso/`.length))) {
     return 'volid is not a valid ISO file name';
   }
   if (system.bios === 'ovmf' && system.efiStorage === undefined) return 'efiStorage is required with OVMF';

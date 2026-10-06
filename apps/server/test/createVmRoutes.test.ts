@@ -402,6 +402,23 @@ describe('create VM route (T61)', () => {
       expect(sent.boot).toBe('order=ide0;ide2;net0');
     });
 
+    it('accepts an ISO name with spaces (PVE allows them) and composes ide2 verbatim', async () => {
+      const cookie = await setupAllowed();
+      const body = minimalBody({ os: { media: 'iso', storage: 'local', volid: 'local:iso/ubuntu 24.04.iso' } });
+      const res = await create(body, { cookie });
+      expect(res.statusCode).toBe(202);
+      expect(fakePve.createCalls[0]!.body.ide2).toBe('local:iso/ubuntu 24.04.iso,media=cdrom');
+      expect(fakePve.createCalls[0]!.body.boot).toBe('order=virtio0;ide2;net0');
+    });
+
+    it('accepts an .IMG image name in any case', async () => {
+      const cookie = await setupAllowed();
+      const body = minimalBody({ os: { media: 'iso', storage: 'local', volid: 'local:iso/Disk Image.IMG' } });
+      const res = await create(body, { cookie });
+      expect(res.statusCode).toBe(202);
+      expect(fakePve.createCalls[0]!.body.ide2).toBe('local:iso/Disk Image.IMG,media=cdrom');
+    });
+
     it('accepts every listed NIC model and vga value', async () => {
       const cookie = await setupAllowed();
       for (const model of ['virtio', 'e1000', 'e1000e', 'vmxnet3', 'rtl8139']) {
@@ -462,6 +479,26 @@ describe('create VM route (T61)', () => {
       await expect400(minimalBody({ os: { media: 'iso', storage: 'local', volid: 'local:iso/a.iso,media=disk' } }));
       await expect400(minimalBody({ os: { media: 'iso', storage: 'local', volid: 'local:iso/../../etc/passwd' } }));
       await expect400(minimalBody({ os: { media: 'iso', storage: 'local', volid: 'local:iso/' } }));
+    });
+
+    it('rejects ISO names that could break the ide2 string or are not .iso/.img files', async () => {
+      for (const volid of [
+        'local:iso/a,b.iso',
+        'local:iso/a=b.iso',
+        'local:iso/../x.iso',
+        'local:iso/ x.iso',
+        'local:iso/x.iso ',
+        'local:iso/a..b.iso',
+        'local:iso/readme.txt',
+        'local:iso/.iso.bak',
+        'local:iso/a	b.iso',
+        `local:iso/${'a'.repeat(252)}.iso`,
+      ]) {
+        const res = await expect400(minimalBody({ os: { media: 'iso', storage: 'local', volid } }));
+        expect(res.json().message).toBe('volid is not a valid ISO file name');
+        await app.close();
+        await fakePve.close();
+      }
     });
 
     it('rejects an invalid name', async () => {

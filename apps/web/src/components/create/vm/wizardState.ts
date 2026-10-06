@@ -10,6 +10,7 @@ import type {
   CreateVmVga,
 } from '@/api/createVm';
 import { isValidDnsName } from '@/lib/guestName';
+import { isSafeIsoName } from '@/lib/pve-config';
 
 /**
  * The Create VM wizard's form state, per-step validation and the request body it builds. Pure (no
@@ -37,6 +38,8 @@ export const MAX_VMID = 999999999;
 export const MAX_DISK_GIB = 65536;
 export const MAX_MEMORY_MIB = 4194304;
 export const DEFAULT_CPU_TYPE = 'x86-64-v2-AES';
+/** Shown on an ISO whose file name the create route would refuse (tooltip and inline error). */
+export const UNSAFE_ISO_NAME_MESSAGE = "This file name contains characters Proxion can't send to Proxmox";
 
 const POOL_RE = /^[A-Za-z][A-Za-z0-9_-]{0,62}$/;
 const TAG_RE = /^[a-z0-9_][a-z0-9_\-+.]*$/i;
@@ -235,6 +238,7 @@ export function stepErrors(step: StepId, form: VmForm): FieldErrors {
       if (form.mediaKind === 'iso') {
         if (form.isoStorage === '') errors.isoStorage = 'Choose a storage that holds ISO images.';
         else if (!form.isoVolid.startsWith(`${form.isoStorage}:iso/`)) errors.isoVolid = 'Choose an ISO image.';
+        else if (!isSafeIsoName(isoFileName(form.isoVolid))) errors.isoVolid = UNSAFE_ISO_NAME_MESSAGE;
       }
       break;
     }

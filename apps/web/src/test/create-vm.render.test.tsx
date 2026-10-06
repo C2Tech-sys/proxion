@@ -10,6 +10,7 @@ import {
   createRouter,
 } from '@tanstack/react-router';
 
+import { routeTree } from '@/routeTree.gen';
 import { CreateVmDialog } from '@/components/create/CreateVmDialog';
 import { createQueryClient } from '@/api/queryClient';
 import { TASKS_QUERY_KEY } from '@/api/liveState';
@@ -60,12 +61,16 @@ vi.mock('@/api/hooks', async () => {
   return { ...actual, useAuthMe: () => mockUseAuthMe() };
 });
 
-vi.mock('sonner', () => ({
-  toast: {
-    success: (...args: unknown[]) => mockToastSuccess(...args),
-    error: (...args: unknown[]) => mockToastError(...args),
-  },
-}));
+vi.mock('sonner', async () => {
+  const actual = await vi.importActual<typeof import('sonner')>('sonner');
+  return {
+    ...actual,
+    toast: {
+      success: (...args: unknown[]) => mockToastSuccess(...args),
+      error: (...args: unknown[]) => mockToastError(...args),
+    },
+  };
+});
 
 vi.mock('@/api/create', async () => {
   const actual = await vi.importActual<typeof import('@/api/create')>('@/api/create');
@@ -116,6 +121,9 @@ const IMAGE_STORAGES = [
 const ISOS = [
   { volid: 'local:iso/debian-12.iso', size: 600 * 1024 ** 2 },
   { volid: 'local:iso/win11.iso', size: 5 * GIB },
+  { volid: 'local:iso/ubuntu 24.04.iso', size: 2 * GIB },
+  // A name the create route would refuse (`,` would break the ide2 property string).
+  { volid: 'local:iso/bad,name.iso', size: 1024 },
 ];
 const BRIDGES = [
   { iface: 'vmbr0', type: 'bridge', active: true },
@@ -165,6 +173,23 @@ async function openWizard(node?: string) {
   });
   const dialog = await screen.findByTestId('create-vm-dialog');
   return { ...app, dialog };
+}
+
+/** Like `openWizard`, but inside the real app shell (inventory tree, Guests page) in fixture mode. */
+async function openWizardInShell(node: string) {
+  const queryClient = createQueryClient();
+  const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ['/guests'] }) });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+  await screen.findByRole('heading', { name: 'Guests' }, { timeout: 10_000 });
+  act(() => {
+    useCreateStore.getState().openCreate('qemu', node);
+  });
+  await screen.findByTestId('create-vm-dialog');
+  return { router };
 }
 
 const nextButton = () => screen.getByRole('button', { name: 'Next' });
@@ -268,6 +293,30 @@ describe('Create VM wizard', () => {
     expect(nextButton()).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText('ISO image'), { target: { value: 'local:iso/debian-12.iso' } });
+    await waitFor(() => expect(nextButton()).toBeEnabled());
+  });
+
+  it('shows an ISO whose name the create route would refuse as disabled, and keeps Next blocked if it is selected anyway', async () => {
+    await openWizard('pve1');
+    await fillGeneral('web-01');
+    await advanceTo('OS');
+    await screen.findByRole('option', { name: /debian-12\.iso/ });
+
+    const bad = screen.getByRole('option', { name: /bad,name\.iso/ });
+    expect(bad).toBeDisabled();
+    expect(bad).toHaveAttribute('title', "This file name contains characters Proxion can't send to Proxmox");
+    for (const good of [/debian-12\.iso/, /win11\.iso/, /ubuntu 24\.04\.iso/]) {
+      const option = screen.getByRole('option', { name: good });
+      expect(option).toBeEnabled();
+      expect(option).not.toHaveAttribute('title');
+    }
+
+    // jsdom lets a script select a disabled option; the step must still refuse it.
+    fireEvent.change(screen.getByLabelText('ISO image'), { target: { value: 'local:iso/bad,name.iso' } });
+    await waitFor(() => expect(nextButton()).toBeDisabled());
+    expect(screen.getByRole('alert')).toHaveTextContent("This file name contains characters Proxion can't send to Proxmox");
+
+    fireEvent.change(screen.getByLabelText('ISO image'), { target: { value: 'local:iso/ubuntu 24.04.iso' } });
     await waitFor(() => expect(nextButton()).toBeEnabled());
   });
 
@@ -661,7 +710,7 @@ describe('Create VM wizard', () => {
 
   it('fixture round trip: the new guest appears in the cluster list, with its composed config, and the app navigates to it', async () => {
     state.fixtures = true;
-    const { router } = await openWizard('pve1');
+    const { router } = await openWizardInShell('pve1');
     await fillGeneral('demo-vm');
     await advanceTo('OS');
     await screen.findByRole('option', { name: /debian-12\.iso/ });
@@ -713,6 +762,15 @@ describe('Create VM wizard', () => {
     });
     expect(config?.net0).toMatch(/^virtio=BC:24:11:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2},bridge=vmbr0,firewall=1$/);
     expect(mockToastSuccess).toHaveBeenCalledWith('VM 150 created');
+
+    // The UI shows it: the inventory rail lists the new VM, and so does the Guests table.
+    expect(await screen.findAllByText('demo-vm', {}, { timeout: 10_000 })).not.toHaveLength(0);
+    await act(async () => {
+      await router.navigate({ to: '/guests' });
+    });
+    const table = await screen.findByRole('table', {}, { timeout: 10_000 });
+    const row = (await within(table).findByText('demo-vm', {}, { timeout: 10_000 })).closest('tr')!;
+    expect(within(row).getByText('150')).toBeInTheDocument();
   });
 
   it('fixture mode rejects a VM id that is already taken', async () => {

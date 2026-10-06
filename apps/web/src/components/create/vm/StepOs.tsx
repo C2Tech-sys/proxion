@@ -3,7 +3,8 @@ import { useId } from 'react';
 import { NativeSelect } from '@/components/hardware/NativeSelect';
 import { OSTYPE_OPTIONS } from '@/components/options/optionFields';
 import { CheckRow, Field, StorageSelect, type StepProps } from '@/components/create/vm/fields';
-import { isoFileName } from '@/components/create/vm/wizardState';
+import { UNSAFE_ISO_NAME_MESSAGE, isoFileName } from '@/components/create/vm/wizardState';
+import { isSafeIsoName } from '@/lib/pve-config';
 import { formatBytes } from '@/lib/format';
 
 const OS_GROUPS: Array<{ label: string; values: readonly string[] }> = [
@@ -13,7 +14,7 @@ const OS_GROUPS: Array<{ label: string; values: readonly string[] }> = [
 ];
 
 /** Step 2: install media (an ISO image or none), OS type, QEMU guest agent. */
-export function StepOs({ form, patch, data, disabled }: StepProps) {
+export function StepOs({ form, patch, errors, data, disabled }: StepProps) {
   const isoName = useId();
   const noneName = useId();
   const iso = form.mediaKind === 'iso';
@@ -74,6 +75,7 @@ export function StepOs({ form, patch, data, disabled }: StepProps) {
                 ? `No ISO images on ${form.isoStorage}. Upload one from the storage page first.`
                 : undefined
             }
+            error={errors.isoVolid === UNSAFE_ISO_NAME_MESSAGE ? errors.isoVolid : undefined}
           >
             {(id) => (
               <NativeSelect
@@ -83,12 +85,20 @@ export function StepOs({ form, patch, data, disabled }: StepProps) {
                 disabled={disabled || form.isoStorage === '' || !data.isos || data.isos.length === 0}
               >
                 <option value="">{data.isos === undefined && form.isoStorage !== '' ? 'Loading…' : 'Select an ISO image'}</option>
-                {(data.isos ?? []).map((m) => (
-                  <option key={m.volid} value={m.volid}>
-                    {isoFileName(m.volid)}
-                    {m.size > 0 ? ` (${formatBytes(m.size)})` : ''}
-                  </option>
-                ))}
+                {(data.isos ?? []).map((m) => {
+                  const safe = isSafeIsoName(isoFileName(m.volid));
+                  return (
+                    <option
+                      key={m.volid}
+                      value={m.volid}
+                      disabled={!safe}
+                      title={safe ? undefined : UNSAFE_ISO_NAME_MESSAGE}
+                    >
+                      {isoFileName(m.volid)}
+                      {m.size > 0 ? ` (${formatBytes(m.size)})` : ''}
+                    </option>
+                  );
+                })}
               </NativeSelect>
             )}
           </Field>
