@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Alert, ResourceLike } from '@proxion/core';
+import { buildDeepLink, enrichEvent } from './format.js';
 import { computeTransitions, type KnownAlert } from './transitions.js';
 import type { NotifyChannel, NotifyEvent, NotifyMessage } from './types.js';
 
@@ -150,13 +151,13 @@ export class Notifier {
         includeResolved: this.options.includeResolved,
         now: this.clock(),
         publicUrl: this.options.publicUrl,
-        resources: this.getResources(),
+        resources: this.safeResources(),
       });
       this.known = nextKnown;
       await this.persistState();
 
       if (events.length === 0) return;
-      this.pendingEvents.push(...events);
+      this.pendingEvents.push(...this.enrich(events));
       this.scheduleFlush();
     } catch (error) {
       this.options.log.error({ err: describeError(error) }, 'Notifier: failed to process alerts snapshot');
@@ -175,26 +176,46 @@ export class Notifier {
       includeResolved: this.options.includeResolved,
       now: this.clock(),
       publicUrl: this.options.publicUrl,
-      resources: this.getResources(),
+      resources: this.safeResources(),
     });
 
-    const summaryEvents: NotifyEvent[] = alerts
-      .filter((alert) => alert.severity !== 'healed')
-      .map((alert) => ({
-        type: 'summary-item',
-        severity: alert.severity,
-        kind: alert.kind,
-        title: alert.title,
-        detail: alert.detail,
-        node: alert.node,
-        vmid: alert.vmid,
-        at: alert.at,
-      }));
+    const resources = this.safeResources();
+    const summaryEvents: NotifyEvent[] = this.enrich(
+      alerts
+        .filter((alert) => alert.severity !== 'healed')
+        .map((alert) => ({
+          type: 'summary-item',
+          severity: alert.severity,
+          kind: alert.kind,
+          title: alert.title,
+          detail: alert.detail,
+          node: alert.node,
+          vmid: alert.vmid,
+          at: alert.at,
+          url: buildDeepLink(alert, this.options.publicUrl, resources),
+        })),
+    );
 
     this.known = nextKnown;
     this.firstRun = false;
     await this.persistState();
     await this.deliver({ kind: 'summary', siteName: this.options.siteName, events: summaryEvents });
+  }
+
+  /** The resources snapshot for presentation lookups -- never throws (a failing provider just
+   *  means no guest names / deep-link types). */
+  private safeResources(): readonly ResourceLike[] {
+    try {
+      return this.getResources();
+    } catch {
+      return [];
+    }
+  }
+
+  /** Adds `guestName`/`guestType` to events about a guest that's still in the resources snapshot. */
+  private enrich(events: NotifyEvent[]): NotifyEvent[] {
+    const resources = this.safeResources();
+    return events.map((event) => enrichEvent(event, resources));
   }
 
   private scheduleFlush(): void {
@@ -247,14 +268,36 @@ export class Notifier {
    *  for `POST /api/notify/test` -- results keyed by channel name, never throwing (a failure is
    *  reported back to the caller as a sanitised string, not surfaced as an exception). */
   async sendTest(): Promise<Record<string, 'ok' | string>> {
-    const testEvent: NotifyEvent = {
-      type: 'test',
-      severity: 'warning',
-      kind: 'task',
-      title: 'This is a test notification from Proxion',
-      at: Math.floor(this.clock() / 1000),
-    };
-    const message: NotifyMessage = { kind: 'test', siteName: this.options.siteName, events: [testEvent] };
+    const at = Math.floor(this.clock() / 1000);
+    // Two realistic-looking sample alerts (a failure and its all-clear) so "Send test" shows the
+    // real design on every channel; the headline ("Test notification - ...") says they're samples.
+    // An empty resources list makes the deep link the site root (undefined without a public URL).
+    const url = buildDeepLink({}, this.options.publicUrl, []);
+    const events: NotifyEvent[] = [
+      {
+        type: 'opened',
+        severity: 'error',
+        kind: 'backup',
+        title: 'Backup of web-prod-01 (VM 100) failed on c2dc2',
+        detail: 'vzdump exited with status 1 — see the task log',
+        node: 'c2dc2',
+        vmid: '100',
+        guestName: 'web-prod-01',
+        guestType: 'qemu',
+        at,
+        url,
+      },
+      {
+        type: 'resolved',
+        severity: 'healed',
+        kind: 'storage',
+        title: 'Storage "local-lvm" on c2dc2 is back under 90%',
+        node: 'c2dc2',
+        at,
+        url,
+      },
+    ];
+    const message: NotifyMessage = { kind: 'test', siteName: this.options.siteName, events };
 
     const results: Record<string, 'ok' | string> = {};
     await Promise.all(

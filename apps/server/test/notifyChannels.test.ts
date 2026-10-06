@@ -81,13 +81,16 @@ describe('webhook channel formats', () => {
         detail: 'pve1',
         node: 'pve1',
         vmid: '101',
+        // T58: every event now also carries its display label and accent colour.
+        label: 'NEW',
+        color: '#DC2626',
         at: 1_700_000_000,
         url: 'https://proxion.example.com/vm/pve1/qemu/101?tab=summary',
       },
     ]);
   });
 
-  it('discord: JSON { content } truncated to 1900 chars', async () => {
+  it('discord: JSON { username, content, embeds } -- long text is truncated to fit Discord limits', async () => {
     let receivedBody = '';
     activeServer = await startFakeWebhook((_req, res, body) => {
       receivedBody = body;
@@ -111,18 +114,24 @@ describe('webhook channel formats', () => {
       ],
     };
     await channel.send(longMessage);
-    const parsed = JSON.parse(receivedBody) as { content: string };
+    // T58: the long text now lives in an embed title (<= 256), not in `content`.
+    const parsed = JSON.parse(receivedBody) as { content: string; embeds: { title: string }[] };
     expect(parsed.content.length).toBeLessThanOrEqual(1900);
-    expect(parsed.content.endsWith('…')).toBe(true);
+    expect(parsed.embeds[0]!.title.length).toBeLessThanOrEqual(256);
+    expect(parsed.embeds[0]!.title.endsWith('…')).toBe(true);
 
-    // A short message round-trips its content untruncated, including the site name.
+    // A short message round-trips its title and site name (username + footer) untruncated.
     await channel.send(TRANSITIONS_MESSAGE);
-    const short = JSON.parse(receivedBody) as { content: string };
-    expect(short.content).toContain('Proxion Test');
-    expect(short.content).toContain('Backup failed for vm 101');
+    const short = JSON.parse(receivedBody) as {
+      username: string;
+      embeds: { title: string; footer: { text: string } }[];
+    };
+    expect(short.username).toBe('Proxion Test');
+    expect(short.embeds[0]!.footer.text).toBe('Proxion Test');
+    expect(short.embeds[0]!.title).toContain('Backup failed for vm 101');
   });
 
-  it('slack: JSON { text }', async () => {
+  it('slack: JSON { text, blocks }', async () => {
     let receivedBody = '';
     activeServer = await startFakeWebhook((_req, res, body) => {
       receivedBody = body;
@@ -131,9 +140,10 @@ describe('webhook channel formats', () => {
     });
     const channel = createWebhookChannel({ url: activeServer.baseUrl, format: 'slack' });
     await channel.send(TRANSITIONS_MESSAGE);
-    const parsed = JSON.parse(receivedBody) as { text: string };
+    // T58: `text` is now only the notification fallback; the event lives in the blocks.
+    const parsed = JSON.parse(receivedBody) as { text: string; blocks: unknown[] };
     expect(parsed.text).toContain('Proxion Test');
-    expect(parsed.text).toContain('Backup failed for vm 101');
+    expect(JSON.stringify(parsed.blocks)).toContain('Backup failed for vm 101');
   });
 
   it('ntfy: plain-text body with Title/Priority/Tags headers', async () => {
@@ -241,7 +251,8 @@ describe('email channel', () => {
     const call = sendMailSpy.mock.calls[0]![0] as { from: string; to: string; subject: string; text: string };
     expect(call.from).toBe('proxion@example.com');
     expect(call.to).toBe('ops@example.com,oncall@example.com');
-    expect(call.subject).toBe('[Proxion Test] 1 alert(s): Backup failed for vm 101');
+    // T58: the subject is now `[site] headline — first title`.
+    expect(call.subject).toBe('[Proxion Test] 1 opened — Backup failed for vm 101');
     expect(call.text).toContain('Backup failed for vm 101');
     expect(call.text).toContain('https://proxion.example.com/vm/pve1/qemu/101?tab=summary');
   });

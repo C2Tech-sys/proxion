@@ -267,7 +267,7 @@ a restart never re-announces something it already told a channel about (state pe
 | `PROXION_NOTIFY_MIN_SEVERITY` | `warning` | `warning` \| `error` -- the lowest severity that opens a notification. |
 | `PROXION_NOTIFY_INCLUDE_RESOLVED` | `true` | Whether a heal/removal also sends a resolved/cleared notice. |
 | `PROXION_NOTIFY_DEBOUNCE_MS` | `10000` | How long transitions are batched before sending. |
-| `PROXION_NOTIFY_SITE_NAME` | `Proxion` | Shown in message titles/subjects, e.g. `[Proxion] 2 alert(s): ...`. |
+| `PROXION_NOTIFY_SITE_NAME` | `Proxion` | Shown in message titles/subjects, e.g. `[Proxion] 2 opened — Backup failed ...`. |
 | `PROXION_PUBLIC_URL` | unset | When set, messages include a deep link back into the app for guest alerts. |
 
 **Discord** (`PROXION_NOTIFY_WEBHOOK_FORMAT=discord`): create a channel webhook (Channel Settings
@@ -279,6 +279,15 @@ auth.
 
 **Email**: `PROXION_NOTIFY_SMTP_URL=smtps://user:pass@smtp.example.com:465`,
 `PROXION_NOTIFY_EMAIL_FROM=proxion@example.com`, `PROXION_NOTIFY_EMAIL_TO=ops@example.com`.
+
+Each channel gets a formatted message rather than a text blob: email is an HTML message (plain-text
+alternative included) with one card per alert -- a severity-coloured edge, the guest, node and
+time, and an "Open in Proxion" button when `PROXION_PUBLIC_URL` is set; Discord gets one embed per
+alert; Slack gets blocks (a header, then a section, meta line and divider per alert); ntfy gets a
+Markdown body with a click action that opens the alert; Gotify gets Markdown too (and a click URL).
+The `generic` webhook stays plain JSON, now with a `headline`, `highestSeverity`, `sentAt` and a
+`label`/`color`/`guestName`/`guestType` on each event. Very large batches are cut off with an
+"...and N more" line.
 
 The webhook token and the SMTP URL's embedded credentials are never written to the server's logs
 -- a channel failure logs only the channel name and host.

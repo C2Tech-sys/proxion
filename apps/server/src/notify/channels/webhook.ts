@@ -1,5 +1,19 @@
-import { eventLine, highestSeverity, plainTextBody, summaryHeadline } from '../format.js';
-import type { NotifyChannel, NotifyMessage } from '../types.js';
+import {
+  escapeSlackMrkdwn,
+  eventGlyph,
+  eventGlyphShortcode,
+  eventMeta,
+  highestSeverity,
+  isoWhen,
+  markdownBody,
+  primaryEvent,
+  safeUrl,
+  severityColorHex,
+  severityColorInt,
+  summaryHeadline,
+  typeLabel,
+} from '../format.js';
+import type { NotifyChannel, NotifyEvent, NotifyMessage } from '../types.js';
 
 export type WebhookFormat = 'generic' | 'discord' | 'slack' | 'ntfy' | 'gotify';
 
@@ -17,9 +31,159 @@ export interface WebhookChannelOptions {
 const DEFAULT_TIMEOUT_MS = 10_000;
 /** Discord hard-caps message content at 2000 chars; the ticket asks for 1900 to leave headroom. */
 const DISCORD_MAX_CONTENT = 1900;
+/** Discord rejects a message with more than 10 embeds, so the "...and N more" overflow embed
+ *  counts towards the cap: 10 events are shown as-is, 11+ become 9 events + the overflow embed. */
+const DISCORD_MAX_EMBEDS = 10;
+const DISCORD_MAX_TITLE = 256;
+const DISCORD_MAX_DESCRIPTION = 4096;
+const DISCORD_MAX_FIELD_VALUE = 1024;
+const DISCORD_MAX_USERNAME = 80;
+/** Discord's cap on the combined text of every embed in one message is 6000; leave headroom. */
+const DISCORD_TOTAL_BUDGET = 5800;
+const DISCORD_OVERFLOW_COLOR = 0x64748b;
+/** Slack allows 50 blocks per message. Header + 3 blocks per event + the overflow context is 50
+ *  at 16 events, so that is the cap (a 20-event cap would be rejected as invalid_blocks). */
+const SLACK_MAX_EVENTS = 16;
+const SLACK_MAX_HEADER = 150;
+const SLACK_MAX_SECTION = 3000;
 
 function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+/** Like `truncate`, but never leaves half of an `&amp;`/`&lt;`/`&gt;` entity at the cut. */
+function truncateEscaped(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).replace(/&[a-z]{0,3}$/, '')}…`;
+}
+
+/** ntfy rejects non-ASCII (and control characters) in header values -- drop them. */
+function asciiHeader(value: string): string {
+  return value.replace(/[^\x20-\x7e]/g, '').trim();
+}
+
+interface DiscordEmbed {
+  title: string;
+  description?: string;
+  url?: string;
+  color: number;
+  timestamp?: string;
+  fields?: { name: string; value: string; inline: boolean }[];
+  footer?: { text: string };
+}
+
+function discordEmbed(event: NotifyEvent, siteName: string): DiscordEmbed {
+  const meta = eventMeta(event, { includeWhen: false });
+  const timestamp = isoWhen(event.at);
+  const url = safeUrl(event.url);
+  return {
+    title: truncate(`${eventGlyph(event)} ${typeLabel(event.type)} · ${event.title}`, DISCORD_MAX_TITLE),
+    ...(event.detail ? { description: truncate(event.detail, DISCORD_MAX_DESCRIPTION) } : {}),
+    ...(url ? { url } : {}),
+    color: severityColorInt(event),
+    ...(timestamp ? { timestamp } : {}),
+    ...(meta
+      ? { fields: [{ name: 'Where', value: truncate(meta, DISCORD_MAX_FIELD_VALUE), inline: true }] }
+      : {}),
+    footer: { text: truncate(siteName, 2048) },
+  };
+}
+
+function discordEmbedSize(embed: DiscordEmbed): number {
+  return (
+    embed.title.length +
+    (embed.description?.length ?? 0) +
+    (embed.footer?.text.length ?? 0) +
+    (embed.fields ?? []).reduce((sum, field) => sum + field.name.length + field.value.length, 0)
+  );
+}
+
+/** Shrinks the embeds until their combined text fits Discord's 6000-character total: descriptions
+ *  are shared out of whatever the fixed parts leave, then (pathological inputs only) fields and
+ *  footers go, then titles are cut hard. */
+function fitDiscordBudget(embeds: DiscordEmbed[]): void {
+  const total = (): number => embeds.reduce((sum, embed) => sum + discordEmbedSize(embed), 0);
+  if (total() <= DISCORD_TOTAL_BUDGET) return;
+
+  const withDescription = embeds.filter((embed) => embed.description);
+  const fixed = total() - withDescription.reduce((sum, embed) => sum + (embed.description?.length ?? 0), 0);
+  if (withDescription.length > 0) {
+    const share = Math.max(0, Math.floor((DISCORD_TOTAL_BUDGET - fixed) / withDescription.length));
+    for (const embed of withDescription) {
+      if (share < 2) delete embed.description;
+      else embed.description = truncate(embed.description ?? '', share);
+    }
+  }
+  if (total() <= DISCORD_TOTAL_BUDGET) return;
+
+  for (const embed of embeds) {
+    delete embed.fields;
+    delete embed.footer;
+  }
+  if (total() <= DISCORD_TOTAL_BUDGET) return;
+  for (const embed of embeds) embed.title = truncate(embed.title, 100);
+}
+
+function discordPayload(message: NotifyMessage, siteName: string): unknown {
+  const events = message.events;
+  const overflow = events.length > DISCORD_MAX_EMBEDS;
+  const shown = overflow ? events.slice(0, DISCORD_MAX_EMBEDS - 1) : events;
+  const embeds = shown.map((event) => discordEmbed(event, siteName));
+  if (overflow) {
+    embeds.push({ title: `…and ${events.length - shown.length} more`, color: DISCORD_OVERFLOW_COLOR });
+  }
+  fitDiscordBudget(embeds);
+  return {
+    username: truncate(siteName, DISCORD_MAX_USERNAME),
+    content: truncate(summaryHeadline(message), DISCORD_MAX_CONTENT),
+    embeds,
+  };
+}
+
+/** `<url|title>` link text for Slack mrkdwn -- the URL may not contain `<`, `>` or `|`. */
+function slackLink(url: string, text: string): string {
+  const safe = url.replace(/</g, '%3C').replace(/>/g, '%3E').replace(/\|/g, '%7C');
+  return `<${safe}|${text}>`;
+}
+
+function slackSection(event: NotifyEvent): unknown {
+  const url = safeUrl(event.url);
+  const title = truncateEscaped(escapeSlackMrkdwn(event.title), 600);
+  const head = `*${typeLabel(event.type)}* ${url ? slackLink(url, title) : title}`;
+  let text = head;
+  if (event.detail) {
+    const room = SLACK_MAX_SECTION - head.length - 1;
+    if (room > 1) text = `${head}\n${truncateEscaped(escapeSlackMrkdwn(event.detail), room)}`;
+  }
+  return { type: 'section', text: { type: 'mrkdwn', text: truncate(text, SLACK_MAX_SECTION) } };
+}
+
+function slackPayload(message: NotifyMessage, siteName: string): unknown {
+  const headline = summaryHeadline(message);
+  const lead = primaryEvent(message);
+  const glyph = lead ? eventGlyph(lead) : 'ℹ️';
+  const events = message.events;
+  const shown = events.slice(0, SLACK_MAX_EVENTS);
+
+  const blocks: unknown[] = [
+    {
+      type: 'header',
+      text: { type: 'plain_text', text: truncate(`${glyph} ${siteName}: ${headline}`, SLACK_MAX_HEADER), emoji: true },
+    },
+  ];
+  for (const event of shown) {
+    blocks.push(slackSection(event));
+    const meta = eventMeta(event);
+    if (meta) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: escapeSlackMrkdwn(meta) }] });
+    blocks.push({ type: 'divider' });
+  }
+  if (events.length > shown.length) {
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `…and ${events.length - shown.length} more` }],
+    });
+  }
+  return { text: escapeSlackMrkdwn(`${siteName} — ${headline}`), blocks };
 }
 
 /** Gotify priority (0-10 scale): `error` alerts page loudly, `warning` is a normal notice,
@@ -39,11 +203,21 @@ function ntfyPriority(message: NotifyMessage): 'urgent' | 'high' | 'default' {
   return 'default';
 }
 
+/** The glyph shortcode of the highest-severity event, plus `computer` when any event is about a
+ *  guest (has a vmid). */
 function ntfyTags(message: NotifyMessage): string {
-  const severity = highestSeverity(message);
-  if (severity === 'error') return 'rotating_light';
-  if (severity === 'warning') return 'warning';
-  return 'information_source';
+  const lead = primaryEvent(message);
+  const tags = [lead ? eventGlyphShortcode(lead) : 'information_source'];
+  if (message.events.some((event) => event.vmid)) tags.push('computer');
+  return tags.join(',');
+}
+
+function firstUrl(message: NotifyMessage): string | undefined {
+  for (const event of message.events) {
+    const url = safeUrl(event.url);
+    if (url) return url;
+  }
+  return undefined;
 }
 
 /** Builds this format's request body + any extra headers beyond `content-type`/`Authorization`
@@ -60,6 +234,9 @@ function buildRequest(
         body: JSON.stringify({
           site: siteName,
           summary: summaryHeadline(message),
+          headline: summaryHeadline(message),
+          highestSeverity: highestSeverity(message),
+          sentAt: new Date().toISOString(),
           events: message.events.map((event) => ({
             type: event.type,
             severity: event.severity,
@@ -68,39 +245,50 @@ function buildRequest(
             detail: event.detail,
             node: event.node,
             vmid: event.vmid,
+            guestName: event.guestName,
+            guestType: event.guestType,
+            label: typeLabel(event.type),
+            color: severityColorHex(event),
             at: event.at,
             url: event.url,
           })),
         }),
       };
-    case 'discord': {
-      const text = `**${siteName}** — ${plainTextBody(message)}`;
-      return { contentType: 'application/json', body: JSON.stringify({ content: truncate(text, DISCORD_MAX_CONTENT) }) };
-    }
+    case 'discord':
+      return { contentType: 'application/json', body: JSON.stringify(discordPayload(message, siteName)) };
     case 'slack':
-      return {
-        contentType: 'application/json',
-        body: JSON.stringify({ text: `*${siteName}* — ${plainTextBody(message)}` }),
-      };
-    case 'ntfy':
+      return { contentType: 'application/json', body: JSON.stringify(slackPayload(message, siteName)) };
+    case 'ntfy': {
+      const click = firstUrl(message);
       return {
         contentType: 'text/plain; charset=utf-8',
-        body: message.events.map(eventLine).join('\n') || summaryHeadline(message),
+        body: markdownBody(message),
         headers: {
-          Title: `${siteName}: ${summaryHeadline(message)}`,
+          Title: asciiHeader(`${siteName}: ${summaryHeadline(message)}`),
           Priority: ntfyPriority(message),
           Tags: ntfyTags(message),
+          Markdown: 'yes',
+          ...(click
+            ? { Click: asciiHeader(click), Actions: asciiHeader(`view, Open in Proxion, ${click}, clear=true`) }
+            : {}),
         },
       };
-    case 'gotify':
+    }
+    case 'gotify': {
+      const click = firstUrl(message);
       return {
         contentType: 'application/json',
         body: JSON.stringify({
           title: `${siteName}: ${summaryHeadline(message)}`,
-          message: plainTextBody(message),
+          message: markdownBody(message),
           priority: gotifyPriority(message),
+          extras: {
+            'client::display': { contentType: 'text/markdown' },
+            ...(click ? { 'client::notification': { click: { url: click } } } : {}),
+          },
         }),
       };
+    }
   }
 }
 
