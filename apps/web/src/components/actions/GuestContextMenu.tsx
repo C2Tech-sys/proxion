@@ -1,6 +1,18 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowRightLeft, Copy, CopyPlus, ExternalLink, Pencil, Power, RotateCw, Square, Trash2, TvMinimal } from 'lucide-react';
+import {
+  ArrowRightLeft,
+  Copy,
+  CopyPlus,
+  ExternalLink,
+  LayoutTemplate,
+  Pencil,
+  Power,
+  RotateCw,
+  Square,
+  Trash2,
+  TvMinimal,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import {
@@ -16,6 +28,7 @@ import { RenameGuestDialog } from '@/components/actions/RenameGuestDialog';
 import { MigrateGuestDialog } from '@/components/actions/MigrateGuestDialog';
 import { CloneGuestDialog } from '@/components/actions/CloneGuestDialog';
 import { DeleteGuestDialog } from '@/components/actions/DeleteGuestDialog';
+import { ConvertToTemplateDialog } from '@/components/actions/ConvertToTemplateDialog';
 import { useAuthMe, useClusterResources } from '@/api/hooks';
 import { usePermissions } from '@/api/actionHooks';
 import { USE_FIXTURES } from '@/api/client';
@@ -114,12 +127,39 @@ function useCanDeleteGuest(vmid: number): { canDelete: boolean; disabledReason: 
   };
 }
 
+/** Same shape as `useCanDeleteGuest` (converting a guest to a template also needs `VM.Allocate` on
+ * `/vms/{vmid}`), plus the two state reasons the item can't run: the guest must be stopped and must
+ * not already be a template. */
+function useCanConvertToTemplate(
+  vmid: number,
+  status: string,
+  template: boolean,
+): { canConvert: boolean; disabledReason: string } {
+  const auth = useAuthMe();
+  const permissions = usePermissions(vmid);
+  const isSessionMode = USE_FIXTURES || auth.data?.mode === 'session';
+  const hasAllocate = permissions.data?.can('VM.Allocate') === true;
+  const running = status === 'running' || status === 'paused';
+  return {
+    canConvert: isSessionMode && hasAllocate && !template && !running,
+    disabledReason: !isSessionMode
+      ? 'Read-only: signed in with a service token'
+      : !hasAllocate
+        ? "You don't have VM.Allocate on this guest"
+        : template
+          ? 'This guest is already a template'
+          : 'Stop the guest first to convert it to a template',
+  };
+}
+
 export interface GuestContextMenuTarget {
   node: string;
   type: GuestType;
   vmid: number;
   name: string;
   status: string;
+  /** Whether the guest is already a template; omitted means "not a template". */
+  template?: boolean | undefined;
 }
 
 export interface GuestContextMenuProps {
@@ -141,11 +181,17 @@ export function GuestContextMenu({ guest, children }: GuestContextMenuProps) {
   const { canMigrate, disabledReason: migrateDisabledReason } = useCanMigrateGuest(guest.vmid, guest.node);
   const { canClone, disabledReason: cloneDisabledReason } = useCanCloneGuest(guest.vmid);
   const { canDelete, disabledReason: deleteDisabledReason } = useCanDeleteGuest(guest.vmid);
+  const { canConvert, disabledReason: convertDisabledReason } = useCanConvertToTemplate(
+    guest.vmid,
+    guest.status,
+    guest.template === true,
+  );
   const flow = useGuestActionFlow({ node: guest.node, type: guest.type, vmid: guest.vmid, name: guest.name });
   const [renameOpen, setRenameOpen] = useState(false);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [convertOpen, setConvertOpen] = useState(false);
   const running = guest.status === 'running';
   const stopped = !running && guest.status !== 'paused';
 
@@ -236,6 +282,13 @@ export function GuestContextMenu({ guest, children }: GuestContextMenuProps) {
         )}
         <ContextMenuSeparator />
         <ContextMenuItem
+          disabled={!canConvert}
+          title={canConvert ? undefined : convertDisabledReason}
+          onSelect={() => setConvertOpen(true)}
+        >
+          <LayoutTemplate /> Convert to template…
+        </ContextMenuItem>
+        <ContextMenuItem
           variant="destructive"
           disabled={!canDelete}
           title={canDelete ? undefined : deleteDisabledReason}
@@ -285,6 +338,16 @@ export function GuestContextMenu({ guest, children }: GuestContextMenuProps) {
         key={deleteOpen ? 'delete-open' : 'delete-closed'}
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
+        node={guest.node}
+        type={guest.type}
+        vmid={guest.vmid}
+        name={guest.name}
+        status={guest.status}
+      />
+      <ConvertToTemplateDialog
+        key={convertOpen ? 'convert-open' : 'convert-closed'}
+        open={convertOpen}
+        onOpenChange={setConvertOpen}
         node={guest.node}
         type={guest.type}
         vmid={guest.vmid}

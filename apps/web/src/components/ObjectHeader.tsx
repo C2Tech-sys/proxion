@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import {
   ArrowRightLeft,
   CopyPlus,
+  LayoutTemplate,
   Loader2,
   MoreHorizontal,
   Pause,
@@ -33,6 +34,7 @@ import { RenameGuestDialog } from '@/components/actions/RenameGuestDialog';
 import { MigrateGuestDialog } from '@/components/actions/MigrateGuestDialog';
 import { CloneGuestDialog } from '@/components/actions/CloneGuestDialog';
 import { DeleteGuestDialog } from '@/components/actions/DeleteGuestDialog';
+import { ConvertToTemplateDialog } from '@/components/actions/ConvertToTemplateDialog';
 import { useAuthMe, useClusterResources } from '@/api/hooks';
 import { usePermissions } from '@/api/actionHooks';
 import { USE_FIXTURES } from '@/api/client';
@@ -101,7 +103,14 @@ export function ObjectHeader({
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {extra}
           {hasGuestTarget && (
-            <GuestQuickActions node={node} type={type} vmid={vmid} name={name} status={status} />
+            <GuestQuickActions
+              node={node}
+              type={type}
+              vmid={vmid}
+              name={name}
+              status={status}
+              template={template === true}
+            />
           )}
         </div>
       </div>
@@ -122,12 +131,14 @@ function GuestQuickActions({
   vmid,
   name,
   status,
+  template,
 }: {
   node: string;
   type: GuestType;
   vmid: number;
   name: string;
   status: string;
+  template: boolean;
 }) {
   const auth = useAuthMe();
   const permissions = usePermissions(vmid);
@@ -137,6 +148,7 @@ function GuestQuickActions({
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [convertOpen, setConvertOpen] = useState(false);
 
   // Fixture/demo mode has no real session concept (and nothing real to protect) -- it always
   // demonstrates the enabled state. A real deployment gates strictly on the caller's own
@@ -186,6 +198,15 @@ function GuestQuickActions({
   const running = status === 'running';
   const paused = status === 'paused';
   const stopped = !running && !paused;
+  // Converting to a template (VM.Allocate, same as delete) also needs a stopped, non-template guest.
+  const canConvert = isSessionMode && hasAllocate && !template && stopped;
+  const convertDisabledReason = !isSessionMode
+    ? 'Read-only: signed in with a service token'
+    : !hasAllocate
+      ? "You don't have VM.Allocate on this guest"
+      : template
+        ? 'This guest is already a template'
+        : 'Stop the guest first to convert it to a template';
   const pendingAction = flow.isPending ? flow.pendingAction : null;
   // Stop/Reset only make sense while the guest is running/paused.
   const showDestructiveActions = running || paused;
@@ -320,6 +341,13 @@ function GuestQuickActions({
             )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
+              disabled={!canConvert}
+              title={canConvert ? undefined : convertDisabledReason}
+              onSelect={() => setConvertOpen(true)}
+            >
+              <LayoutTemplate /> Convert to template…
+            </DropdownMenuItem>
+            <DropdownMenuItem
               variant="destructive"
               disabled={!canDelete}
               title={canDelete ? undefined : deleteDisabledReason}
@@ -362,6 +390,16 @@ function GuestQuickActions({
         key={cloneOpen ? 'clone-open' : 'clone-closed'}
         open={cloneOpen}
         onOpenChange={setCloneOpen}
+        node={node}
+        type={type}
+        vmid={vmid}
+        name={name}
+        status={status}
+      />
+      <ConvertToTemplateDialog
+        key={convertOpen ? 'convert-open' : 'convert-closed'}
+        open={convertOpen}
+        onOpenChange={setConvertOpen}
         node={node}
         type={type}
         vmid={vmid}

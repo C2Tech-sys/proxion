@@ -23,6 +23,7 @@ import {
   cloneGuest,
   getCloneNextId,
   destroyGuest,
+  convertToTemplate,
   GuestActionError,
   type GuestAction,
   type GuestActionBody,
@@ -741,6 +742,57 @@ export function useDestroyGuest() {
     },
     onError: (error: unknown) => {
       toast.error(error instanceof GuestActionError ? error.message : 'The delete could not be started.');
+    },
+  });
+}
+
+export interface ConvertToTemplateVars {
+  node: string;
+  type: GuestType;
+  vmid: number;
+  /** The guest's display name, for the toasts only -- never sent to the server. */
+  name: string;
+}
+
+/**
+ * Requests converting one guest to a template (`src/api/actions.ts`, T63). On success: a
+ * "Converting <name> to a template..." toast right away, then -- once the conversion is actually
+ * done -- invalidates the guest's config/status and the cluster-wide resources query (the tree's
+ * template badge reads the latter) and toasts "<name> is now a template". qemu answers with a task
+ * UPID, so completion is awaited through `watchTaskCompletion` (a no-op in fixture mode, where the
+ * in-memory change already happened); lxc answers with no task and is done as soon as the request
+ * returns. A *failed* qemu task (PVE reports a `status` other than `"OK"`) is its own error toast.
+ * On a request-level error: a toast with the server's message, same convention as
+ * `useDestroyGuest`.
+ */
+export function useConvertToTemplate() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (vars: ConvertToTemplateVars) => convertToTemplate(vars.node, vars.type, vars.vmid),
+    onSuccess: (result, vars) => {
+      toast.success(`Converting ${vars.name} to a template…`);
+
+      const finish = () => {
+        void queryClient.invalidateQueries({ queryKey: ['vm-config', vars.node, vars.type, vars.vmid] });
+        void queryClient.invalidateQueries({ queryKey: ['vm-status', vars.node, vars.type, vars.vmid] });
+        void queryClient.invalidateQueries({ queryKey: CLUSTER_RESOURCES_QUERY_KEY });
+        toast.success(`${vars.name} is now a template`);
+      };
+      const failed = (message: string) => {
+        toast.error(message || 'The convert-to-template task failed.');
+      };
+
+      if (USE_FIXTURES || !result.upid) {
+        finish();
+      } else {
+        watchTaskCompletion(queryClient, result.upid, finish, failed);
+      }
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof GuestActionError ? error.message : 'The convert to template could not be started.',
+      );
     },
   });
 }

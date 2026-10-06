@@ -10,11 +10,13 @@ import {
   addFixtureGuest,
   removeFixtureGuest,
   getFixtureNextId,
+  patchFixtureGuestConfig,
 } from '@/api/fixtures';
 import type { BackupContentItem, ClusterResource, GuestType } from '@/api/types';
 import type {
   BackupGuestBody,
   CloneGuestBody,
+  ConvertToTemplateResult,
   CreateSnapshotBody,
   DownloadUrlToStorageBody,
   GuestAction,
@@ -447,4 +449,26 @@ export async function fixtureDestroyGuest(
   await wait(DESTROY_DELAY_MS);
   removeFixtureGuest(node, type, vmid);
   return { upid: fakeUpidFor(node, vmid, type === 'qemu' ? 'qmdestroy' : 'vzdestroy') };
+}
+
+/** Fixture-mode implementation of `convertToTemplate` (see `src/api/actions.ts`, T63): no real
+ * request -- after a simulated delay, marks the guest as a stopped template in the in-memory fixture
+ * data. The cluster-resources row gets `template: 1` (what the inventory tree's template badge and
+ * the object header read) and the guest's config gets PVE's own `template: 1` key. */
+export async function fixtureConvertToTemplate(
+  node: string,
+  type: GuestType,
+  vmid: number,
+): Promise<ConvertToTemplateResult> {
+  const resource = getFixtureGuestByVmid(vmid);
+  if (resource) {
+    // In place: `fixtures.ts` has no template-specific mutator, and `getClusterResources` hands
+    // out fresh copies of each row, so every later read sees the change.
+    resource.template = 1;
+    resource.status = 'stopped';
+  }
+  patchFixtureGuestConfig(node, type, vmid, { template: 1 });
+  return type === 'qemu'
+    ? delay({ upid: fakeUpidFor(node, vmid, 'qmtemplate') })
+    : delay({ ok: true });
 }
