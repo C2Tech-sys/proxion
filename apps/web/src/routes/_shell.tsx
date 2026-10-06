@@ -7,6 +7,8 @@ import { DemoBanner } from '@/components/DemoBanner';
 import { UpdateAvailableBanner } from '@/components/UpdateAvailableBanner';
 import { InventoryTree } from '@/components/InventoryTree';
 import { TasksDrawer } from '@/components/TasksDrawer';
+import { CreateVmDialog } from '@/components/create/CreateVmDialog';
+import { CreateCtDialog } from '@/components/create/CreateCtDialog';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useUiStore } from '@/store/ui';
 import { useAuthMe } from '@/api/hooks';
@@ -225,6 +227,9 @@ function ShellLayout() {
         </ResizablePanelGroup>
       </div>
       <TasksDrawer />
+      {/* Global create wizards: mounted once, opened via `useCreateStore` (top bar / node menu). */}
+      <CreateVmDialog />
+      <CreateCtDialog />
     </div>
   );
 }

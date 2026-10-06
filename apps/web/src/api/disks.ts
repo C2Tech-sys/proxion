@@ -353,16 +353,19 @@ export interface DiskStorage {
   freeBytes?: number | undefined;
 }
 
+/** A PVE storage content type (the comma-separated `content` list on a storage row). */
+export type StorageContentKind = 'images' | 'rootdir' | 'iso' | 'vztmpl';
+
 /**
- * The storages on `node` that can hold a new disk: `images` content for a qemu guest, `rootdir`
- * for a lxc mount point, from the cluster resources' storage rows.
+ * The storages on `node` that list `content` among their content types, from the cluster
+ * resources' storage rows. `diskCapableStorages` below is this for the disk case; the create
+ * wizards (`api/create.ts`) use it for ISO / template / disk placement.
  */
-export function diskCapableStorages(
+export function storagesWithContent(
   resources: ClusterResource[] | undefined,
   node: string,
-  type: GuestType,
+  content: StorageContentKind,
 ): DiskStorage[] {
-  const content = type === 'qemu' ? 'images' : 'rootdir';
   const out: DiskStorage[] = [];
   for (const r of resources ?? []) {
     if (r.type !== 'storage' || r.node !== node || r.storage === undefined) continue;
@@ -374,4 +377,16 @@ export function diskCapableStorages(
     });
   }
   return out;
+}
+
+/**
+ * The storages on `node` that can hold a new disk: `images` content for a qemu guest, `rootdir`
+ * for a lxc mount point, from the cluster resources' storage rows.
+ */
+export function diskCapableStorages(
+  resources: ClusterResource[] | undefined,
+  node: string,
+  type: GuestType,
+): DiskStorage[] {
+  return storagesWithContent(resources, node, type === 'qemu' ? 'images' : 'rootdir');
 }

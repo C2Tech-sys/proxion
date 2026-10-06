@@ -1,6 +1,7 @@
 import { useMemo, useState, type KeyboardEvent } from 'react';
 import { Link, useLocation, useParams } from '@tanstack/react-router';
 import {
+  Box,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -8,6 +9,7 @@ import {
   ExternalLink,
   Folder,
   LayoutList,
+  Monitor,
   Server,
   Terminal,
 } from 'lucide-react';
@@ -18,6 +20,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { StatusDot } from '@/components/StatusDot';
@@ -25,6 +28,8 @@ import { TagChip } from '@/components/TagChip';
 import { EmptyState } from '@/components/EmptyState';
 import { GuestContextMenu } from '@/components/actions/GuestContextMenu';
 import { GuestThumbnailHover } from '@/components/GuestThumbnailHover';
+import { useCanOpenCreate } from '@/components/create/useCanOpenCreate';
+import { useCreateStore } from '@/store/createStore';
 import { useClusterResources } from '@/api/hooks';
 import { buildInventoryTree, filterTree, type GuestNode, type NodeNode } from '@/lib/tree';
 import { cn } from '@/lib/utils';
@@ -191,6 +196,8 @@ function NodeRow({
 }) {
   const params = useParams({ strict: false });
   const isActive = params.node === node.name && params.vmid === undefined;
+  const canCreate = useCanOpenCreate();
+  const openCreate = useCreateStore((s) => s.openCreate);
 
   // Only ArrowLeft/ArrowRight need a handler here: Space and Enter already toggle a native
   // <button> without one.
@@ -251,6 +258,18 @@ function NodeRow({
         <ContextMenuItem onSelect={() => copyToClipboard(node.name, 'name')}>
           <Copy /> Copy name
         </ContextMenuItem>
+        {/* Same session gating as the top bar's Create button: hidden for the service token. */}
+        {canCreate && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => openCreate('qemu', node.name)}>
+              <Monitor /> Create VM here
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => openCreate('lxc', node.name)}>
+              <Box /> Create container here
+            </ContextMenuItem>
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );

@@ -4,10 +4,13 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Activity,
+  Box,
   Coffee,
   ListChecks,
+  Monitor,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   Search,
   UserRound,
 } from 'lucide-react';
@@ -34,6 +37,8 @@ import { useThemePreferenceSync } from '@/api/prefsHooks';
 import { api } from '@/api/client';
 import { errorMessage } from '@/api/errors';
 import { useUiStore } from '@/store/ui';
+import { useCreateStore } from '@/store/createStore';
+import { useCanOpenCreate } from '@/components/create/useCanOpenCreate';
 import { cn } from '@/lib/utils';
 import { APP_NAME, SUPPORT_URL } from '@/lib/app';
 import { APP_VERSION } from '@/version';
@@ -68,6 +73,8 @@ export function TopBar() {
   const location = useLocation();
   const onTasksRoute = location.pathname === '/tasks';
   const { data: auth } = useAuthMe();
+  const canCreate = useCanOpenCreate();
+  const openCreate = useCreateStore((s) => s.openCreate);
   const { data: serverHealth } = useServerVersion();
   const queryClient = useQueryClient();
   // Only appended once the server has actually answered with a version -- an unknown server
@@ -161,6 +168,28 @@ export function TopBar() {
       </button>
 
       <div className="flex-1" />
+
+      {/* Hidden outright (not disabled) for the shared service token, which can never create
+          guests. Not gated on VM.Allocate: no permission hook takes a cluster-wide path, so the
+          wizard dialog gates on the privilege itself. */}
+      {canCreate && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+              <Plus className="size-3.5" />
+              Create
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => openCreate('qemu')}>
+              <Monitor /> Virtual machine…
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => openCreate('lxc')}>
+              <Box /> Container…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
 
       <div
         className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs"
