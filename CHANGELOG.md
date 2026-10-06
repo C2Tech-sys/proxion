@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Convert to template: a stopped VM or container can be turned into a template from the object
+  header's "More" menu or the inventory tree's context menu, behind a typed-VMID confirmation
+  (the change is permanent). `POST /api/actions/guest/:node/:type/:vmid/template` needs a signed-in
+  session and `VM.Allocate` on the guest, and refuses a running/paused guest (`guest-running`) or one
+  that is already a template (`already-template`).
+
 ### Changed
 
 - An invalid `PROXION_NOTIFY_*` / `PROXION_PUBLIC_URL` value no longer crash-loops the server at

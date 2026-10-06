@@ -17,6 +17,7 @@ import { registerOptionsRoutes } from './optionsRoutes.js';
 import { registerCloudInitRoutes } from './cloudInitRoutes.js';
 import { registerDeviceRoutes } from './deviceRoutes.js';
 import { registerFirewallRoutes } from './firewallRoutes.js';
+import { registerTemplateRoutes } from './templateRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -433,6 +434,9 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // Guest network device add/edit/remove + next free slot (`networkRoutes.ts`) share the same
   // bucket, same rationale.
   registerNetworkRoutes(app, guestActionsRateLimit);
+
+  // Guest convert-to-template (`templateRoutes.ts`) shares the same bucket, same rationale.
+  registerTemplateRoutes(app, guestActionsRateLimit);
   registerOptionsRoutes(app, guestActionsRateLimit);
 
   // Guest cloud-init edit + image regenerate (`cloudInitRoutes.ts`) share the same bucket, same

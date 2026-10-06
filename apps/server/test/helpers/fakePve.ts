@@ -230,6 +230,13 @@ export interface FakePve {
     target: 'rules' | 'options',
     failure: { status: number; message: string; errors?: Record<string, string> } | undefined,
   ) => void;
+  // --- T63 convert to template ---
+  /** Every `POST /nodes/{node}/{type}/{vmid}/template` request PVE has received, in order: type +
+   * vmid + the parsed form body. Used by `templateRoutes.test.ts` (T63). */
+  templateCalls: Array<{ type: 'qemu' | 'lxc'; vmid: number; body: Record<string, string> }>;
+  /** Makes the next `POST .../{type}/{vmid}/template` call for `vmid` fail with the given status/message. */
+  setTemplateError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string) => void;
+  // --- end T63 ---
   close: () => Promise<void>;
 }
 
@@ -948,6 +955,25 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   registerFirewallRoutesForType('lxc');
   // --- end T56 guest firewall ---
 
+  // --- T63 convert to template ---
+  // `POST /nodes/{node}/qemu/{vmid}/template` (returns a UPID) and `POST .../lxc/{vmid}/template`
+  // (returns null), used by `src/actions/templateRoutes.ts`.
+  const templateCalls: Array<{ type: 'qemu' | 'lxc'; vmid: number; body: Record<string, string> }> = [];
+  const templateErrors = new Map<string, { status: number; message: string }>();
+  for (const type of ['qemu', 'lxc'] as const) {
+    app.post(`/api2/json/nodes/:node/${type}/:vmid/template`, async (req, reply) => {
+      const { vmid } = req.params as { node: string; vmid: string };
+      templateCalls.push({ type, vmid: Number(vmid), body: (req.body ?? {}) as Record<string, string> });
+      const failure = templateErrors.get(`${type}:${Number(vmid)}`);
+      if (failure) {
+        reply.code(failure.status).send({ data: null, message: failure.message });
+        return;
+      }
+      reply.send({ data: type === 'qemu' ? `UPID:fakepve:00000001:00000000:00000000:qmtemplate:${vmid}:root@pam:` : null });
+    });
+  }
+  // --- end T63 ---
+
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
   return {
@@ -1183,6 +1209,14 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       else firewallErrors.delete(target);
     },
     // --- end T56 guest firewall ---
+    // --- T63 convert to template ---
+    get templateCalls() {
+      return templateCalls;
+    },
+    setTemplateError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string) => {
+      templateErrors.set(`${type}:${vmid}`, { status, message });
+    },
+    // --- end T63 ---
     close: () => app.close(),
   };
 }

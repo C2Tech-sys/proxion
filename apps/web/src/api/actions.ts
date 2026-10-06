@@ -18,6 +18,7 @@ import {
   fixtureCloneGuest,
   fixtureCloneNextId,
   fixtureDestroyGuest,
+  fixtureConvertToTemplate,
 } from '@/api/actionsFixture';
 import type { GuestType } from '@/api/types';
 
@@ -840,6 +841,36 @@ export async function destroyGuest(
 
   if (res.status === 202) {
     return (await res.json()) as GuestActionResult;
+  }
+  return throwSnapshotError(res);
+}
+
+/** Result of `convertToTemplate`. PVE answers qemu with a task (`upid`, HTTP 202) and lxc with
+ * nothing (`{ ok: true }`, HTTP 200) -- the conversion is already done when that comes back. */
+export interface ConvertToTemplateResult {
+  upid?: string;
+  ok?: boolean;
+}
+
+/**
+ * Requests converting one stopped guest to a template (T63). Irreversible -- the caller confirms
+ * with a typed VMID first. Real mode: `POST /api/actions/guest/:node/:type/:vmid/template` (no
+ * body; `202 { upid }` for qemu, `200 { ok }` for lxc). Fixture mode: simulates the request and
+ * flags the guest as a stopped template in the in-memory fixture data (`actionsFixture.ts`).
+ */
+export async function convertToTemplate(
+  node: string,
+  type: GuestType,
+  vmid: number,
+): Promise<ConvertToTemplateResult> {
+  if (USE_FIXTURES) {
+    return fixtureConvertToTemplate(node, type, vmid);
+  }
+
+  const res = await fetch(`/api/actions/guest/${node}/${type}/${vmid}/template`, { method: 'POST' });
+
+  if (res.status === 202 || res.status === 200) {
+    return (await res.json()) as ConvertToTemplateResult;
   }
   return throwSnapshotError(res);
 }
