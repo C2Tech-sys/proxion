@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Notification emails: the Outlook button label sat below the button edge (Word's engine
+  pushes text down when a line-height is forced inside VML); the label now relies on
+  `v-text-anchor:middle` alone.
+
 ## [0.10.2] - 2026-10-06
 
 ### Fixed

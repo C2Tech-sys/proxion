@@ -325,7 +325,7 @@ function htmlButton(href: string, color: string): string {
   const url = escapeHtml(href);
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:14px;"><tr><td>` +
-    `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${url}" style="height:44px;v-text-anchor:middle;width:220px;" arcsize="14%" stroke="f" fillcolor="${color}"><w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Arial,sans-serif;font-size:14px;font-weight:600;line-height:44px;mso-line-height-rule:exactly;white-space:nowrap;">Open in Proxion</center></v:roundrect><![endif]-->` +
+    `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${url}" style="height:44px;v-text-anchor:middle;width:220px;" arcsize="14%" stroke="f" fillcolor="${color}"><w:anchorlock/><center style="color:#ffffff;font-family:'Segoe UI',Arial,sans-serif;font-size:14px;font-weight:600;white-space:nowrap;">Open in Proxion</center></v:roundrect><![endif]-->` +
     `<!--[if !mso]><!-->` +
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${color}" style="background-color:${color};border-radius:6px;">` +
     `<a href="${url}" style="display:inline-block;padding:12px 24px;font-family:${FONT_STACK};font-size:14px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;white-space:nowrap;mso-padding-alt:0;">Open in Proxion</a>` +
