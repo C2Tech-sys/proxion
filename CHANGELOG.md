@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Create container wizard: General, Template, Disks, CPU, Memory, Network, DNS and Confirm steps
+  (opened from the node context menu or the top bar's Create menu), validated per step, ending in
+  one new allow-listed `POST /api/actions/guest/:node/lxc/create` that follows the task and opens
+  the new container. Needs a signed-in session, `VM.Allocate` on the new CT ID and
+  `Datastore.AllocateSpace` on the root disk's storage (409 `vmid-taken` for an id in use). The root
+  password is never logged, echoed or stored; SSH public keys travel newline-separated, as PVE's
+  `ssh-public-keys` expects.
+
 ### Changed
 
 - An invalid `PROXION_NOTIFY_*` / `PROXION_PUBLIC_URL` value no longer crash-loops the server at

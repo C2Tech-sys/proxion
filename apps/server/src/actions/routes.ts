@@ -13,6 +13,7 @@ import { registerHardwareRoutes } from './hardwareRoutes.js';
 import { registerBootOrderRoutes } from './bootOrderRoutes.js';
 import { registerDiskRoutes } from './diskRoutes.js';
 import { registerNetworkRoutes } from './networkRoutes.js';
+import { registerCreateCtRoutes } from './createCtRoutes.js';
 import { registerOptionsRoutes } from './optionsRoutes.js';
 import { registerCloudInitRoutes } from './cloudInitRoutes.js';
 import { registerDeviceRoutes } from './deviceRoutes.js';
@@ -433,6 +434,9 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // Guest network device add/edit/remove + next free slot (`networkRoutes.ts`) share the same
   // bucket, same rationale.
   registerNetworkRoutes(app, guestActionsRateLimit);
+
+  // Create container wizard (`createCtRoutes.ts`) shares the same bucket, same rationale.
+  registerCreateCtRoutes(app, guestActionsRateLimit);
   registerOptionsRoutes(app, guestActionsRateLimit);
 
   // Guest cloud-init edit + image regenerate (`cloudInitRoutes.ts`) share the same bucket, same

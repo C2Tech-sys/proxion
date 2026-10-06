@@ -865,3 +865,15 @@ export function patchFixtureFirewallOptions(vmid: number, patch: Record<string, 
 export function resetFixtureFirewall(): void {
   fixtureFirewall = initialFixtureFirewall();
 }
+
+// --- T62 create container ---------------------------------------------------------------------
+
+/**
+ * Test/demo-only mutator (T62): sets (or replaces) one guest's whole fixture config. Unlike
+ * `patchFixtureGuestConfig`, which is a no-op for a vmid without a config, this creates the entry --
+ * `createCt` (`src/api/createCt.ts`) needs it for a brand-new container. The caller never puts a
+ * secret in `config` (the root password is never stored).
+ */
+export function setFixtureGuestConfigRecord(vmid: number, config: GuestConfig): void {
+  configs[String(vmid)] = config;
+}
