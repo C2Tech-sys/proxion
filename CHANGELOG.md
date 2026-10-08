@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-10-08
+
 ### Security
 
 - Notification webhooks never follow redirects, and "Send test notification" now reports a failed
@@ -547,7 +549,8 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/C2Tech-sys/proxion/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/C2Tech-sys/proxion/compare/v0.10.3...v0.11.0
 [0.10.3]: https://github.com/C2Tech-sys/proxion/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/C2Tech-sys/proxion/compare/v0.10.1...v0.10.2
