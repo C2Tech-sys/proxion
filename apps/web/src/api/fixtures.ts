@@ -1064,7 +1064,7 @@ export function putFixtureNotifySettings(body: FixtureNotifySettingsPut): Fixtur
     if (typeof body.webhook.token === 'string') {
       token = body.webhook.token;
     } else if (body.webhook.token && current.webhook?.token) {
-      if (new URL(url).host !== new URL(current.webhook.url).host) {
+      if (new URL(url).origin !== new URL(current.webhook.url).origin) {
         throw new Error('webhook.token: enter the token again when you change the webhook address');
       }
       token = current.webhook.token;

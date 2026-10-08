@@ -54,12 +54,16 @@ export const isoDateField = z
     message: 'must be an ISO 8601 date-time',
   });
 
-export const recipientField = z
+/** A bare address: no whitespace (so no CR/LF header injection), no angle brackets, quotes or
+ *  commas (no display names, one address per entry), 3..320 characters. Mirrored in `config.ts`
+ *  for the env path. */
+const BARE_EMAIL_RE = /^[^\s@,<>"]+@[^\s@,<>"]+\.[^\s@,<>"]+$/;
+export const emailAddressField = z
   .string()
-  .trim()
-  .min(1)
+  .min(3)
   .max(320)
-  .refine((value) => !value.includes(','), { message: 'one address per entry (no commas)' });
+  .regex(BARE_EMAIL_RE, { message: 'must be a bare email address such as ops@example.com' });
+export const recipientField = emailAddressField;
 
 const webhookSettingsSchema = z
   .object({
@@ -72,7 +76,7 @@ const webhookSettingsSchema = z
 const emailSettingsSchema = z
   .object({
     smtpUrl: smtpUrlField,
-    from: z.string().trim().min(1).max(320),
+    from: emailAddressField,
     to: z.array(recipientField).min(1).max(50),
   })
   .strict();

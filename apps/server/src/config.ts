@@ -120,6 +120,13 @@ const envSchema = z
     }
   });
 
+/** A bare address: no whitespace (so no CR/LF header injection), no angle brackets or quotes (no
+ *  display names), no comma, 3..320 characters. Same rule as `notify/settingsStore.ts`. */
+const BARE_EMAIL_RE = /^[^\s@,<>"]+@[^\s@,<>"]+\.[^\s@,<>"]+$/;
+function isBareEmailAddress(value: string): boolean {
+  return value.length >= 3 && value.length <= 320 && BARE_EMAIL_RE.test(value);
+}
+
 function httpUrlSchema(message: string) {
   return z.string().refine(
     (value) => {
@@ -166,9 +173,19 @@ const notifySchema = z
         { message: 'PROXION_NOTIFY_SMTP_URL must be an smtp:// or smtps:// URL' },
       )
       .optional(),
-    PROXION_NOTIFY_EMAIL_FROM: z.string().min(1).optional(),
+    PROXION_NOTIFY_EMAIL_FROM: z
+      .string()
+      .refine(isBareEmailAddress, { message: 'must be a bare email address such as ops@example.com' })
+      .optional(),
     // Comma-separated list of recipients.
-    PROXION_NOTIFY_EMAIL_TO: z.string().min(1).optional(),
+    PROXION_NOTIFY_EMAIL_TO: z
+      .string()
+      .min(1)
+      .refine(
+        (value) => value.split(',').map((entry) => entry.trim()).every(isBareEmailAddress),
+        { message: 'must be bare email addresses such as ops@example.com, separated by commas' },
+      )
+      .optional(),
 
     // The lowest severity that opens a notification (an alert below this is tracked but never
     // announced as "opened" -- see notify/notifier.ts). `healed`/resolution notices are governed

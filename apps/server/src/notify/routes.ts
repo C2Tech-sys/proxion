@@ -10,6 +10,7 @@ import {
   NOTIFY_KINDS,
   WEBHOOK_FORMATS,
   buildNotifyChannels,
+  emailAddressField,
   effectiveNotifySettings,
   httpUrlField,
   isMuted,
@@ -70,6 +71,15 @@ export interface NotifySettingsView {
 function hostOf(url: string): string {
   try {
     return new URL(url).host;
+  } catch {
+    return '';
+  }
+}
+
+/** scheme + host + port; `''` for an unparseable URL. */
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
   } catch {
     return '';
   }
@@ -157,7 +167,7 @@ const putBodySchema = z
     email: z
       .object({
         smtpUrl: z.union([smtpUrlField, keepSchema]),
-        from: z.string().trim().min(1).max(320),
+        from: emailAddressField,
         to: z.array(recipientField).min(1).max(50),
       })
       .strict()
@@ -197,7 +207,7 @@ function isKeep(value: unknown): value is Keep {
 type ResolveResult = { ok: true; settings: NotifySettings } | { ok: false; message: string };
 
 /** Turns a validated PUT body into the settings to persist, resolving `{ keep: true }` against
- *  what is in force now. A kept token is only honoured while the webhook host is unchanged --
+ *  what is in force now. A kept token is only honoured while the webhook origin (scheme, host, port) is unchanged --
  *  otherwise a caller with `Sys.Modify` could repoint the webhook at their own server and have
  *  the stored token sent there. */
 function resolvePut(body: PutBody, current: EffectiveNotifySettings): ResolveResult {
@@ -226,7 +236,7 @@ function resolvePut(body: PutBody, current: EffectiveNotifySettings): ResolveRes
     let token: string | undefined;
     if (isKeep(body.webhook.token)) {
       if (storedWebhook?.token) {
-        if (hostOf(url) !== hostOf(storedWebhook.url)) {
+        if (originOf(url) !== originOf(storedWebhook.url)) {
           return { ok: false, message: 'webhook.token: enter the token again when you change the webhook address' };
         }
         token = storedWebhook.token;

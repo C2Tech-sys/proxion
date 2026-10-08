@@ -476,6 +476,21 @@ describe('/api/notify', () => {
           { ...BASE_BODY, email: { smtpUrl: 'smtp://x.example.com', from: 'a@b.c', to: [] } },
           'email.to',
         ],
+        [
+          'a recipient that is not an address',
+          { ...BASE_BODY, email: { smtpUrl: 'smtp://x.example.com', from: 'a@b.co', to: ['not an email'] } },
+          'email.to',
+        ],
+        [
+          'a recipient carrying a CR/LF header injection',
+          { ...BASE_BODY, email: { smtpUrl: 'smtp://x.example.com', from: 'a@b.co', to: ['a@b.c\r\nBcc: x@y.z'] } },
+          'email.to',
+        ],
+        [
+          'a sender with a display name',
+          { ...BASE_BODY, email: { smtpUrl: 'smtp://x.example.com', from: 'Ops <ops@example.com>', to: ['a@b.co'] } },
+          'email.from',
+        ],
         ['a keep sentinel with nothing stored (url)', { ...BASE_BODY, webhook: { url: { keep: true }, format: 'generic' } }, 'no stored webhook URL'],
         [
           'a keep sentinel with nothing stored (smtp)',
@@ -718,6 +733,76 @@ describe('/api/notify', () => {
         expect((res.json() as { message: string }).message).toContain('webhook.token');
         expect(res.body).not.toContain('stored-token');
         expect(savedFile().webhook).toStrictEqual({ url: original.baseUrl, format: 'generic', token: 'stored-token' });
+      });
+
+      it('a kept token is refused when only the scheme or the port changes (the whole origin must match)', async () => {
+        const original = await startRecordingTarget(); // http://127.0.0.1:<port>
+        const cookie = await setupAdmin();
+        await put(cookie, { ...BASE_BODY, webhook: { url: `${original.baseUrl}/hook`, format: 'generic', token: 'stored-token' } });
+        const stored = { url: `${original.baseUrl}/hook`, format: 'generic', token: 'stored-token' };
+
+        const sameHostOtherScheme = original.baseUrl.replace('http://', 'https://');
+        const samePortOtherPath = `${original.baseUrl}/another/path`;
+        const otherPort = original.baseUrl.replace(/:\d+$/, ':1');
+        for (const url of [sameHostOtherScheme, otherPort]) {
+          const res = await put(cookie, { ...BASE_BODY, webhook: { url, format: 'generic', token: { keep: true } } });
+          expect(res.statusCode).toBe(400);
+          expect((res.json() as { message: string }).message).toBe(
+            'webhook.token: enter the token again when you change the webhook address',
+          );
+          expect(savedFile().webhook).toStrictEqual(stored);
+        }
+
+        // Same origin, different path: the token may stay.
+        const ok = await put(cookie, {
+          ...BASE_BODY,
+          webhook: { url: samePortOtherPath, format: 'generic', token: { keep: true } },
+        });
+        expect(ok.statusCode).toBe(200);
+        expect(savedFile().webhook).toStrictEqual({ ...stored, url: samePortOtherPath });
+      });
+
+      it('delivers exactly one request to the new webhook, and none to the old one, after a reload', async () => {
+        const realFetch = globalThis.fetch;
+        const hits: Array<{ host: string; method: string }> = [];
+        const stub = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+          if (url.host === 'a.example.com' || url.host === 'b.example.com') {
+            hits.push({ host: url.host, method: init?.method ?? 'GET' });
+            return new Response(null, { status: 200 });
+          }
+          return realFetch(input, init); // the fake PVE
+        });
+        vi.stubGlobal('fetch', stub);
+        try {
+          const cookie = await setupAdmin({ PROXION_NOTIFY_WEBHOOK_URL: 'https://a.example.com/hook' });
+          const oldNotifier = app.notifier!;
+          oldNotifier.onAlerts([]); // seeds notify-state.json (first-run summary goes to A, before the switch)
+          await oldNotifier.flushForTest();
+          expect(hits.map((h) => h.host)).toStrictEqual(['a.example.com']);
+          hits.length = 0;
+
+          const res = await put(cookie, {
+            ...BASE_BODY,
+            debounceMs: 1000,
+            webhook: { url: 'https://b.example.com/hook', format: 'generic' },
+          });
+          expect(res.statusCode).toBe(200);
+          expect(app.notifier).not.toBe(oldNotifier);
+
+          const notifier = app.notifier!;
+          notifier.onAlerts([
+            { id: 'task:1', kind: 'task', severity: 'error', title: 'ONE-TRANSITION', at: Math.floor(Date.now() / 1000) },
+          ]);
+          await notifier.flushForTest();
+          await vi.waitFor(() => expect(hits.length).toBeGreaterThanOrEqual(1), { timeout: 5000 });
+          await new Promise((resolve) => setTimeout(resolve, 400)); // room for an erroneous second send
+          await notifier.flushForTest();
+
+          expect(hits).toStrictEqual([{ host: 'b.example.com', method: 'POST' }]);
+        } finally {
+          vi.unstubAllGlobals();
+        }
       });
 
       it('keeps work against env-sourced values too (they are copied into the file)', async () => {

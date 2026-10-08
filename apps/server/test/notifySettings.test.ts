@@ -176,6 +176,42 @@ describe('effectiveNotifySettings', () => {
     expect(effective.webhook).toBeUndefined();
   });
 
+  it('env addresses must be bare: a bad EMAIL_TO or EMAIL_FROM names its key in notifyConfigError', () => {
+    const email = {
+      PROXION_NOTIFY_SMTP_URL: 'smtp://u:p@smtp.example.com:587',
+      PROXION_NOTIFY_EMAIL_FROM: 'from@example.com',
+      PROXION_NOTIFY_EMAIL_TO: 'a@example.com',
+    };
+    expect(loadConfig({ ...baseEnv, ...email }).notifyConfigError).toBeUndefined();
+    expect(loadConfig({ ...baseEnv, ...email, PROXION_NOTIFY_EMAIL_TO: 'a@example.com, b@example.com' }).notifyConfigError).toBeUndefined();
+
+    for (const [key, value] of [
+      ['PROXION_NOTIFY_EMAIL_TO', 'garbage'],
+      ['PROXION_NOTIFY_EMAIL_TO', 'a@example.com, not an email'],
+      ['PROXION_NOTIFY_EMAIL_TO', 'Ops <ops@example.com>'],
+      ['PROXION_NOTIFY_EMAIL_FROM', 'Ops <ops@example.com>'],
+      ['PROXION_NOTIFY_EMAIL_FROM', 'nobody'],
+    ] as const) {
+      const config = loadConfig({ ...baseEnv, ...email, [key]: value });
+      expect(config.notifyConfigError).toContain(key);
+      // A bad value drops every channel (T59): nothing is built from it.
+      expect(buildNotifyChannels(effectiveNotifySettings(config, undefined))).toHaveLength(0);
+    }
+  });
+
+  it('the settings schema applies the same address rule', () => {
+    const base = { ...FULL };
+    const withEmail = (from: string, to: string[]) =>
+      notifySettingsSchema.safeParse({ ...base, email: { smtpUrl: 'smtp://x.example.com', from, to } }).success;
+    expect(withEmail('ops@example.com', ['a@example.com'])).toBe(true);
+    expect(withEmail('ops@example.com', ['not an email'])).toBe(false);
+    expect(withEmail('ops@example.com', ['a@b.c\r\nBcc: x@y.z'])).toBe(false);
+    expect(withEmail('ops@example.com', ['a@b.c,d@e.f'])).toBe(false);
+    expect(withEmail('Ops <ops@example.com>', ['a@example.com'])).toBe(false);
+    expect(withEmail('ops@example.com\n', ['a@example.com'])).toBe(false);
+    expect(withEmail('@.', ['a@example.com'])).toBe(false);
+  });
+
   it('isMuted: only a future muteUntil mutes', () => {
     const now = Date.parse('2030-06-01T00:00:00.000Z');
     expect(isMuted({}, now)).toBe(false);
