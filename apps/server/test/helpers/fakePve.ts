@@ -111,6 +111,10 @@ export interface FakePve {
    * additive next to `setVmPermissions`/`setNodePermissions`, same shape/rationale, used by
    * `storageActions.test.ts` (T32). No defaults: absent a call, a storage grants nothing. */
   setStoragePermissions: (storage: string, privs: Record<string, boolean>) => void;
+  // --- T64 ---
+  /** Sets exactly which privileges `/access/permissions?path=/` (the root ACL path) reports.
+   * No defaults: absent a call, `/` grants nothing -- so a test opts in to `Sys.Modify`. */
+  setRootPermissions: (privs: Record<string, boolean>) => void;
   /**
    * Holds back the *next* `GET /access/permissions` response until `release()` is called --
    * used by `storageActions.test.ts` (T37) to reopen the T35 permission-check race: the upload
@@ -372,6 +376,7 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   const extraPermsByVmid = new Map<number, Record<string, boolean>>();
   const extraPermsByNode = new Map<string, Record<string, boolean>>();
   const extraPermsByStorage = new Map<string, Record<string, boolean>>();
+  let rootPerms: Record<string, boolean> = {}; // T64
   const statusByGuest = new Map<string, 'running' | 'stopped'>();
 
   // One-shot hold for the *next* `/access/permissions` request -- see `holdPermissions` above.
@@ -406,6 +411,15 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
         if (grant) base[priv] = 1;
         else delete base[priv];
       }
+    }
+    // Root path (`/`, T64): no defaults at all, like the node/storage paths.
+    if (query.path === '/') {
+      const rootBase: Record<string, number> = {};
+      for (const [priv, grant] of Object.entries(rootPerms)) {
+        if (grant) rootBase[priv] = 1;
+      }
+      reply.send({ data: { '/': rootBase } });
+      return;
     }
     // Storage-scoped path (`/storage/{storage}`): same "no defaults" convention as the node path
     // below -- absent a `setStoragePermissions` call, a storage grants nothing.
@@ -1095,6 +1109,9 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     },
     setStoragePermissions: (storage: string, privs: Record<string, boolean>) => {
       extraPermsByStorage.set(storage, privs);
+    },
+    setRootPermissions: (privs: Record<string, boolean>) => {
+      rootPerms = privs;
     },
     holdPermissions: () => {
       let resolveReached!: () => void;

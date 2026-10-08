@@ -888,3 +888,224 @@ export function setFixtureGuestConfigRecord(vmid: number, config: GuestConfig): 
 export function addFixtureGuestConfig(vmid: number, config: GuestConfig): void {
   configs[String(vmid)] = { ...config };
 }
+
+// --- T64 notification settings --------------------------------------------------------------
+
+export type FixtureMuteSpan = '1h' | '8h' | '24h' | '7d';
+type FixtureNotifyKind = 'backup' | 'task' | 'storage';
+type FixtureKeep = { keep: true };
+
+/** The masked settings view `GET /api/notify/settings` returns (mirrors `NotifySettingsView` in
+ *  `api/notify.ts`; declared here so this append-only block needs no new import). */
+export interface FixtureNotifySettingsView {
+  source: 'file' | 'env';
+  enabled: boolean;
+  muteUntil?: string;
+  mutedKinds: FixtureNotifyKind[];
+  minSeverity: 'warning' | 'error';
+  includeResolved: boolean;
+  debounceMs: number;
+  siteName: string;
+  publicUrl?: string;
+  webhook?: {
+    url: { host: string; masked: true };
+    format: 'generic' | 'discord' | 'slack' | 'ntfy' | 'gotify';
+    token: { set: boolean };
+  };
+  email?: {
+    smtpUrl: { host: string; port: number; secure: boolean; user?: string; set: true };
+    from: string;
+    to: string[];
+  };
+  channels: { webhook: boolean; email: boolean };
+  error?: string;
+}
+
+/** The body `PUT /api/notify/settings` takes (mirrors `NotifySettingsPutBody` in `api/notify.ts`). */
+export interface FixtureNotifySettingsPut {
+  enabled: boolean;
+  muteUntil?: string | null;
+  mutedKinds: FixtureNotifyKind[];
+  minSeverity: 'warning' | 'error';
+  includeResolved: boolean;
+  debounceMs: number;
+  siteName: string;
+  publicUrl?: string | null;
+  webhook?: {
+    url: string | FixtureKeep;
+    format: 'generic' | 'discord' | 'slack' | 'ntfy' | 'gotify';
+    token?: string | FixtureKeep | null;
+  } | null;
+  email?: { smtpUrl: string | FixtureKeep; from: string; to: string[] } | null;
+}
+
+interface FixtureNotifyStored {
+  source: 'file' | 'env';
+  enabled: boolean;
+  muteUntil?: string;
+  mutedKinds: FixtureNotifyKind[];
+  minSeverity: 'warning' | 'error';
+  includeResolved: boolean;
+  debounceMs: number;
+  siteName: string;
+  publicUrl?: string;
+  webhook?: { url: string; format: 'generic' | 'discord' | 'slack' | 'ntfy' | 'gotify'; token?: string };
+  email?: { smtpUrl: string; from: string; to: string[] };
+}
+
+function initialFixtureNotifyStored(): FixtureNotifyStored {
+  return {
+    source: 'env',
+    enabled: true,
+    mutedKinds: [],
+    minSeverity: 'warning',
+    includeResolved: true,
+    debounceMs: 10_000,
+    siteName: 'Proxion',
+    publicUrl: 'https://proxion.example.com',
+    webhook: { url: 'https://ntfy.example.com/proxion-alerts', format: 'ntfy', token: 'fixture-token' },
+  };
+}
+
+let fixtureNotifyStored: FixtureNotifyStored = initialFixtureNotifyStored();
+
+const FIXTURE_NOTIFY_KINDS: readonly FixtureNotifyKind[] = ['backup', 'task', 'storage'];
+
+function maskFixtureNotify(stored: FixtureNotifyStored, nowMs: number): FixtureNotifySettingsView {
+  const view: FixtureNotifySettingsView = {
+    source: stored.source,
+    enabled: stored.enabled,
+    mutedKinds: FIXTURE_NOTIFY_KINDS.filter((kind) => stored.mutedKinds.includes(kind)),
+    minSeverity: stored.minSeverity,
+    includeResolved: stored.includeResolved,
+    debounceMs: stored.debounceMs,
+    siteName: stored.siteName,
+    channels: { webhook: Boolean(stored.webhook), email: Boolean(stored.email) },
+  };
+  if (stored.muteUntil && Date.parse(stored.muteUntil) > nowMs) view.muteUntil = stored.muteUntil;
+  if (stored.publicUrl) view.publicUrl = stored.publicUrl;
+  if (stored.webhook) {
+    view.webhook = {
+      url: { host: new URL(stored.webhook.url).host, masked: true },
+      format: stored.webhook.format,
+      token: { set: Boolean(stored.webhook.token) },
+    };
+  }
+  if (stored.email) {
+    const url = new URL(stored.email.smtpUrl);
+    const secure = url.protocol === 'smtps:';
+    view.email = {
+      smtpUrl: {
+        host: url.hostname,
+        port: url.port ? Number(url.port) : secure ? 465 : 587,
+        secure,
+        ...(url.username ? { user: decodeURIComponent(url.username) } : {}),
+        set: true,
+      },
+      from: stored.email.from,
+      to: stored.email.to,
+    };
+  }
+  return view;
+}
+
+function fixtureUrlHas(value: string, protocols: readonly string[]): boolean {
+  try {
+    return protocols.includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+}
+
+/** Demo/test-only (T64): the masked notification settings. */
+export function getFixtureNotifySettings(): FixtureNotifySettingsView {
+  return maskFixtureNotify(fixtureNotifyStored, Date.now());
+}
+
+/**
+ * Demo/test-only (T64): applies a `PUT /api/notify/settings` body the way the server does -- full
+ * replace, `{ keep: true }` resolves against what is stored, an omitted `muteUntil` keeps the
+ * current snooze. Throws an `Error` carrying the server-style `field: message` text on the
+ * validation failures the form can actually hit.
+ */
+export function putFixtureNotifySettings(body: FixtureNotifySettingsPut): FixtureNotifySettingsView {
+  const current = fixtureNotifyStored;
+  if (!Number.isInteger(body.debounceMs) || body.debounceMs < 1000 || body.debounceMs > 600_000) {
+    throw new Error('debounceMs: Too small: expected number to be >=1000');
+  }
+  if (body.siteName.trim().length < 1 || body.siteName.length > 64) throw new Error('siteName: Invalid length');
+  if (body.publicUrl && !fixtureUrlHas(body.publicUrl, ['http:', 'https:'])) {
+    throw new Error('publicUrl: must be an absolute http(s) URL');
+  }
+
+  const next: FixtureNotifyStored = {
+    source: 'file',
+    enabled: body.enabled,
+    mutedKinds: FIXTURE_NOTIFY_KINDS.filter((kind) => body.mutedKinds.includes(kind)),
+    minSeverity: body.minSeverity,
+    includeResolved: body.includeResolved,
+    debounceMs: body.debounceMs,
+    siteName: body.siteName.trim(),
+  };
+  const muteUntil = body.muteUntil === undefined ? current.muteUntil : (body.muteUntil ?? undefined);
+  if (muteUntil) next.muteUntil = muteUntil;
+  if (body.publicUrl) next.publicUrl = body.publicUrl;
+
+  if (body.webhook) {
+    let url: string;
+    if (typeof body.webhook.url === 'string') {
+      if (!fixtureUrlHas(body.webhook.url, ['http:', 'https:'])) throw new Error('webhook.url: must be an absolute http(s) URL');
+      url = body.webhook.url;
+    } else {
+      if (!current.webhook) throw new Error('webhook.url: there is no stored webhook URL to keep');
+      url = current.webhook.url;
+    }
+    let token: string | undefined;
+    if (typeof body.webhook.token === 'string') {
+      token = body.webhook.token;
+    } else if (body.webhook.token && current.webhook?.token) {
+      if (new URL(url).host !== new URL(current.webhook.url).host) {
+        throw new Error('webhook.token: enter the token again when you change the webhook address');
+      }
+      token = current.webhook.token;
+    }
+    next.webhook = { url, format: body.webhook.format, ...(token !== undefined ? { token } : {}) };
+  }
+
+  if (body.email) {
+    let smtpUrl: string;
+    if (typeof body.email.smtpUrl === 'string') {
+      if (!fixtureUrlHas(body.email.smtpUrl, ['smtp:', 'smtps:'])) throw new Error('email.smtpUrl: must be an smtp:// or smtps:// URL');
+      smtpUrl = body.email.smtpUrl;
+    } else {
+      if (!current.email) throw new Error('email.smtpUrl: there is no stored SMTP URL to keep');
+      smtpUrl = current.email.smtpUrl;
+    }
+    if (body.email.to.length === 0) throw new Error('email.to: Too small: expected array to have >=1 items');
+    next.email = { smtpUrl, from: body.email.from, to: body.email.to };
+  }
+
+  fixtureNotifyStored = next;
+  return maskFixtureNotify(next, Date.now());
+}
+
+const FIXTURE_MUTE_MS: Record<FixtureMuteSpan, number> = {
+  '1h': 3_600_000,
+  '8h': 8 * 3_600_000,
+  '24h': 24 * 3_600_000,
+  '7d': 7 * 24 * 3_600_000,
+};
+
+/** Demo/test-only (T64): the snooze buttons -- `null` clears the mute. */
+export function muteFixtureNotifications(span: FixtureMuteSpan | null): FixtureNotifySettingsView {
+  const next: FixtureNotifyStored = { ...fixtureNotifyStored, source: 'file' };
+  delete next.muteUntil;
+  if (span !== null) next.muteUntil = new Date(Date.now() + FIXTURE_MUTE_MS[span]).toISOString();
+  fixtureNotifyStored = next;
+  return maskFixtureNotify(next, Date.now());
+}
+
+/** Test-only (T64): puts the fixture notification settings back to their initial (env) state. */
+export function resetFixtureNotifySettings(): void {
+  fixtureNotifyStored = initialFixtureNotifyStored();
+}

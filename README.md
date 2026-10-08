@@ -300,6 +300,22 @@ button (a signed-in session only; disabled with a shared service token, same as 
 in token mode) -- `GET /api/notify/status` / `POST /api/notify/test`. A bad notification value
 disables notifications and shows why on the Preferences page; it never stops the server.
 
+**Managing notifications in the app.** A user with `Sys.Modify` on `/` can manage all of this on
+the Preferences page, without editing the env file: a master switch, snooze buttons (1 h, 8 h,
+24 h, 7 days, Unmute), which alert kinds are announced (backups, failed tasks, storage usage),
+the delivery settings above, and the webhook and email details. The environment variables above
+stay the defaults: until someone saves from the page, they are what is in effect; the first save
+(or snooze) writes the whole effective configuration to `<PROXION_DATA_DIR>/notify-settings.json`,
+and from then on that file wins and takes effect at once, without a restart. The file holds the
+webhook token and the SMTP URL (with its password) in plain text, so it is written with mode `0600`
+in the data directory -- keep that directory private and out of backups you do not trust. The API
+never returns a secret: `GET /api/notify/settings` (any signed-in identity) shows the webhook's
+host only, whether a token is set, and the SMTP host/port/user. `PUT /api/notify/settings` and
+`POST /api/notify/mute` need a signed-in session (not the shared service token) and `Sys.Modify`
+on `/`. While notifications are switched off or snoozed nothing is sent, but alert state keeps
+being tracked, so nothing that happened meanwhile is announced when they come back; "Send test
+notification" always sends, even while muted.
+
 ## Security model
 
 - **Pass-through login**: Proxion never asks for or stores your PVE
