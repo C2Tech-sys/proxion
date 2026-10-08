@@ -26,6 +26,7 @@ import { registerBackupJobRoutes } from './backupJobRoutes.js';
 import { registerAccessRoutes } from './accessRoutes.js';
 import { registerStorageConfigRoutes } from './storageConfigRoutes.js';
 import { registerPoolRoutes } from './poolRoutes.js';
+import { registerFirmwareRoutes } from './firmwareRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -478,4 +479,7 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // Node network editor: interface create/edit/delete + apply/revert (`nodeNetworkRoutes.ts`) share the
   // same bucket, same rationale.
   registerNodeNetworkRoutes(app, guestActionsRateLimit);
+  // VM firmware / platform hardware: BIOS, machine, display, SCSI controller, EFI disk, TPM state
+  // (`firmwareRoutes.ts`, T72) shares the same bucket, same rationale.
+  registerFirmwareRoutes(app, guestActionsRateLimit);
 }

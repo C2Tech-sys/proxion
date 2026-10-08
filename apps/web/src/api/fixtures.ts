@@ -2245,3 +2245,59 @@ export function resetFixtureNodeNetwork(): void {
   fixtureNodeNet.clear();
 }
 // --- end T69 ---
+
+// --- T72 vm firmware ---
+/** The machine types the demo node offers (`GET /nodes/{node}/capabilities/qemu/machines`). */
+export const FIXTURE_QEMU_MACHINES: Array<{ id: string; type: 'q35' | 'i440fx'; version: string }> = [
+  { id: 'pc', type: 'i440fx', version: '8.1' },
+  { id: 'pc-i440fx-8.1', type: 'i440fx', version: '8.1' },
+  { id: 'pc-i440fx-8.0', type: 'i440fx', version: '8.0' },
+  { id: 'pc-i440fx-7.2', type: 'i440fx', version: '7.2' },
+  { id: 'q35', type: 'q35', version: '8.1' },
+  { id: 'pc-q35-8.1', type: 'q35', version: '8.1' },
+  { id: 'pc-q35-8.0', type: 'q35', version: '8.0' },
+  { id: 'pc-q35-7.2', type: 'q35', version: '7.2' },
+];
+
+/** Config keys the demo holds back for a running guest after a firmware edit, per vmid. */
+const fixtureFirmwarePending = new Map<number, Set<string>>();
+
+/**
+ * Demo/test-only (T72): applies a firmware edit to one guest's fixture config -- sets `set`'s keys,
+ * deletes `remove`'s -- and, while the guest is running, records every changed key as pending (a
+ * stop/start applies them, like real PVE; `getFixtureFirmwarePending` forgets them once the guest
+ * is seen stopped). Returns the keys changed and the ones held back.
+ */
+export function applyFixtureFirmware(
+  node: string,
+  vmid: number,
+  set: Record<string, string>,
+  remove: string[],
+): { changed: string[]; pending: string[] } {
+  const patch: Record<string, string | number | undefined> = { ...set };
+  for (const key of remove) patch[key] = undefined;
+  patchFixtureGuestConfig(node, 'qemu', vmid, patch);
+  const changed = [...Object.keys(set), ...remove];
+  const running = getFixtureGuestByVmid(vmid)?.status === 'running';
+  if (running) {
+    const held = fixtureFirmwarePending.get(vmid) ?? new Set<string>();
+    for (const key of changed) held.add(key);
+    fixtureFirmwarePending.set(vmid, held);
+  }
+  return { changed, pending: running ? changed : [] };
+}
+
+/** Demo/test-only (T72): the keys a firmware edit is still holding back for `vmid`. */
+export function getFixtureFirmwarePending(vmid: number): string[] {
+  if (getFixtureGuestByVmid(vmid)?.status !== 'running') {
+    fixtureFirmwarePending.delete(vmid);
+    return [];
+  }
+  return [...(fixtureFirmwarePending.get(vmid) ?? [])];
+}
+
+/** Test-only (T72): forgets every held-back firmware change. */
+export function resetFixtureFirmwarePending(): void {
+  fixtureFirmwarePending.clear();
+}
+// --- end T72 ---

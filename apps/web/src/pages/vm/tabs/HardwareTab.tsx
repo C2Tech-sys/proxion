@@ -13,6 +13,12 @@ import { EditMemoryDialog } from '@/components/hardware/EditMemoryDialog';
 import { EditCdromDialog } from '@/components/hardware/EditCdromDialog';
 import { ResizeDiskDialog } from '@/components/hardware/ResizeDiskDialog';
 import { AddDiskDialog } from '@/components/hardware/AddDiskDialog';
+import { EditBiosDialog } from '@/components/hardware/EditBiosDialog';
+import { EditMachineDialog } from '@/components/hardware/EditMachineDialog';
+import { EditDisplayDialog } from '@/components/hardware/EditDisplayDialog';
+import { EditScsiControllerDialog } from '@/components/hardware/EditScsiControllerDialog';
+import { AddEfiDiskDialog } from '@/components/hardware/AddEfiDiskDialog';
+import { AddTpmStateDialog } from '@/components/hardware/AddTpmStateDialog';
 import { DetachDiskDialog } from '@/components/hardware/DetachDiskDialog';
 import { RemoveUnusedDiskDialog } from '@/components/hardware/RemoveUnusedDiskDialog';
 import { PendingBanner } from '@/components/hardware/PendingBanner';
@@ -28,6 +34,7 @@ import { useAuthMe, useClusterResources, useVmConfig } from '@/api/hooks';
 import { diskCapableStorages } from '@/api/disks';
 import { usePermissions } from '@/api/actionHooks';
 import { usePendingConfig, useResizeDisk } from '@/api/hardwareHooks';
+import { useFirmwareFixturePending } from '@/api/firmwareHooks';
 import { isPendingEntry } from '@/api/hardware';
 import { USE_FIXTURES } from '@/api/client';
 import { errorMessage } from '@/api/errors';
@@ -66,6 +73,12 @@ interface Row {
 type EditTarget =
   | { kind: 'cpu' }
   | { kind: 'memory' }
+  | { kind: 'bios' }
+  | { kind: 'machine' }
+  | { kind: 'display' }
+  | { kind: 'scsihw' }
+  | { kind: 'addEfi' }
+  | { kind: 'addTpm' }
   | { kind: 'cdrom'; slot: string; volid: string | undefined }
   | { kind: 'disk'; disk: string; size: string | undefined }
   | { kind: 'addDisk' }
@@ -244,11 +257,12 @@ function DiskActionButton({
 }
 
 /** The disks section's header row: its "Add" button lives in the row's action slot. */
-function disksHeaderRow(actionFor: ActionFor, label: string, hint: string): Row {
+function disksHeaderRow(actionFor: ActionFor, label: string, hint: string, extra?: ReactNode): Row {
+  const add = actionFor(label, 'VM.Config.Disk', { kind: 'addDisk' });
   return {
     label: 'Disks',
     value: <span className="text-xs text-muted-foreground">{hint}</span>,
-    action: actionFor(label, 'VM.Config.Disk', { kind: 'addDisk' }),
+    action: extra ? <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">{add}{extra}</div> : add,
   };
 }
 
@@ -300,16 +314,40 @@ function qemuRows(
       label: 'BIOS',
       value: config.bios === 'ovmf' ? 'OVMF (UEFI)' : (config.bios ?? 'SeaBIOS (default)'),
       keys: ['bios'],
+      action: actionFor('BIOS', 'VM.Config.HWType', { kind: 'bios' }),
     },
-    { label: 'Display', value: config.vga ?? 'default', keys: ['vga'] },
-    { label: 'Machine', value: config.machine ?? 'default (i440fx)', keys: ['machine'] },
-    { label: 'SCSI Controller', value: config.scsihw ?? 'default (LSI 53C895A)', keys: ['scsihw'] },
+    {
+      label: 'Display',
+      value: config.vga ?? 'default',
+      keys: ['vga'],
+      action: actionFor('display', 'VM.Config.HWType', { kind: 'display' }),
+    },
+    {
+      label: 'Machine',
+      value: config.machine ?? 'default (i440fx)',
+      keys: ['machine'],
+      action: actionFor('machine', 'VM.Config.HWType', { kind: 'machine' }),
+    },
+    {
+      label: 'SCSI Controller',
+      value: config.scsihw ?? 'default (LSI 53C895A)',
+      keys: ['scsihw'],
+      action: actionFor('SCSI controller', 'VM.Config.HWType', { kind: 'scsihw' }),
+    },
   ];
 
   if (efidisk) rows.push({ label: 'EFI Disk', value: driveLine(efidisk), keys: [efidisk.key] });
   if (tpm) rows.push({ label: 'TPM State', value: driveLine(tpm), keys: [tpm.key] });
 
-  rows.push(disksHeaderRow(actionFor, 'Add disk', 'Hard disks and unused volumes'));
+  // An EFI disk / TPM state can only be added while the guest has none.
+  const firmwareAdds =
+    efidisk && tpm ? undefined : (
+      <>
+        {!efidisk && actionFor('Add EFI disk', 'VM.Config.Disk', { kind: 'addEfi' })}
+        {!tpm && actionFor('Add TPM state', 'VM.Config.Disk', { kind: 'addTpm' })}
+      </>
+    );
+  rows.push(disksHeaderRow(actionFor, 'Add disk', 'Hard disks and unused volumes', firmwareAdds));
 
   for (const disk of disks) {
     rows.push({
@@ -555,6 +593,7 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
   const auth = useAuthMe();
   const permissions = usePermissions(vmid);
   const pending = usePendingConfig(node, type, vmid);
+  const firmwarePending = useFirmwareFixturePending(vmid);
   const clusterResources = useClusterResources();
   // Owned here, not by the resize dialog: the dialog unmounts as soon as a resize succeeds, and
   // the hook's delayed re-reads of the config must outlive it.
@@ -573,15 +612,21 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
       ? 'Read-only: signed in with a service token'
       : permissions.data?.can(privilege) !== true
         ? `You don't have ${privilege} on this guest`
-        : target.kind === 'addDisk' &&
+        : (target.kind === 'addDisk' || target.kind === 'addEfi' || target.kind === 'addTpm') &&
             clusterResources.data !== undefined &&
             diskCapableStorages(clusterResources.data, node, type).length === 0
           ? `No storage on this node can hold ${type === 'qemu' ? 'disk images' : 'container volumes'}`
           : undefined;
-    if (target.kind === 'addDisk' || target.kind === 'detach' || target.kind === 'removeUnused') {
+    if (
+      target.kind === 'addDisk' ||
+      target.kind === 'addEfi' ||
+      target.kind === 'addTpm' ||
+      target.kind === 'detach' ||
+      target.kind === 'removeUnused'
+    ) {
       return (
         <DiskActionButton
-          kind={target.kind}
+          kind={target.kind === 'detach' || target.kind === 'removeUnused' ? target.kind : 'addDisk'}
           label={label}
           disabledReason={disabledReason}
           onClick={() => setEditing(target)}
@@ -668,7 +713,9 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
     type === 'qemu'
       ? qemuRows(config, actionFor, { node, type, vmid }, nicActions, deviceActions)
       : lxcRows(config, actionFor, nicActions);
-  const pendingKeys = (pending.data ?? []).filter(isPendingEntry).map((entry) => entry.key);
+  const pendingKeys = [
+    ...new Set([...(pending.data ?? []).filter(isPendingEntry).map((entry) => entry.key), ...firmwarePending]),
+  ];
   const closeDialog = (open: boolean) => {
     if (!open) setEditing(null);
   };
@@ -734,6 +781,27 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
           swap={config.swap}
         />
       )}
+      {editing?.kind === 'bios' && (
+        <EditBiosDialog
+          open
+          onOpenChange={closeDialog}
+          node={node}
+          vmid={vmid}
+          bios={config.bios}
+          hasEfidisk={'efidisk0' in config}
+        />
+      )}
+      {editing?.kind === 'machine' && (
+        <EditMachineDialog open onOpenChange={closeDialog} node={node} vmid={vmid} machine={config.machine} />
+      )}
+      {editing?.kind === 'display' && (
+        <EditDisplayDialog open onOpenChange={closeDialog} node={node} vmid={vmid} vga={config.vga} />
+      )}
+      {editing?.kind === 'scsihw' && (
+        <EditScsiControllerDialog open onOpenChange={closeDialog} node={node} vmid={vmid} scsihw={config.scsihw} />
+      )}
+      {editing?.kind === 'addEfi' && <AddEfiDiskDialog open onOpenChange={closeDialog} node={node} vmid={vmid} />}
+      {editing?.kind === 'addTpm' && <AddTpmStateDialog open onOpenChange={closeDialog} node={node} vmid={vmid} />}
       {editing?.kind === 'cdrom' && (
         <EditCdromDialog
           open
