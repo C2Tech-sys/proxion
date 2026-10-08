@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Datacenter -> Storage and Datacenter -> Pools. The Storage tab lists every storage definition with
+  its usage and adds, edits and removes them (Directory, NFS, SMB/CIFS, LVM, LVM-Thin, ZFS and
+  Proxmox Backup Server, with scan helpers, node selection and keep-* retention); removing one drops
+  the definition only, never the data, and `local` cannot be removed. The Pools tab creates, comments
+  and deletes pools and adds or removes guests and storages. New routes under
+  `/api/actions/datacenter/storage` and `/api/actions/datacenter/pools` need a session sign-in and
+  `Datastore.Allocate` / `Pool.Allocate`; CIFS and PBS passwords are sent to PVE once and are never
+  logged, echoed or stored.
+
 ## [0.11.1] - 2026-10-08
 
 ### Security

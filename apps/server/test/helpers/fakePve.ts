@@ -241,6 +241,29 @@ export interface FakePve {
   /** Makes the next `POST .../{type}/{vmid}/template` call for `vmid` fail with the given status/message. */
   setTemplateError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string) => void;
   // --- end T63 ---
+  // --- T70 storage config + pools ---
+  /** Sets exactly which privileges `/access/permissions?path=<path>` reports for an ACL path the
+   * handlers above have no setter for (`/storage`, `/pool`, `/pool/<id>`). No defaults: an
+   * unconfigured path falls through to the existing handler, which grants none of those. */
+  setPathPermissions: (path: string, privs: Record<string, boolean>) => void;
+  /** Every `POST /storage`, `PUT /storage/{id}` and `DELETE /storage/{id}` PVE has received, in
+   * order: method + path + the parsed form body. Used by `storageConfigRoutes.test.ts` (T70). */
+  storageConfigCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }>;
+  /** Sets the config `GET /storage/{id}` returns (it also feeds `GET /storage`); an unknown id is a 404. */
+  setStorageConfig: (storage: string, config: Record<string, unknown>) => void;
+  /** Makes every storage write fail with the given status/message/errors until called with `undefined`. */
+  setStorageConfigError: (failure: { status: number; message: string; errors?: Record<string, string> } | undefined) => void;
+  /** Every `POST /pools`, `PUT /pools/{id}` and `DELETE /pools/{id}` PVE has received, in order. */
+  poolCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }>;
+  /** Makes every pool write fail with the given status/message/errors until called with `undefined`. */
+  setPoolError: (failure: { status: number; message: string; errors?: Record<string, string> } | undefined) => void;
+  /** Sets the rows `GET /pools` returns. */
+  setPools: (pools: unknown[]) => void;
+  /** Sets the rows `GET /nodes/{node}/scan/<kind>` returns. */
+  setScanResult: (kind: 'nfs' | 'cifs' | 'zfs' | 'lvm' | 'lvmthin', rows: unknown[]) => void;
+  /** Every `GET /nodes/{node}/scan/<kind>` PVE has received (kind + the query string it saw). */
+  scanCalls: Array<{ kind: string; query: Record<string, string> }>;
+  // --- end T70 ---
   close: () => Promise<void>;
 }
 
@@ -988,6 +1011,94 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   }
   // --- end T63 ---
 
+  // --- T70 storage config + pools ---
+  // `POST /storage`, `GET|PUT|DELETE /storage/{id}`, `POST /pools`, `GET /pools`,
+  // `PUT|DELETE /pools/{id}` and `GET /nodes/{node}/scan/<kind>`, used by
+  // `src/actions/storageConfigRoutes.ts` / `poolRoutes.ts`.
+  type T70Failure = { status: number; message: string; errors?: Record<string, string> };
+  const pathPerms = new Map<string, Record<string, boolean>>();
+  // An `onRequest` hook (not a second route: the permissions route above already owns that URL), so
+  // only the ACL paths a test configured are answered here and every other path is left to it.
+  app.addHook('onRequest', async (req, reply) => {
+    if (!req.url.startsWith('/api2/json/access/permissions')) return;
+    const path = new URL(req.url, 'http://fake.invalid').searchParams.get('path') ?? '';
+    const privs = pathPerms.get(path);
+    if (privs === undefined) return;
+    const granted: Record<string, number> = {};
+    for (const [priv, grant] of Object.entries(privs)) {
+      if (grant) granted[priv] = 1;
+    }
+    await reply.send({ data: { [path]: granted } });
+    return reply;
+  });
+  const storageConfigCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }> = [];
+  const storageConfigs = new Map<string, Record<string, unknown>>();
+  let storageConfigError: T70Failure | undefined;
+  const poolCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }> = [];
+  let poolError: T70Failure | undefined;
+  let poolRows: unknown[] = [];
+  const scanResults = new Map<string, unknown[]>();
+  const scanCalls: Array<{ kind: string; query: Record<string, string> }> = [];
+  const sendT70 = (reply: import('fastify').FastifyReply, failure: T70Failure | undefined): boolean => {
+    if (!failure) return false;
+    reply
+      .code(failure.status)
+      .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
+    return true;
+  };
+  app.get('/api2/json/storage', async () => ({ data: Array.from(storageConfigs.values()) }));
+  app.get('/api2/json/storage/:storage', async (req, reply) => {
+    const { storage } = req.params as { storage: string };
+    const config = storageConfigs.get(storage);
+    if (!config) {
+      reply.code(404).send({ data: null, message: `storage '${storage}' does not exist` });
+      return;
+    }
+    reply.send({ data: config });
+  });
+  app.post('/api2/json/storage', async (req, reply) => {
+    storageConfigCalls.push({ method: 'POST', path: '/storage', body: { ...((req.body ?? {}) as Record<string, string>) } });
+    if (sendT70(reply, storageConfigError)) return;
+    reply.send({ data: { storage: (req.body as Record<string, string> | undefined)?.storage, type: (req.body as Record<string, string> | undefined)?.type } });
+  });
+  app.put('/api2/json/storage/:storage', async (req, reply) => {
+    const { storage } = req.params as { storage: string };
+    storageConfigCalls.push({ method: 'PUT', path: `/storage/${storage}`, body: { ...((req.body ?? {}) as Record<string, string>) } });
+    if (sendT70(reply, storageConfigError)) return;
+    reply.send({ data: { storage } });
+  });
+  app.delete('/api2/json/storage/:storage', async (req, reply) => {
+    const { storage } = req.params as { storage: string };
+    storageConfigCalls.push({ method: 'DELETE', path: `/storage/${storage}`, body: { ...((req.query ?? {}) as Record<string, string>) } });
+    if (sendT70(reply, storageConfigError)) return;
+    reply.send({ data: null });
+  });
+  app.get('/api2/json/pools', async () => ({ data: poolRows }));
+  app.post('/api2/json/pools', async (req, reply) => {
+    poolCalls.push({ method: 'POST', path: '/pools', body: { ...((req.body ?? {}) as Record<string, string>) } });
+    if (sendT70(reply, poolError)) return;
+    reply.send({ data: null });
+  });
+  app.put('/api2/json/pools/:poolid', async (req, reply) => {
+    const { poolid } = req.params as { poolid: string };
+    poolCalls.push({ method: 'PUT', path: `/pools/${poolid}`, body: { ...((req.body ?? {}) as Record<string, string>) } });
+    if (sendT70(reply, poolError)) return;
+    reply.send({ data: null });
+  });
+  app.delete('/api2/json/pools/:poolid', async (req, reply) => {
+    const { poolid } = req.params as { poolid: string };
+    poolCalls.push({ method: 'DELETE', path: `/pools/${poolid}`, body: { ...((req.query ?? {}) as Record<string, string>) } });
+    if (sendT70(reply, poolError)) return;
+    reply.send({ data: null });
+  });
+  for (const kind of ['nfs', 'cifs', 'zfs', 'lvm', 'lvmthin'] as const) {
+    app.get(`/api2/json/nodes/:node/scan/${kind}`, async (req) => {
+      scanCalls.push({ kind, query: { ...((req.query ?? {}) as Record<string, string>) } });
+      return { data: scanResults.get(kind) ?? [] };
+    });
+  }
+  // --- end T70 ---
+
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
   return {
@@ -1234,6 +1345,35 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       templateErrors.set(`${type}:${vmid}`, { status, message });
     },
     // --- end T63 ---
+    // --- T70 storage config + pools ---
+    setPathPermissions: (path: string, privs: Record<string, boolean>) => {
+      pathPerms.set(path, privs);
+    },
+    get storageConfigCalls() {
+      return storageConfigCalls;
+    },
+    setStorageConfig: (storage: string, config: Record<string, unknown>) => {
+      storageConfigs.set(storage, config);
+    },
+    setStorageConfigError: (failure: T70Failure | undefined) => {
+      storageConfigError = failure;
+    },
+    get poolCalls() {
+      return poolCalls;
+    },
+    setPoolError: (failure: T70Failure | undefined) => {
+      poolError = failure;
+    },
+    setPools: (pools: unknown[]) => {
+      poolRows = pools;
+    },
+    setScanResult: (kind: 'nfs' | 'cifs' | 'zfs' | 'lvm' | 'lvmthin', rows: unknown[]) => {
+      scanResults.set(kind, rows);
+    },
+    get scanCalls() {
+      return scanCalls;
+    },
+    // --- end T70 ---
     close: () => app.close(),
   };
 }
