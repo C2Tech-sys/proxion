@@ -144,7 +144,7 @@ describe('Node row name vs. chevron (T7)', () => {
 });
 
 describe('Datacenter header row (T7)', () => {
-  it('navigates to / when clicked, from another route', async () => {
+  it('navigates to /datacenter when clicked, from another route', async () => {
     // The tree lives in the persistent shell alongside the routed page in the real app (see
     // _shell.tsx) -- mirror that here (rather than reusing `buildTestRouter`, where the tree is
     // itself the index route's component) so we can click it while sitting on a different page.
@@ -159,7 +159,13 @@ describe('Datacenter header row (T7)', () => {
     const indexRoute = createRoute({
       getParentRoute: () => rootRoute,
       path: '/',
-      component: () => <div>DASHBOARD MARKER</div>,
+      component: () => <div>HOME MARKER</div>,
+    });
+    const datacenterRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: '/datacenter',
+      validateSearch: (): { tab: string } => ({ tab: 'overview' }),
+      component: () => <div>DATACENTER MARKER</div>,
     });
     const nodeRoute = createRoute({
       getParentRoute: () => rootRoute,
@@ -167,7 +173,7 @@ describe('Datacenter header row (T7)', () => {
       validateSearch: (): { tab: string } => ({ tab: 'summary' }),
       component: () => <div>NODE PAGE MARKER</div>,
     });
-    const routeTree = rootRoute.addChildren([indexRoute, nodeRoute]);
+    const routeTree = rootRoute.addChildren([indexRoute, datacenterRoute, nodeRoute]);
     const router = createRouter({
       routeTree,
       history: createMemoryHistory({ initialEntries: ['/node/pve1?tab=summary'] }),
@@ -185,7 +191,7 @@ describe('Datacenter header row (T7)', () => {
 
     fireEvent.click(screen.getByRole('link', { name: /Datacenter/i }));
 
-    expect(await screen.findByText('DASHBOARD MARKER')).toBeInTheDocument();
+    expect(await screen.findByText('DATACENTER MARKER')).toBeInTheDocument();
   });
 });
 

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as ShellRouteImport } from './routes/_shell'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ShellIndexRouteImport } from './routes/_shell/index'
+import { Route as ShellDatacenterRouteImport } from './routes/_shell/datacenter'
 import { Route as ShellGuestsRouteImport } from './routes/_shell/guests'
 import { Route as ShellPreferencesRouteImport } from './routes/_shell/preferences'
 import { Route as ShellTasksRouteImport } from './routes/_shell/tasks'
@@ -33,6 +34,11 @@ const LoginRoute = LoginRouteImport.update({
 const ShellIndexRoute = ShellIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellDatacenterRoute = ShellDatacenterRouteImport.update({
+  id: '/datacenter',
+  path: '/datacenter',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellGuestsRoute = ShellGuestsRouteImport.update({
@@ -79,6 +85,7 @@ const ShellVmNodeTypeVmidRoute = ShellVmNodeTypeVmidRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
   '/login': typeof LoginRoute
+  '/datacenter': typeof ShellDatacenterRoute
   '/guests': typeof ShellGuestsRoute
   '/preferences': typeof ShellPreferencesRoute
   '/tasks': typeof ShellTasksRoute
@@ -90,6 +97,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/datacenter': typeof ShellDatacenterRoute
   '/guests': typeof ShellGuestsRoute
   '/preferences': typeof ShellPreferencesRoute
   '/tasks': typeof ShellTasksRoute
@@ -104,6 +112,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_shell': typeof ShellRouteWithChildren
   '/login': typeof LoginRoute
+  '/_shell/datacenter': typeof ShellDatacenterRoute
   '/_shell/guests': typeof ShellGuestsRoute
   '/_shell/preferences': typeof ShellPreferencesRoute
   '/_shell/tasks': typeof ShellTasksRoute
@@ -119,6 +128,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/datacenter'
     | '/guests'
     | '/preferences'
     | '/tasks'
@@ -130,6 +140,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
+    | '/datacenter'
     | '/guests'
     | '/preferences'
     | '/tasks'
@@ -143,6 +154,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_shell'
     | '/login'
+    | '/_shell/datacenter'
     | '/_shell/guests'
     | '/_shell/preferences'
     | '/_shell/tasks'
@@ -182,6 +194,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof ShellIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/datacenter': {
+      id: '/_shell/datacenter'
+      path: '/datacenter'
+      fullPath: '/datacenter'
+      preLoaderRoute: typeof ShellDatacenterRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/guests': {
@@ -244,6 +263,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface ShellRouteChildren {
+  ShellDatacenterRoute: typeof ShellDatacenterRoute
   ShellGuestsRoute: typeof ShellGuestsRoute
   ShellPreferencesRoute: typeof ShellPreferencesRoute
   ShellTasksRoute: typeof ShellTasksRoute
@@ -254,6 +274,7 @@ interface ShellRouteChildren {
 }
 
 const ShellRouteChildren: ShellRouteChildren = {
+  ShellDatacenterRoute: ShellDatacenterRoute,
   ShellGuestsRoute: ShellGuestsRoute,
   ShellPreferencesRoute: ShellPreferencesRoute,
   ShellTasksRoute: ShellTasksRoute,
