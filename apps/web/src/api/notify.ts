@@ -180,4 +180,3 @@ export function muteNotifications(span: MuteSpan | null): Promise<NotifySettings
   }
   return settingsRequest<NotifySettingsView>(MUTE_PATH, { method: 'POST', body: JSON.stringify({ for: span }) });
 }
-
