@@ -15,6 +15,7 @@ import { registerDiskRoutes } from './diskRoutes.js';
 import { registerNetworkRoutes } from './networkRoutes.js';
 import { registerNodeNetworkRoutes } from './nodeNetworkRoutes.js';
 import { registerGuestFirewallRefsRoutes } from './guestFirewallRefsRoutes.js';
+import { registerNodeSystemRoutes } from './nodeSystemRoutes.js';
 import { registerCreateCtRoutes } from './createCtRoutes.js';
 import { registerCreateVmRoutes } from './createVmRoutes.js';
 import { registerOptionsRoutes } from './optionsRoutes.js';
@@ -485,4 +486,7 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // VM firmware / platform hardware: BIOS, machine, display, SCSI controller, EFI disk, TPM state
   // (`firmwareRoutes.ts`, T72) shares the same bucket, same rationale.
   registerFirmwareRoutes(app, guestActionsRateLimit);
+  // Node System tab: DNS / time zone / options / hosts / custom certificate (`nodeSystemRoutes.ts`) share
+  // the same bucket, same rationale.
+  registerNodeSystemRoutes(app, guestActionsRateLimit);
 }

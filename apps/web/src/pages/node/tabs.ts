@@ -5,6 +5,7 @@ import { MonitorTab } from '@/pages/node/tabs/MonitorTab';
 import { ShellTab } from '@/pages/node/tabs/ShellTab';
 import { StorageTab } from '@/pages/node/tabs/StorageTab';
 import { NetworkTab } from '@/pages/node/tabs/NetworkTab';
+import { SystemTab } from '@/pages/node/tabs/SystemTab';
 import { TasksTab } from '@/pages/node/tabs/TasksTab';
 
 /** Props every node object-page tab receives. Tabs fetch their own data from this ID. */
@@ -12,7 +13,7 @@ export interface NodeTabProps {
   node: string;
 }
 
-export const NODE_TAB_ORDER = ['summary', 'monitor', 'shell', 'storage', 'network', 'tasks'] as const;
+export const NODE_TAB_ORDER = ['summary', 'monitor', 'shell', 'storage', 'network', 'system', 'tasks'] as const;
 export type NodeTab = (typeof NODE_TAB_ORDER)[number];
 
 export function isNodeTab(value: unknown): value is NodeTab {
@@ -26,5 +27,6 @@ export const NODE_TAB_REGISTRY: Record<NodeTab, { label: string; component: Comp
   shell: { label: 'Shell', component: ShellTab },
   storage: { label: 'Storage', component: StorageTab },
   network: { label: 'Network', component: NetworkTab },
+  system: { label: 'System', component: SystemTab },
   tasks: { label: 'Tasks', component: TasksTab },
 };
