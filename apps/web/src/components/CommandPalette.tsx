@@ -14,6 +14,7 @@ import { useClusterResources } from '@/api/hooks';
 import { useUiStore } from '@/store/ui';
 import { toSearchItems, type FlatSearchItem } from '@/lib/tree';
 import { isHotkeyScopeSuppressed } from '@/lib/hotkeys';
+import { DATACENTER_TAB_ORDER, DATACENTER_TAB_REGISTRY, type DatacenterTab } from '@/pages/datacenter/tabs';
 
 function iconFor(item: FlatSearchItem) {
   if (item.kind === 'node') return Server;
@@ -74,12 +75,30 @@ export function CommandPalette() {
     void navigate({ to: '/guests' });
   }
 
+  function selectDatacenterTab(tab: DatacenterTab) {
+    setOpen(false);
+    void navigate({ to: '/datacenter', search: { tab } });
+  }
+
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
       <CommandInput placeholder="Search nodes, VMs, containers, storage&hellip;" />
       <CommandList>
         <CommandEmpty>No results.</CommandEmpty>
         <CommandGroup heading="Pages">
+          {DATACENTER_TAB_ORDER.map((tab) => {
+            const { label } = DATACENTER_TAB_REGISTRY[tab];
+            return (
+              <CommandItem
+                key={tab}
+                value={`Datacenter ${label}`}
+                onSelect={() => selectDatacenterTab(tab)}
+              >
+                <Server /> Datacenter
+                <span className="ml-auto text-xs text-muted-foreground">{label}</span>
+              </CommandItem>
+            );
+          })}
           <CommandItem value="Guests" onSelect={selectGuestsPage}>
             <LayoutList /> Guests
             <span className="ml-auto text-xs text-muted-foreground">Every VM &amp; CT</span>

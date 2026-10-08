@@ -414,7 +414,8 @@ export function InventoryTree() {
         ) : (
           <div>
             <Link
-              to="/"
+              to="/datacenter"
+              search={{ tab: 'overview' }}
               className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium tracking-[0.08em] text-muted-foreground uppercase outline-none hover:bg-accent/10 hover:text-foreground focus-visible:bg-accent/10"
             >
               <Server className="size-3.5" /> {tree.name}
