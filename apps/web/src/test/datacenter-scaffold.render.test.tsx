@@ -53,7 +53,7 @@ describe('Datacenter page scaffold (fixture mode)', () => {
     expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('shows the six tabs in order and each non-Overview tab renders its stub', async () => {
+  it('shows the six tabs in order and each non-Overview tab renders its panel', async () => {
     renderAt('/datacenter');
 
     expect(await tabNames()).toEqual([
@@ -75,7 +75,7 @@ describe('Datacenter page scaffold (fixture mode)', () => {
       // Radix's TabsTrigger switches tabs on `mousedown`, not `click`.
       fireEvent.mouseDown(screen.getByRole('tab', { name: label }), { button: 0 });
       const panel = await screen.findByTestId(testId, undefined, { timeout: FIND_TIMEOUT_MS });
-      expect(panel).toHaveTextContent('Coming soon.');
+      expect(panel).toBeInTheDocument();
     }
   });
 
@@ -108,6 +108,6 @@ describe('Node page Network tab scaffold (fixture mode)', () => {
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Network' }), { button: 0 });
     const panel = await screen.findByTestId('node-network-tab', undefined, { timeout: FIND_TIMEOUT_MS });
-    expect(panel).toHaveTextContent('Coming soon.');
+    expect(panel).toBeInTheDocument();
   });
 });
