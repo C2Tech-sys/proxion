@@ -100,7 +100,7 @@ describe('Datacenter page scaffold (fixture mode)', () => {
 });
 
 describe('Node page Network tab scaffold (fixture mode)', () => {
-  it('shows a Network tab between Storage and Tasks, and it renders its stub', async () => {
+  it('shows a Network tab between Storage and Tasks, and it renders the editor', async () => {
     renderAt('/node/pve1');
 
     const names = await tabNames();
@@ -108,6 +108,8 @@ describe('Node page Network tab scaffold (fixture mode)', () => {
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Network' }), { button: 0 });
     const panel = await screen.findByTestId('node-network-tab', undefined, { timeout: FIND_TIMEOUT_MS });
-    expect(panel).toHaveTextContent('Coming soon.');
+    // The real Network editor (T69) replaced the stub; its own tests live in node-network.render.test.tsx.
+    expect(panel).not.toHaveTextContent('Coming soon.');
+    expect(await screen.findByTestId('node-network-row-vmbr0', undefined, { timeout: FIND_TIMEOUT_MS })).toBeInTheDocument();
   });
 });

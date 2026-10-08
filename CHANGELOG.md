@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Node → Network: the node's Network tab now lists every interface and lets you create a Linux
+  bridge, bond or VLAN, edit an interface (a physical one only its addressing, autostart, MTU and
+  comment) and delete a bridge, bond or VLAN. Proxmox only stages these changes, so a pending
+  banner shows the diff with **Apply configuration** (typed `APPLY` confirmation; applying can
+  disconnect the node from the network if the configuration is wrong) and **Revert**. Needs a
+  signed-in session and `Sys.Modify` on the node; deleting the interface that carries the address
+  Proxion reaches Proxmox at is refused.
+
 ## [0.11.1] - 2026-10-08
 
 ### Security
