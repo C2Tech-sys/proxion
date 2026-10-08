@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import nodemailer from 'nodemailer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Alert } from '@proxion/core';
-import { createWebhookChannel, type WebhookFormat } from '../src/notify/channels/webhook.js';
+import { WebhookSendError, createWebhookChannel, type WebhookFormat } from '../src/notify/channels/webhook.js';
 import { createEmailChannel } from '../src/notify/channels/email.js';
 import { Notifier } from '../src/notify/notifier.js';
 import type { NotifyMessage } from '../src/notify/types.js';
@@ -216,7 +216,55 @@ describe('webhook channel formats', () => {
       // Never calls res.end() -- the request hangs until the channel's own timeout fires.
     });
     const channel = createWebhookChannel({ url: activeServer.baseUrl, format: 'generic', timeoutMs: 50 });
-    await expect(channel.send(TRANSITIONS_MESSAGE)).rejects.toThrow(/timed out/);
+    await expect(channel.send(TRANSITIONS_MESSAGE)).rejects.toMatchObject({ name: 'WebhookSendError', kind: 'timeout' });
+  });
+
+  it('never follows a redirect: a real 302 is an error, the Location target is never contacted, nothing leaks', async () => {
+    let followed = 0;
+    const elsewhere = await startFakeWebhook((_req, res) => {
+      followed += 1;
+      res.writeHead(200);
+      res.end();
+    });
+    try {
+      activeServer = await startFakeWebhook((_req, res) => {
+        res.writeHead(302, { location: `${elsewhere.baseUrl}/internal-secret-path` });
+        res.end();
+      });
+      const channel = createWebhookChannel({ url: activeServer.baseUrl, format: 'generic', token: 'bearer-secret' });
+      const error = await channel.send(TRANSITIONS_MESSAGE).then(
+        () => undefined,
+        (e: unknown) => e as Error,
+      );
+      expect(error).toBeInstanceOf(WebhookSendError);
+      expect(JSON.stringify([error?.message, (error as { cause?: unknown }).cause])).not.toContain('internal-secret-path');
+      expect(error?.message).not.toContain('127.0.0.1');
+      expect(followed).toBe(0);
+    } finally {
+      await elsewhere.close();
+    }
+  });
+
+  it('asks fetch not to follow redirects, and a stubbed 302 is a sanitised HTTP error without the Location', async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data' } }),
+    );
+    const channel = createWebhookChannel({
+      url: 'https://hooks.example.com/abc',
+      format: 'generic',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const error = await channel.send(TRANSITIONS_MESSAGE).then(
+      () => undefined,
+      (e: unknown) => e as WebhookSendError,
+    );
+    expect(error).toBeInstanceOf(WebhookSendError);
+    expect(error).toMatchObject({ kind: 'http', status: 302 });
+    expect(error?.message).toBe('webhook responded HTTP 302');
+    expect(error?.message).not.toContain('169.254');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const init = (fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(init.redirect).toBe('error');
   });
 
   it('every format works for every WebhookFormat value (exhaustiveness)', async () => {

@@ -127,6 +127,49 @@ function isBareEmailAddress(value: string): boolean {
   return value.length >= 3 && value.length <= 320 && BARE_EMAIL_RE.test(value);
 }
 
+/**
+ * `PROXION_NOTIFY_ALLOWED_HOSTS` (optional): comma-separated hostnames the webhook and SMTP
+ * destinations may use. Case-insensitive, exact match after lowercasing and stripping one trailing
+ * dot; `*.example.com` matches exactly one extra label (`a.example.com`, not `example.com` or
+ * `a.b.example.com`). Ports are not part of the match.
+ */
+const ALLOWED_HOST_ENTRY_RE = /^(\*\.)?([a-z0-9_]([a-z0-9_-]*[a-z0-9_])?)(\.[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?)*$|^\[[0-9a-f:.]+\]$/;
+
+export function normaliseHostname(host: string): string {
+  const lower = host.trim().toLowerCase();
+  return lower.endsWith('.') ? lower.slice(0, -1) : lower;
+}
+
+/** `null` = no restriction (unset, empty or only separators). Entries are normalised and de-duplicated. */
+export function parseAllowedHosts(raw: string | undefined): string[] | null {
+  if (raw === undefined) return null;
+  const entries = [
+    ...new Set(
+      raw
+        .split(',')
+        .map((entry) => normaliseHostname(entry))
+        .filter((entry) => entry.length > 0),
+    ),
+  ];
+  return entries.length > 0 ? entries : null;
+}
+
+export function isValidAllowedHostsValue(raw: string): boolean {
+  const entries = parseAllowedHosts(raw);
+  return entries === null || entries.every((entry) => ALLOWED_HOST_ENTRY_RE.test(entry));
+}
+
+/** Whether `host` (a URL's hostname) is permitted by `allowed` (`null` = everything is). */
+export function hostIsAllowed(host: string, allowed: readonly string[] | null): boolean {
+  if (allowed === null) return true;
+  const candidate = normaliseHostname(host);
+  return allowed.some((entry) => {
+    if (!entry.startsWith('*.')) return entry === candidate;
+    const suffix = entry.slice(1); // ".example.com"
+    return candidate.endsWith(suffix) && candidate.length > suffix.length && !candidate.slice(0, -suffix.length).includes('.');
+  });
+}
+
 function httpUrlSchema(message: string) {
   return z.string().refine(
     (value) => {
@@ -185,6 +228,15 @@ const notifySchema = z
         (value) => value.split(',').map((entry) => entry.trim()).every(isBareEmailAddress),
         { message: 'must be bare email addresses such as ops@example.com, separated by commas' },
       )
+      .optional(),
+
+    // Optional operator allowlist for where notifications may be sent (webhook / SMTP host names).
+    // Unset = no restriction. Enforced when settings are saved and when channels are built.
+    PROXION_NOTIFY_ALLOWED_HOSTS: z
+      .string()
+      .refine(isValidAllowedHostsValue, {
+        message: 'must be a comma-separated list of host names, optionally with a *.example.com wildcard',
+      })
       .optional(),
 
     // The lowest severity that opens a notification (an alert below this is tracked but never

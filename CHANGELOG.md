@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Notification webhooks never follow redirects, and "Send test notification" now reports a failed
+  channel only as `request failed (HTTP <status>)`, `(timeout)` or `(network)` (email: also
+  `authentication failed`) instead of the upstream's error text, so the button cannot be used to
+  probe hosts or ports reachable from the server. New optional `PROXION_NOTIFY_ALLOWED_HOSTS`
+  restricts the webhook and SMTP hosts that settings (saved in the app or set in the environment)
+  may use; unset keeps today's behaviour. Email sender and recipient addresses are validated as
+  bare addresses, and a kept webhook token is only reused while the scheme, host and port are
+  unchanged.
+
 ### Added
 
 - Notification settings in the app: the Preferences page can now switch notifications on or off,

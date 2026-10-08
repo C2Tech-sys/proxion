@@ -26,6 +26,7 @@ import { buildPveClient } from './pve/client.js';
 import { Notifier } from './notify/notifier.js';
 import {
   NotifySettingsStore,
+  allowedNotifyHosts,
   buildNotifyChannels,
   effectiveNotifySettings,
   type EffectiveNotifySettings,
@@ -123,7 +124,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   };
 
   const initialSettings = effectiveNotifySettings(config, notifySettingsStore.current);
-  app.decorate('notifier', await startNotifier(initialSettings, buildNotifyChannels(initialSettings)));
+  app.decorate('notifier', await startNotifier(initialSettings, buildNotifyChannels(initialSettings, { allowedHosts: allowedNotifyHosts(config), log: app.log })));
 
   // Reloads are serialised. Channels are built BEFORE the old notifier is retired, so a settings
   // value that cannot produce a channel leaves the running notifier untouched; the old one is
@@ -133,7 +134,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   app.decorate('reloadNotifier', () => {
     const run = reloadChain.then(async () => {
       const settings = effectiveNotifySettings(config, notifySettingsStore.current);
-      const channels = buildNotifyChannels(settings);
+      const channels = buildNotifyChannels(settings, { allowedHosts: allowedNotifyHosts(config), log: app.log });
       const previous = app.notifier;
       await previous?.stop();
       app.notifier = await startNotifier(settings, channels);

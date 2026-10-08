@@ -159,8 +159,22 @@ describe('/api/notify', () => {
     const res = await app.inject({ method: 'POST', url: '/api/notify/test', headers: { cookie } });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { results: { webhook: string } };
-    expect(body.results.webhook).not.toBe('ok');
-    expect(body.results.webhook).toContain('503');
+    expect(body.results.webhook).toBe('request failed (HTTP 503)');
+    expect(res.body).not.toContain('Service Unavailable');
+    expect(res.body).not.toContain('127.0.0.1');
+  });
+
+  it('POST /api/notify/test collapses a refused connection to "network" with no host, port or address', async () => {
+    const closed = await startFakeWebhookTarget();
+    const deadUrl = closed.baseUrl;
+    await closed.close(); // nothing is listening on that port any more
+    await setup({ PROXION_NOTIFY_WEBHOOK_URL: deadUrl });
+    const cookie = await loginCookie();
+
+    const res = await app.inject({ method: 'POST', url: '/api/notify/test', headers: { cookie } });
+    expect(res.json()).toStrictEqual({ results: { webhook: 'request failed (network)' } });
+    expect(res.body).not.toContain('ECONNREFUSED');
+    expect(res.body).not.toContain('127.0.0.1');
   });
 
   describe('an invalid PROXION_NOTIFY_* value (T59)', () => {
@@ -365,6 +379,7 @@ describe('/api/notify', () => {
         debounceMs: 10_000,
         siteName: 'Proxion',
         channels: { webhook: false, email: false },
+        allowedHosts: null,
       });
     });
 
@@ -395,6 +410,7 @@ describe('/api/notify', () => {
           to: ['a@example.com', 'b@example.com'],
         },
         channels: { webhook: true, email: true },
+        allowedHosts: null,
       });
       for (const secret of ['SECRET-PATH-123', 'SECRET-QUERY', 'super-secret-token-value', 'S3cretPw']) {
         expect(res.body).not.toContain(secret);
@@ -557,6 +573,7 @@ describe('/api/notify', () => {
             to: ['a@example.com'],
           },
           channels: { webhook: true, email: true },
+          allowedHosts: null,
         });
         for (const secret of ['SECRET-PATH-123', 'tok-new-1', 'S3cretPw']) expect(res.body).not.toContain(secret);
 
@@ -825,6 +842,113 @@ describe('/api/notify', () => {
           webhook: { url: `${target.baseUrl}/env-hook`, token: 'env-token' },
           email: { smtpUrl: SMTP_WITH_PASSWORD },
         });
+      });
+    });
+
+    describe('destination allowlist (PROXION_NOTIFY_ALLOWED_HOSTS)', () => {
+      const WEBHOOK = (url: string) => ({ ...BASE_BODY, webhook: { url, format: 'generic' } });
+      const EMAIL_BODY = (smtpUrl: string) => ({
+        ...BASE_BODY,
+        email: { smtpUrl, from: 'proxion@example.com', to: ['a@example.com'] },
+      });
+
+      it('GET reports the normalised list, or null when unrestricted', async () => {
+        const cookie = await setupAdmin();
+        expect(((await getSettings(cookie)).json() as { allowedHosts: unknown }).allowedHosts).toBeNull();
+        await app.close();
+        await fakePve.close();
+
+        const cookie2 = await setupAdmin({ PROXION_NOTIFY_ALLOWED_HOSTS: 'Hooks.Example.COM., *.lan' });
+        expect(((await getSettings(cookie2)).json() as { allowedHosts: unknown }).allowedHosts).toStrictEqual([
+          'hooks.example.com',
+          '*.lan',
+        ]);
+      });
+
+      it('PUT refuses a webhook host that is not allowed, without echoing it or writing anything', async () => {
+        const cookie = await setupAdmin({ PROXION_NOTIFY_ALLOWED_HOSTS: 'hooks.example.com' });
+        const res = await put(cookie, WEBHOOK('https://internal-admin.corp.example/SECRET-PATH'));
+        expect(res.statusCode).toBe(400);
+        expect(res.json()).toStrictEqual({
+          error: 'invalid-settings',
+          message: 'webhook.url: host is not in PROXION_NOTIFY_ALLOWED_HOSTS',
+        });
+        expect(res.body).not.toContain('internal-admin');
+        expect(res.body).not.toContain('SECRET-PATH');
+        expect(app.notifySettingsStore.current).toBeUndefined();
+      });
+
+      it('PUT refuses an SMTP host that is not allowed', async () => {
+        const cookie = await setupAdmin({ PROXION_NOTIFY_ALLOWED_HOSTS: 'smtp.example.com' });
+        const res = await put(cookie, EMAIL_BODY('smtp://u:p@10.0.0.9:25'));
+        expect(res.statusCode).toBe(400);
+        expect(res.json()).toStrictEqual({
+          error: 'invalid-settings',
+          message: 'email.smtpUrl: host is not in PROXION_NOTIFY_ALLOWED_HOSTS',
+        });
+        expect(res.body).not.toContain('10.0.0.9');
+        expect((await put(cookie, EMAIL_BODY('smtps://u:p@SMTP.example.com.:465'))).statusCode).toBe(200);
+      });
+
+      it('PUT accepts an allowed host regardless of case, a trailing dot and the port', async () => {
+        const cookie = await setupAdmin({ PROXION_NOTIFY_ALLOWED_HOSTS: 'Hooks.Example.COM.' });
+        expect((await put(cookie, WEBHOOK('https://HOOKS.example.com./x'))).statusCode).toBe(200);
+        expect((await put(cookie, WEBHOOK('https://hooks.example.com:8443/x'))).statusCode).toBe(200);
+        expect((await put(cookie, WEBHOOK('https://hooks.example.com.evil.net/x'))).statusCode).toBe(400);
+        expect((await put(cookie, WEBHOOK('https://x.hooks.example.com/x'))).statusCode).toBe(400);
+      });
+
+      it('a *.label wildcard matches exactly one extra label', async () => {
+        const cookie = await setupAdmin({ PROXION_NOTIFY_ALLOWED_HOSTS: '*.example.com' });
+        expect((await put(cookie, WEBHOOK('https://a.example.com/x'))).statusCode).toBe(200);
+        expect((await put(cookie, WEBHOOK('https://example.com/x'))).statusCode).toBe(400);
+        expect((await put(cookie, WEBHOOK('https://a.b.example.com/x'))).statusCode).toBe(400);
+      });
+
+      it('with no allowlist anything goes, including private addresses (trusted-operator model)', async () => {
+        const cookie = await setupAdmin();
+        expect((await put(cookie, WEBHOOK('http://192.168.1.20:8080/ntfy/alerts'))).statusCode).toBe(200);
+        expect((await put(cookie, WEBHOOK('http://localhost:9000/x'))).statusCode).toBe(200);
+      });
+
+      it('a kept URL that has since fallen outside the allowlist is refused too', async () => {
+        const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proxion-notify-allow-'));
+        try {
+          const cookie = await setupAdmin({ PROXION_DATA_DIR: dataDir });
+          await put(cookie, WEBHOOK('https://old-host.example.com/x'));
+          await app.close();
+
+          // The operator tightens the allowlist and restarts: the saved webhook no longer qualifies.
+          app = await buildApp({
+            config: loadConfig({
+              NODE_ENV: 'test',
+              PVE_URL: fakePve.url,
+              PROXION_DATA_DIR: dataDir,
+              PROXION_NOTIFY_ALLOWED_HOSTS: 'new-host.example.com',
+            }),
+          });
+          expect(app.notifier).toBeUndefined(); // dropped at build time, the server still boots
+          const cookie2 = await loginCookie();
+          expect(((await getSettings(cookie2)).json() as { webhook?: unknown }).webhook).toBeDefined();
+          const res = await put(cookie2, { ...BASE_BODY, webhook: { url: { keep: true }, format: 'generic' } });
+          expect(res.statusCode).toBe(400);
+          expect((res.json() as { message: string }).message).toBe('webhook.url: host is not in PROXION_NOTIFY_ALLOWED_HOSTS');
+          expect((await put(cookie2, WEBHOOK('https://new-host.example.com/x'))).statusCode).toBe(200);
+          expect(app.notifier).toBeDefined();
+        } finally {
+          fs.rmSync(dataDir, { recursive: true, force: true });
+        }
+      });
+
+      it('an allowed local target still receives the test message', async () => {
+        const target = await startRecordingTarget();
+        const cookie = await setupAdmin({
+          PROXION_NOTIFY_ALLOWED_HOSTS: '127.0.0.1',
+          PROXION_NOTIFY_WEBHOOK_URL: target.baseUrl,
+        });
+        const res = await app.inject({ method: 'POST', url: '/api/notify/test', headers: { cookie } });
+        expect(res.json()).toStrictEqual({ results: { webhook: 'ok' } });
+        expect(target.requests).toHaveLength(1);
       });
     });
 

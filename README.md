@@ -295,6 +295,19 @@ The `generic` webhook stays plain JSON, now with a `headline`, `highestSeverity`
 The webhook token and the SMTP URL's embedded credentials are never written to the server's logs
 -- a channel failure logs only the channel name and host.
 
+**Webhook destinations.** Proxion assumes the people who can change notification settings (`Sys.Modify`
+on `/`) are trusted operators, so a webhook or SMTP server on your LAN (a self-hosted ntfy or Gotify,
+an internal mail relay) is fine and private addresses are not blocked. Two safeguards apply
+regardless: a webhook request never follows a redirect (a 3xx is a failure, so a token is never sent
+to a place you did not configure), and "Send test notification" reports a failure only as
+`request failed (HTTP <status>)`, `(timeout)` or `(network)` -- never a host, port, status text or
+response body -- so it cannot be used to probe other machines. To restrict where notifications can
+go, set `PROXION_NOTIFY_ALLOWED_HOSTS` to a comma-separated list of host names (case-insensitive,
+exact match, a trailing dot is ignored, `*.example.com` matches exactly one extra label, ports are not
+compared). When set, saving a webhook or SMTP URL on any other host is refused, and a saved
+destination that no longer matches (for example after you tighten the list) is dropped at startup
+with a warning that names the setting but not the host. Unset means no restriction.
+
 The Preferences page shows which channels are configured and has a "Send test notification"
 button (a signed-in session only; disabled with a shared service token, same as every other write
 in token mode) -- `GET /api/notify/status` / `POST /api/notify/test`. A bad notification value

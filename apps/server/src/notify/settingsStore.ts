@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import type { Config } from '../config.js';
+import { hostIsAllowed, parseAllowedHosts, type Config } from '../config.js';
 import { createEmailChannel } from './channels/email.js';
 import { createWebhookChannel } from './channels/webhook.js';
 import type { NotifyLogger } from './notifier.js';
@@ -149,11 +149,38 @@ export function toPersistable(effective: EffectiveNotifySettings): NotifySetting
   return rest;
 }
 
+/** The configured allowlist (`PROXION_NOTIFY_ALLOWED_HOSTS`), normalised; `null` = unrestricted. */
+export function allowedNotifyHosts(config: Config): string[] | null {
+  return parseAllowedHosts(config.PROXION_NOTIFY_ALLOWED_HOSTS);
+}
+
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
 /** One channel per configured target (webhook, then email). Throws if a channel can't be built
- *  from the given values; callers that take user input build channels BEFORE writing the file. */
-export function buildNotifyChannels(settings: NotifySettings): NotifyChannel[] {
+ *  from the given values; callers that take user input build channels BEFORE writing the file.
+ *  With an allowlist, a target whose host is not on it is dropped with a warning that names the
+ *  setting and the channel, never the host. */
+export function buildNotifyChannels(
+  settings: NotifySettings,
+  options: { allowedHosts?: readonly string[] | null; log?: Pick<NotifyLogger, 'warn'> } = {},
+): NotifyChannel[] {
+  const allowed = options.allowedHosts ?? null;
+  const permitted = (channel: 'webhook' | 'email', url: string): boolean => {
+    if (hostIsAllowed(hostnameOf(url), allowed)) return true;
+    options.log?.warn(
+      { key: 'PROXION_NOTIFY_ALLOWED_HOSTS', channel },
+      'Notification channel dropped: its host is not in PROXION_NOTIFY_ALLOWED_HOSTS',
+    );
+    return false;
+  };
   const channels: NotifyChannel[] = [];
-  if (settings.webhook) {
+  if (settings.webhook && permitted('webhook', settings.webhook.url)) {
     channels.push(
       createWebhookChannel({
         url: settings.webhook.url,
@@ -162,7 +189,7 @@ export function buildNotifyChannels(settings: NotifySettings): NotifyChannel[] {
       }),
     );
   }
-  if (settings.email) {
+  if (settings.email && permitted('email', settings.email.smtpUrl)) {
     channels.push(
       createEmailChannel({
         smtpUrl: settings.email.smtpUrl,

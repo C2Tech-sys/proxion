@@ -299,6 +299,22 @@ function buildRequest(
 }
 
 /**
+ * A failed webhook delivery, reduced to what is safe to show to a signed-in operator: the kind of
+ * failure and (for `http`) the status code. Never the host, URL, status text, redirect target or
+ * response body -- the test endpoint must not double as a port scanner or an internal-service
+ * oracle (see `notifier.ts`'s `sanitiseTestError`).
+ */
+export class WebhookSendError extends Error {
+  constructor(
+    readonly kind: 'http' | 'timeout' | 'network',
+    readonly status?: number,
+  ) {
+    super(kind === 'http' ? `webhook responded HTTP ${status}` : `webhook request failed (${kind})`);
+    this.name = 'WebhookSendError';
+  }
+}
+
+/**
  * The webhook notification channel: one HTTP POST per message, in one of five shapes selected by
  * `PROXION_NOTIFY_WEBHOOK_FORMAT`. Throws on a non-2xx response, a network error, or a timeout --
  * `Notifier` is the one place that catches, logs and retries that.
@@ -328,15 +344,16 @@ export function createWebhookChannel(options: WebhookChannelOptions): NotifyChan
           },
           body,
           signal: controller.signal,
+          // Never follow a redirect: a 3xx from the configured address must not move the request
+          // (and its bearer token) somewhere the operator did not choose.
+          redirect: 'error',
         });
-        if (!res.ok) {
-          throw new Error(`webhook responded ${res.status} ${res.statusText}`);
-        }
+        if (!res.ok) throw new WebhookSendError('http', res.status);
       } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          throw new Error(`webhook request to ${host} timed out after ${timeoutMs}ms`, { cause: error });
-        }
-        throw error;
+        if (error instanceof WebhookSendError) throw error;
+        // Deliberately no `cause`: undici's error causes carry the target address.
+        if (error instanceof Error && error.name === 'AbortError') throw new WebhookSendError('timeout');
+        throw new WebhookSendError('network');
       } finally {
         clearTimeout(timer);
       }

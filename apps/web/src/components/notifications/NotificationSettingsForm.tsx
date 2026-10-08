@@ -171,6 +171,11 @@ function Field({ label, htmlFor, hint, children }: { label: string; htmlFor: str
   );
 }
 
+/** The operator's `PROXION_NOTIFY_ALLOWED_HOSTS`, when set: the server refuses any other host. */
+function AllowedHostsHint({ hosts }: { hosts: string[] }) {
+  return <p className="text-xs text-muted-foreground">Allowed hosts: {hosts.join(', ')}</p>;
+}
+
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-3 py-3">
@@ -384,6 +389,7 @@ function SettingsFormBody({
       </Group>
 
       <Group title="Webhook">
+        {view.allowedHosts ? <AllowedHostsHint hosts={view.allowedHosts} /> : null}
         {draft.webhookOn ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Format" htmlFor={`${id}-wh-format`}>
@@ -473,6 +479,7 @@ function SettingsFormBody({
       </Group>
 
       <Group title="Email">
+        {view.allowedHosts ? <AllowedHostsHint hosts={view.allowedHosts} /> : null}
         {draft.emailOn ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field
