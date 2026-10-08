@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next to the inherited datacenter ones. Needs a signed-in session and `VM.Config.Network` on the
   guest; changes forward PVE's digest. New routes under
   `/api/actions/guest/{node}/{type}/{vmid}/firewall/{aliases,ipsets}`.
+- VM Hardware tab: the BIOS, Machine, Display and SCSI Controller rows are now editable, and a VM
+  without an EFI disk or TPM state gets "Add EFI disk" / "Add TPM state". BIOS switches between
+  SeaBIOS and OVMF (and can add the EFI disk in the same save, since an OVMF guest without one loses
+  its UEFI settings on every stop); Machine picks i440fx or q35, a pinned version from the node's own
+  list or "Latest (default)", a virtual IOMMU on q35, or resets to PVE's default; Display sets the
+  adapter and video memory; SCSI Controller picks the model. Needs a signed-in session and
+  `VM.Config.HWType` for the four rows, `VM.Config.Disk` plus `Datastore.AllocateSpace` on the
+  storage for the EFI disk and TPM state. New route
+  `PUT /api/actions/guest/:node/qemu/:vmid/firmware`.
 
 ## [0.12.0] - 2026-10-08
 

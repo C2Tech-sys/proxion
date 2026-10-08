@@ -1429,6 +1429,20 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     }));
   }
   // --- end T73 ---
+  // --- T72 vm firmware ---
+  // `GET /nodes/{node}/capabilities/qemu/machines`: the machine types/versions the node offers
+  // (the VM firmware route reuses the existing guest config PUT / GET / pending handlers).
+  app.get('/api2/json/nodes/:node/capabilities/qemu/machines', async () => ({
+    data: [
+      { id: 'pc', type: 'i440fx', version: '9.0' },
+      { id: 'pc-i440fx-9.0', type: 'i440fx', version: '9.0' },
+      { id: 'pc-i440fx-8.1', type: 'i440fx', version: '8.1' },
+      { id: 'q35', type: 'q35', version: '9.0' },
+      { id: 'pc-q35-9.0', type: 'q35', version: '9.0' },
+      { id: 'pc-q35-8.1', type: 'q35', version: '8.1' },
+    ],
+  }));
+  // --- end T72 ---
 
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
