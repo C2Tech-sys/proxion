@@ -23,6 +23,8 @@ import { registerClusterFirewallRoutes } from './clusterFirewallRoutes.js';
 import { registerTemplateRoutes } from './templateRoutes.js';
 import { registerBackupJobRoutes } from './backupJobRoutes.js';
 import { registerAccessRoutes } from './accessRoutes.js';
+import { registerStorageConfigRoutes } from './storageConfigRoutes.js';
+import { registerPoolRoutes } from './poolRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -468,4 +470,8 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // Datacenter users / groups / ACL / API tokens / password (`accessRoutes.ts`) share the same bucket,
   // same rationale.
   registerAccessRoutes(app, guestActionsRateLimit);
+  // Datacenter storage definitions add/edit/remove (`storageConfigRoutes.ts`) and pool
+  // create/edit/members/delete (`poolRoutes.ts`) share the same bucket, same rationale.
+  registerStorageConfigRoutes(app, guestActionsRateLimit);
+  registerPoolRoutes(app, guestActionsRateLimit);
 }

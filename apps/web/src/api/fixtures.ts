@@ -1843,3 +1843,216 @@ export function resetFixtureAccess(): void {
   fixtureAccess = initialFixtureAccess();
 }
 // --- end T68 ---
+// --- T70 storage config + pools ---
+
+/** One `GET /storage` row as PVE reports it: PVE's own property names, flags as 0/1. Secrets
+ * (CIFS/PBS passwords) are never part of a record -- PVE never returns them either. */
+export interface FixtureStorageConfig {
+  storage: string;
+  type: string;
+  [key: string]: string | number | boolean | undefined;
+}
+
+const FIXTURE_PBS_FINGERPRINT = Array.from({ length: 32 }, (_, i) => ((i * 13 + 5) % 256).toString(16).padStart(2, '0').toUpperCase()).join(':');
+
+function initialFixtureStorageConfigs(): FixtureStorageConfig[] {
+  return [
+    { storage: 'local', type: 'dir', path: '/var/lib/vz', content: 'iso,vztmpl,backup', shared: 0 },
+    { storage: 'local-zfs', type: 'zfspool', pool: 'rpool/data', content: 'images,rootdir', sparse: 1, nodes: 'pve1' },
+    { storage: 'tank', type: 'zfspool', pool: 'tank/vm', content: 'images,rootdir', blocksize: '16k', nodes: 'pve1' },
+    {
+      storage: 'tank-backups',
+      type: 'dir',
+      path: '/tank/backups',
+      content: 'backup',
+      nodes: 'pve1',
+      'prune-backups': 'keep-last=7,keep-weekly=4',
+    },
+    {
+      storage: 'backup-nfs',
+      type: 'nfs',
+      server: '10.0.0.20',
+      export: '/export/pve-backups',
+      content: 'backup,iso',
+      options: 'vers=4.2',
+      shared: 1,
+      'prune-backups': 'keep-last=3',
+    },
+    {
+      storage: 'pbs-main',
+      type: 'pbs',
+      server: 'pbs.lan',
+      datastore: 'main',
+      username: 'backup@pbs',
+      fingerprint: FIXTURE_PBS_FINGERPRINT,
+      content: 'backup',
+      'prune-backups': 'keep-all=1',
+    },
+  ];
+}
+
+let fixtureStorageConfigs: FixtureStorageConfig[] = initialFixtureStorageConfigs();
+
+/** Demo/test-only (T70): the storage definitions, newest state, as copies. */
+export function getFixtureStorageConfigs(): FixtureStorageConfig[] {
+  return fixtureStorageConfigs.map((config) => ({ ...config }));
+}
+
+/** Demo/test-only (T70): adds a storage definition. Throws PVE's own message for a taken id. */
+export function addFixtureStorageConfig(config: FixtureStorageConfig): void {
+  if (fixtureStorageConfigs.some((c) => c.storage === config.storage)) {
+    throw new Error(`storage ID '${config.storage}' already defined`);
+  }
+  fixtureStorageConfigs = [...fixtureStorageConfigs, { ...config }];
+}
+
+/** Demo/test-only (T70): sets `set` on a definition and removes every key in `remove`. Throws if
+ * the storage does not exist. */
+export function patchFixtureStorageConfig(
+  storage: string,
+  set: Record<string, string | number | boolean>,
+  remove: readonly string[],
+): void {
+  const index = fixtureStorageConfigs.findIndex((c) => c.storage === storage);
+  if (index === -1) throw new Error(`storage '${storage}' does not exist`);
+  const next: FixtureStorageConfig = { ...fixtureStorageConfigs[index]!, ...set };
+  for (const key of remove) delete next[key];
+  fixtureStorageConfigs = fixtureStorageConfigs.map((c, i) => (i === index ? next : c));
+}
+
+/** Demo/test-only (T70): removes the definition only (the fixture has no data to delete). */
+export function removeFixtureStorageConfig(storage: string): void {
+  if (!fixtureStorageConfigs.some((c) => c.storage === storage)) throw new Error(`storage '${storage}' does not exist`);
+  fixtureStorageConfigs = fixtureStorageConfigs.filter((c) => c.storage !== storage);
+}
+
+/** Test-only (T70): puts the fixture storage definitions back to their initial state. */
+export function resetFixtureStorageConfigs(): void {
+  fixtureStorageConfigs = initialFixtureStorageConfigs();
+}
+
+/** What the scan buttons find on the demo's network (`/nodes/{node}/scan/*`). */
+export const FIXTURE_STORAGE_SCAN = {
+  nfs: [
+    { path: '/export/pve-backups', options: '10.0.0.0/24' },
+    { path: '/export/isos', options: '*' },
+  ],
+  cifs: [
+    { share: 'media', description: 'Media library' },
+    { share: 'backups', description: '' },
+  ],
+  zfs: [{ pool: 'rpool' }, { pool: 'tank' }],
+  lvm: [{ vg: 'pve' }, { vg: 'data' }],
+  lvmthin: { pve: [{ lv: 'data' }], data: [{ lv: 'thin0' }] } as Record<string, Array<{ lv: string }>>,
+};
+
+/** One pool member as `GET /pools/{poolid}` reports it. */
+export interface FixturePoolMember {
+  type: 'qemu' | 'lxc' | 'storage';
+  /** `qemu/100`, `lxc/200` or `storage/<node>/<storage>`. */
+  id: string;
+  node: string;
+  vmid?: number;
+  storage?: string;
+}
+
+export interface FixturePool {
+  poolid: string;
+  comment?: string;
+  members: FixturePoolMember[];
+}
+
+function guestMember(vmid: number): FixturePoolMember {
+  const guest = getFixtureGuestByVmid(vmid);
+  if (!guest) throw new Error(`VM ${vmid} does not exist`);
+  const type = guest.type === 'lxc' ? 'lxc' : 'qemu';
+  return { type, id: `${type}/${vmid}`, node: guest.node, vmid };
+}
+
+function storageMember(storage: string): FixturePoolMember {
+  const row = resources.find((r) => r.type === 'storage' && r.storage === storage);
+  const node = row?.node ?? 'pve1';
+  return { type: 'storage', id: `storage/${node}/${storage}`, node, storage };
+}
+
+function initialFixturePools(): FixturePool[] {
+  return [
+    {
+      poolid: 'prod',
+      comment: 'Production guests',
+      members: [guestMember(100), guestMember(101), guestMember(300), storageMember('tank-backups')],
+    },
+    { poolid: 'dev', comment: 'Lab and CI', members: [guestMember(104), guestMember(105), guestMember(108)] },
+    { poolid: 'archive', members: [] },
+  ];
+}
+
+let fixturePools: FixturePool[] = initialFixturePools();
+
+/** Demo/test-only (T70): the pools with their members, as copies. */
+export function getFixturePools(): FixturePool[] {
+  return fixturePools.map((p) => ({ ...p, members: p.members.map((m) => ({ ...m })) }));
+}
+
+/** Demo/test-only (T70): creates a pool. Throws PVE's own message for a taken id. */
+export function addFixturePool(poolid: string, comment?: string): void {
+  if (fixturePools.some((p) => p.poolid === poolid)) throw new Error(`pool '${poolid}' already exists`);
+  fixturePools = [...fixturePools, { poolid, ...(comment !== undefined && comment !== '' ? { comment } : {}), members: [] }];
+}
+
+export interface FixturePoolUpdate {
+  comment?: string | undefined;
+  vms?: readonly number[] | undefined;
+  storage?: readonly string[] | undefined;
+  remove?: boolean | undefined;
+  allowMove?: boolean | undefined;
+}
+
+/** Demo/test-only (T70): comment / add members / remove members, with PVE's own refusal of a
+ * guest that already sits in another pool unless `allowMove`. */
+export function updateFixturePool(poolid: string, update: FixturePoolUpdate): void {
+  const index = fixturePools.findIndex((p) => p.poolid === poolid);
+  if (index === -1) throw new Error(`pool '${poolid}' does not exist`);
+  const pools = fixturePools.map((p) => ({ ...p, members: [...p.members] }));
+  const pool = pools[index]!;
+
+  if (update.comment !== undefined) {
+    if (update.comment === '') delete pool.comment;
+    else pool.comment = update.comment;
+  }
+  const ids = [
+    ...(update.vms ?? []).map((vmid) => ({ vmid, storage: undefined as string | undefined })),
+    ...(update.storage ?? []).map((storage) => ({ vmid: undefined as number | undefined, storage })),
+  ];
+  for (const entry of ids) {
+    const member = entry.vmid !== undefined ? guestMember(entry.vmid) : storageMember(entry.storage!);
+    if (update.remove === true) {
+      pool.members = pool.members.filter((m) => m.id !== member.id);
+      continue;
+    }
+    if (pool.members.some((m) => m.id === member.id)) continue;
+    const other = pools.find((p) => p !== pool && p.members.some((m) => m.id === member.id));
+    if (other) {
+      if (update.allowMove !== true) {
+        throw new Error(`${member.id} is already a member of pool '${other.poolid}' (use allow-move to move it)`);
+      }
+      other.members = other.members.filter((m) => m.id !== member.id);
+    }
+    pool.members.push(member);
+  }
+  fixturePools = pools;
+}
+
+/** Demo/test-only (T70): deletes a pool; like PVE, refuses one that still has members. */
+export function removeFixturePool(poolid: string): void {
+  const pool = fixturePools.find((p) => p.poolid === poolid);
+  if (!pool) throw new Error(`pool '${poolid}' does not exist`);
+  if (pool.members.length > 0) throw new Error(`pool '${poolid}' is not empty`);
+  fixturePools = fixturePools.filter((p) => p.poolid !== poolid);
+}
+
+/** Test-only (T70): puts the fixture pools back to their initial state. */
+export function resetFixturePools(): void {
+  fixturePools = initialFixturePools();
+}
+// --- end T70 ---
