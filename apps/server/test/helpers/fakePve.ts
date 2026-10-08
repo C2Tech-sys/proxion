@@ -241,6 +241,16 @@ export interface FakePve {
   /** Makes the next `POST .../{type}/{vmid}/template` call for `vmid` fail with the given status/message. */
   setTemplateError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string) => void;
   // --- end T63 ---
+  // --- T67 datacenter firewall ---
+  /** Every datacenter firewall write PVE has received (`POST`/`PUT`/`DELETE` under `/cluster/firewall/`
+   * rules, options, groups, aliases and ipset), in order: method + the raw request path (so an
+   * encoded `%2F` in an ipset CIDR is visible) + the parsed form body (POST/PUT) or query string
+   * (DELETE). Used by `clusterFirewallRoutes.test.ts` (T67). */
+  clusterFirewallCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }>;
+  /** Makes every datacenter firewall write fail with the given status/message until called again
+   * with `undefined`. */
+  setClusterFirewallError: (failure: { status: number; message: string } | undefined) => void;
+  // --- end T67 ---
   close: () => Promise<void>;
 }
 
@@ -988,6 +998,51 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   }
   // --- end T63 ---
 
+  // --- T67 datacenter firewall ---
+  // Every `POST`/`PUT`/`DELETE` under `/cluster/firewall/{rules,options,groups,aliases,ipset}` that
+  // `src/actions/clusterFirewallRoutes.ts` issues. Records each call (method + raw path + parsed form
+  // body, or the query string for DELETE) and replies with an empty `data`, same recording pattern
+  // as the guest firewall block above.
+  const clusterFirewallCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }> = [];
+  let clusterFirewallFailure: { status: number; message: string } | undefined;
+  const recordClusterFirewall = (
+    method: 'POST' | 'PUT' | 'DELETE',
+    req: import('fastify').FastifyRequest,
+    reply: import('fastify').FastifyReply,
+  ) => {
+    const body = (method === 'DELETE' ? req.query : req.body) ?? {};
+    clusterFirewallCalls.push({ method, path: req.url.split('?')[0]!, body: { ...(body as Record<string, string>) } });
+    if (clusterFirewallFailure) {
+      reply.code(clusterFirewallFailure.status).send({ data: null, message: clusterFirewallFailure.message });
+      return;
+    }
+    reply.send({ data: null });
+  };
+  for (const route of [
+    '/cluster/firewall/rules',
+    '/cluster/firewall/rules/:pos',
+    '/cluster/firewall/groups',
+    '/cluster/firewall/groups/:group',
+    '/cluster/firewall/groups/:group/:pos',
+    '/cluster/firewall/aliases',
+    '/cluster/firewall/aliases/:name',
+    '/cluster/firewall/ipset',
+    '/cluster/firewall/ipset/:name',
+    '/cluster/firewall/ipset/:name/:cidr',
+    '/cluster/firewall/options',
+  ]) {
+    for (const method of ['POST', 'PUT', 'DELETE'] as const) {
+      app.route({
+        method,
+        url: `/api2/json${route}`,
+        handler: async (req, reply) => {
+          recordClusterFirewall(method, req, reply);
+        },
+      });
+    }
+  }
+  // --- end T67 ---
+
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
   return {
@@ -1234,6 +1289,14 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       templateErrors.set(`${type}:${vmid}`, { status, message });
     },
     // --- end T63 ---
+    // --- T67 datacenter firewall ---
+    get clusterFirewallCalls() {
+      return clusterFirewallCalls;
+    },
+    setClusterFirewallError: (failure: { status: number; message: string } | undefined) => {
+      clusterFirewallFailure = failure;
+    },
+    // --- end T67 ---
     close: () => app.close(),
   };
 }
