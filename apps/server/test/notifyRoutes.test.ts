@@ -929,15 +929,95 @@ describe('/api/notify', () => {
           });
           expect(app.notifier).toBeUndefined(); // dropped at build time, the server still boots
           const cookie2 = await loginCookie();
-          expect(((await getSettings(cookie2)).json() as { webhook?: unknown }).webhook).toBeDefined();
+          const stored = (await getSettings(cookie2)).json() as { webhook?: unknown; channels: unknown };
+          expect(stored.webhook).toBeDefined(); // still stored ...
+          expect(stored.channels).toStrictEqual({ webhook: false, email: false }); // ... but not built
+          const status = await app.inject({ method: 'GET', url: '/api/notify/status', headers: { cookie: cookie2 } });
+          expect((status.json() as { configured: unknown }).configured).toStrictEqual({ webhook: false, email: false });
           const res = await put(cookie2, { ...BASE_BODY, webhook: { url: { keep: true }, format: 'generic' } });
           expect(res.statusCode).toBe(400);
           expect((res.json() as { message: string }).message).toBe('webhook.url: host is not in PROXION_NOTIFY_ALLOWED_HOSTS');
           expect((await put(cookie2, WEBHOOK('https://new-host.example.com/x'))).statusCode).toBe(200);
           expect(app.notifier).toBeDefined();
+          expect(((await getSettings(cookie2)).json() as { channels: unknown }).channels).toStrictEqual({
+            webhook: true,
+            email: false,
+          });
         } finally {
           fs.rmSync(dataDir, { recursive: true, force: true });
         }
+      });
+
+      describe('an INVALID allowlist fails closed', () => {
+        const MESSAGE = 'PROXION_NOTIFY_ALLOWED_HOSTS is invalid; fix proxion.env and redeploy';
+
+        async function bootWithBrokenAllowlist() {
+          const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proxion-notify-broken-allow-'));
+          const cookie = await setupAdmin({ PROXION_DATA_DIR: dataDir });
+          // a webhook saved while the allowlist was fine (or absent)
+          expect((await put(cookie, WEBHOOK('https://anywhere.example.net/x'))).statusCode).toBe(200);
+          await app.close();
+          app = await buildApp({
+            config: loadConfig({
+              NODE_ENV: 'test',
+              PVE_URL: fakePve.url,
+              PROXION_DATA_DIR: dataDir,
+              PROXION_NOTIFY_ALLOWED_HOSTS: 'hooks.example.com:443',
+            }),
+          });
+          return { dataDir, cookie: await loginCookie() };
+        }
+
+        it('builds no notifier, GET shows allowedHosts [] and the error whatever the source', async () => {
+          const { dataDir, cookie } = await bootWithBrokenAllowlist();
+          try {
+            expect(app.notifier).toBeUndefined();
+            const res = await getSettings(cookie);
+            expect(res.json()).toMatchObject({
+              source: 'file',
+              allowedHosts: [],
+              error: MESSAGE,
+              channels: { webhook: false, email: false },
+            });
+            expect(res.body).not.toContain('443');
+            const status = await app.inject({ method: 'GET', url: '/api/notify/status', headers: { cookie } });
+            expect((status.json() as { configured: unknown }).configured).toStrictEqual({ webhook: false, email: false });
+            // the T59 `error` on /status stays env-only; this one is on the settings view
+            expect(status.json()).not.toHaveProperty('error');
+          } finally {
+            fs.rmSync(dataDir, { recursive: true, force: true });
+          }
+        });
+
+        it('PUT and POST /mute are 400 with the message; Send test is 400 not-configured', async () => {
+          const { dataDir, cookie } = await bootWithBrokenAllowlist();
+          try {
+            const putRes = await put(cookie, WEBHOOK('https://hooks.example.com/x'));
+            expect(putRes.statusCode).toBe(400);
+            expect(putRes.json()).toStrictEqual({ error: 'invalid-settings', message: MESSAGE });
+            const muteRes = await mute(cookie, { for: '1h' });
+            expect(muteRes.statusCode).toBe(400);
+            expect(muteRes.json()).toStrictEqual({ error: 'invalid-settings', message: MESSAGE });
+            expect(app.notifier).toBeUndefined();
+            const test = await app.inject({ method: 'POST', url: '/api/notify/test', headers: { cookie } });
+            expect(test.statusCode).toBe(400);
+            expect(test.json()).toStrictEqual({ error: 'not-configured', message: MESSAGE });
+          } finally {
+            fs.rmSync(dataDir, { recursive: true, force: true });
+          }
+        });
+
+        it('also denies an env-sourced webhook', async () => {
+          const target = await startRecordingTarget();
+          const cookie = await setupAdmin({
+            PROXION_NOTIFY_ALLOWED_HOSTS: '127.0.0.1:80',
+            PROXION_NOTIFY_WEBHOOK_URL: target.baseUrl,
+          });
+          expect(app.notifier).toBeUndefined();
+          const res = (await getSettings(cookie)).json() as { error: string; allowedHosts: unknown; source: string };
+          expect(res).toMatchObject({ source: 'env', allowedHosts: [], error: MESSAGE });
+          expect(target.requests).toHaveLength(0);
+        });
       });
 
       it('an allowed local target still receives the test message', async () => {

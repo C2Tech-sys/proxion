@@ -6,6 +6,7 @@ import { hostIsAllowed, loadConfig, parseAllowedHosts } from '../src/config.js';
 import {
   NOTIFY_SETTINGS_FILE_NAME,
   NotifySettingsStore,
+  allowedNotifyHosts,
   buildNotifyChannels,
   effectiveNotifySettings,
   isMuted,
@@ -260,18 +261,52 @@ describe('PROXION_NOTIFY_ALLOWED_HOSTS', () => {
     expect(hostIsAllowed('.example.com', allowed)).toBe(false);
   });
 
-  it('config: a good value is kept as written; a bad value goes through the T59 path naming the key', () => {
+  it('config: a good value is kept as written; a bad value FAILS CLOSED (deny-all) and leaves the other notify values alone', () => {
     expect(loadConfig({ ...baseEnv, PROXION_NOTIFY_ALLOWED_HOSTS: 'hooks.example.com,*.lan' }).notifyConfigError).toBeUndefined();
     expect(loadConfig(baseEnv).PROXION_NOTIFY_ALLOWED_HOSTS).toBeUndefined();
-    for (const bad of ['http://hooks.example.com', 'hooks.example.com/path', 'a b', '*', '**.example.com', 'ex*ample.com']) {
+    expect(allowedNotifyHosts(loadConfig({ ...baseEnv, PROXION_NOTIFY_ALLOWED_HOSTS: 'Hooks.Example.COM.,*.lan' }))).toStrictEqual([
+      'hooks.example.com',
+      '*.lan',
+    ]);
+    expect(allowedNotifyHosts(loadConfig(baseEnv))).toBeNull();
+    expect(allowedNotifyHosts(loadConfig({ ...baseEnv, PROXION_NOTIFY_ALLOWED_HOSTS: ' , ' }))).toBeNull();
+
+    const message = 'PROXION_NOTIFY_ALLOWED_HOSTS is invalid; fix proxion.env and redeploy';
+    for (const bad of [
+      'hooks.example.com:443',
+      'http://hooks.example.com',
+      'hooks.example.com/path',
+      'a b',
+      '*',
+      '**.example.com',
+      'ex*ample.com',
+    ]) {
       const config = loadConfig({
         ...baseEnv,
         PROXION_NOTIFY_WEBHOOK_URL: 'https://hooks.example.com/x',
         PROXION_NOTIFY_ALLOWED_HOSTS: bad,
       });
-      expect(config.notifyConfigError, bad).toContain('PROXION_NOTIFY_ALLOWED_HOSTS');
-      expect(config.PROXION_NOTIFY_WEBHOOK_URL).toBeUndefined(); // channels dropped, server still boots
+      expect(config.allowedHostsError, bad).toBe(message);
+      expect(config.PROXION_NOTIFY_ALLOWED_HOSTS).toBeUndefined();
+      expect(allowedNotifyHosts(config), bad).toStrictEqual([]); // deny-all, NOT "unset"
+      // the rest of the notify env is untouched (T59 behaviour is unchanged)
+      expect(config.notifyConfigError).toBeUndefined();
+      expect(config.PROXION_NOTIFY_WEBHOOK_URL).toBe('https://hooks.example.com/x');
     }
+
+    // an allowlist error and a T59 error are independent
+    const both = loadConfig({ ...baseEnv, PROXION_NOTIFY_WEBHOOK_FORMAT: 'nope', PROXION_NOTIFY_ALLOWED_HOSTS: 'a:1' });
+    expect(both.allowedHostsError).toBe(message);
+    expect(both.notifyConfigError).toContain('PROXION_NOTIFY_WEBHOOK_FORMAT');
+  });
+
+  it('deny-all builds nothing and warns once, naming the key and not the hosts', () => {
+    const warn = vi.fn();
+    expect(buildNotifyChannels(FULL, { allowedHosts: [], log: { warn } })).toHaveLength(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain('PROXION_NOTIFY_ALLOWED_HOSTS');
+    expect(logged).not.toContain('example.com');
   });
 
   it('buildNotifyChannels drops a target outside the allowlist with a warning naming the key, never the host', () => {

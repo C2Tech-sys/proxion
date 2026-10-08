@@ -306,7 +306,10 @@ go, set `PROXION_NOTIFY_ALLOWED_HOSTS` to a comma-separated list of host names (
 exact match, a trailing dot is ignored, `*.example.com` matches exactly one extra label, ports are not
 compared). When set, saving a webhook or SMTP URL on any other host is refused, and a saved
 destination that no longer matches (for example after you tighten the list) is dropped at startup
-with a warning that names the setting but not the host. Unset means no restriction.
+with a warning that names the setting but not the host. Unset means no restriction. A list that cannot
+be parsed (for example one with a port, `hooks.example.com:443`) fails closed: no destination is
+allowed, nothing is sent, saving is refused, and the Preferences page shows the error until you fix
+`proxion.env` and redeploy.
 
 The Preferences page shows which channels are configured and has a "Send test notification"
 button (a signed-in session only; disabled with a shared service token, same as every other write

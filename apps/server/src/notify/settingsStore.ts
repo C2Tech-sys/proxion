@@ -149,8 +149,10 @@ export function toPersistable(effective: EffectiveNotifySettings): NotifySetting
   return rest;
 }
 
-/** The configured allowlist (`PROXION_NOTIFY_ALLOWED_HOSTS`), normalised; `null` = unrestricted. */
+/** The configured allowlist (`PROXION_NOTIFY_ALLOWED_HOSTS`), normalised; `null` = unrestricted.
+ *  Fails closed: an invalid value (`config.allowedHostsError`) is deny-all (`[]`), never "unset". */
 export function allowedNotifyHosts(config: Config): string[] | null {
+  if (config.allowedHostsError !== undefined) return [];
   return parseAllowedHosts(config.PROXION_NOTIFY_ALLOWED_HOSTS);
 }
 
@@ -171,12 +173,10 @@ export function buildNotifyChannels(
   options: { allowedHosts?: readonly string[] | null; log?: Pick<NotifyLogger, 'warn'> } = {},
 ): NotifyChannel[] {
   const allowed = options.allowedHosts ?? null;
+  const dropped: string[] = [];
   const permitted = (channel: 'webhook' | 'email', url: string): boolean => {
     if (hostIsAllowed(hostnameOf(url), allowed)) return true;
-    options.log?.warn(
-      { key: 'PROXION_NOTIFY_ALLOWED_HOSTS', channel },
-      'Notification channel dropped: its host is not in PROXION_NOTIFY_ALLOWED_HOSTS',
-    );
+    dropped.push(channel);
     return false;
   };
   const channels: NotifyChannel[] = [];
@@ -196,6 +196,12 @@ export function buildNotifyChannels(
         from: settings.email.from,
         to: settings.email.to.join(','),
       }),
+    );
+  }
+  if (dropped.length > 0) {
+    options.log?.warn(
+      { key: 'PROXION_NOTIFY_ALLOWED_HOSTS', channels: dropped },
+      'Notification channels dropped: their host is not allowed by PROXION_NOTIFY_ALLOWED_HOSTS',
     );
   }
   return channels;
@@ -281,6 +287,9 @@ declare module 'fastify' {
   interface FastifyInstance {
     /** The persisted, runtime-editable notification settings (T64). */
     notifySettingsStore: NotifySettingsStore;
+    /** Which channels the CURRENT notifier was actually built with (after the allowlist drop),
+     *  as opposed to which are merely stored in the settings (T64). */
+    notifierChannels: { webhook: boolean; email: boolean };
     /** Rebuilds the channels from the effective settings and swaps `app.notifier` without a
      *  restart (T64). Resolves once the swap is done; rejects if the new notifier cannot be built
      *  (the previous one then stays in place). */

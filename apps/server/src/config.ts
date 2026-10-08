@@ -135,6 +135,8 @@ function isBareEmailAddress(value: string): boolean {
  */
 const ALLOWED_HOST_ENTRY_RE = /^(\*\.)?([a-z0-9_]([a-z0-9_-]*[a-z0-9_])?)(\.[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?)*$|^\[[0-9a-f:.]+\]$/;
 
+export const ALLOWED_HOSTS_INVALID_MESSAGE = 'PROXION_NOTIFY_ALLOWED_HOSTS is invalid; fix proxion.env and redeploy';
+
 export function normaliseHostname(host: string): string {
   const lower = host.trim().toLowerCase();
   return lower.endsWith('.') ? lower.slice(0, -1) : lower;
@@ -230,15 +232,6 @@ const notifySchema = z
       )
       .optional(),
 
-    // Optional operator allowlist for where notifications may be sent (webhook / SMTP host names).
-    // Unset = no restriction. Enforced when settings are saved and when channels are built.
-    PROXION_NOTIFY_ALLOWED_HOSTS: z
-      .string()
-      .refine(isValidAllowedHostsValue, {
-        message: 'must be a comma-separated list of host names, optionally with a *.example.com wildcard',
-      })
-      .optional(),
-
     // The lowest severity that opens a notification (an alert below this is tracked but never
     // announced as "opened" -- see notify/notifier.ts). `healed`/resolution notices are governed
     // separately by PROXION_NOTIFY_INCLUDE_RESOLVED, not this threshold.
@@ -327,6 +320,15 @@ export type Config = Omit<
    * `GET /api/notify/status` surfaces it to the Preferences page.
    */
   notifyConfigError?: string;
+  /**
+   * `PROXION_NOTIFY_ALLOWED_HOSTS` (optional allowlist for webhook / SMTP destinations). Parsed
+   * apart from the other notify values because it is a security control and must FAIL CLOSED: when
+   * it is present but invalid, `allowedHostsError` is set (names the key, never the value) and the
+   * effective allowlist is deny-all (see `allowedNotifyHosts` in `notify/settingsStore.ts`) instead
+   * of reading as unset. Holds the raw list only while it is valid.
+   */
+  PROXION_NOTIFY_ALLOWED_HOSTS?: string;
+  allowedHostsError?: string;
   SESSION_SECRET: string;
   PROXION_COOKIE_SECURE: boolean;
   /** Parsed from `PROXION_AGENTS`: node name -> agent base URL (no trailing slash). Empty when unset. */
@@ -410,6 +412,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const notify = notifyParsed.success ? notifyParsed.data : notifySchema.parse({});
   const notifyConfigError = notifyParsed.success ? undefined : formatNotifyError(notifyParsed.error, env);
 
+  const rawAllowedHosts = env.PROXION_NOTIFY_ALLOWED_HOSTS;
+  const allowedHostsError =
+    rawAllowedHosts !== undefined && !isValidAllowedHostsValue(rawAllowedHosts)
+      ? ALLOWED_HOSTS_INVALID_MESSAGE
+      : undefined;
+
   let sessionSecret = raw.SESSION_SECRET;
   if (!sessionSecret) {
     if (raw.NODE_ENV === 'production') {
@@ -473,6 +481,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ...rest,
     ...notify,
     ...(notifyConfigError !== undefined ? { notifyConfigError } : {}),
+    ...(rawAllowedHosts !== undefined && allowedHostsError === undefined ? { PROXION_NOTIFY_ALLOWED_HOSTS: rawAllowedHosts } : {}),
+    ...(allowedHostsError !== undefined ? { allowedHostsError } : {}),
     SESSION_SECRET: sessionSecret,
     PROXION_COOKIE_SECURE: cookieSecure,
     PROXION_DATA_DIR: dataDir,

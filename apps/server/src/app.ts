@@ -106,6 +106,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
           : 'Proxion notification channels: none configured',
       );
     }
+    app.notifierChannels = {
+      webhook: channels.some((c) => c.name === 'webhook'),
+      email: channels.some((c) => c.name === 'email'),
+    };
     if (channels.length === 0) return undefined;
     return Notifier.create({
       dataDir: notifyDataDir,
@@ -123,6 +127,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     });
   };
 
+  app.decorate('notifierChannels', { webhook: false, email: false });
+  // Fail closed (see `Config.allowedHostsError`): said once, loudly, at boot; the key only, never the value.
+  if (config.allowedHostsError) app.log.warn(`Notification destinations disabled: ${config.allowedHostsError}`);
   const initialSettings = effectiveNotifySettings(config, notifySettingsStore.current);
   app.decorate('notifier', await startNotifier(initialSettings, buildNotifyChannels(initialSettings, { allowedHosts: allowedNotifyHosts(config), log: app.log })));
 
