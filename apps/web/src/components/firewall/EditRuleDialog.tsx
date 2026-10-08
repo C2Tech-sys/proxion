@@ -130,7 +130,8 @@ export function EditRuleDialog({
   const mutation = isNew ? add : update;
   const groups = useSecurityGroups();
   const macros = useFirewallMacros();
-  const refs = useClusterRefs(!isGuest);
+  // A guest's pickers offer its own aliases / IP sets next to the inherited datacenter ones.
+  const refs = useClusterRefs(true, scope);
 
   const [form, setForm] = useState<RuleForm>(() => formFromRule(rule, initialType ?? 'in'));
   const set = <K extends keyof RuleForm>(key: K, value: RuleForm[K]) => setForm((prev) => ({ ...prev, [key]: value }));
@@ -319,7 +320,7 @@ export function EditRuleDialog({
                 <Field label="Source" htmlFor={`${id}-source`} error={errors.source} hint="IP, CIDR, range, alias or +ipset.">
                   <Input
                     id={`${id}-source`}
-                    list={isGuest ? undefined : `${id}-refs`}
+                    list={`${id}-refs`}
                     value={form.source}
                     onChange={(e) => set('source', e.target.value)}
                     disabled={busy}
@@ -331,7 +332,7 @@ export function EditRuleDialog({
                 <Field label="Destination" htmlFor={`${id}-dest`} error={errors.dest} hint="IP, CIDR, range, alias or +ipset.">
                   <Input
                     id={`${id}-dest`}
-                    list={isGuest ? undefined : `${id}-refs`}
+                    list={`${id}-refs`}
                     value={form.dest}
                     onChange={(e) => set('dest', e.target.value)}
                     disabled={busy}
@@ -339,15 +340,13 @@ export function EditRuleDialog({
                     autoComplete="off"
                   />
                 </Field>
-                {!isGuest && (
-                  <datalist id={`${id}-refs`}>
-                    {refOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </datalist>
-                )}
+                <datalist id={`${id}-refs`}>
+                  {refOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </datalist>
                 <Field label="Source port" htmlFor={`${id}-sport`} error={errors.sport} hint="80, 8000:8100, a service name or a list.">
                   <Input
                     id={`${id}-sport`}

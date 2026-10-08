@@ -14,6 +14,7 @@ import { registerBootOrderRoutes } from './bootOrderRoutes.js';
 import { registerDiskRoutes } from './diskRoutes.js';
 import { registerNetworkRoutes } from './networkRoutes.js';
 import { registerNodeNetworkRoutes } from './nodeNetworkRoutes.js';
+import { registerGuestFirewallRefsRoutes } from './guestFirewallRefsRoutes.js';
 import { registerCreateCtRoutes } from './createCtRoutes.js';
 import { registerCreateVmRoutes } from './createVmRoutes.js';
 import { registerOptionsRoutes } from './optionsRoutes.js';
@@ -478,4 +479,6 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // Node network editor: interface create/edit/delete + apply/revert (`nodeNetworkRoutes.ts`) share the
   // same bucket, same rationale.
   registerNodeNetworkRoutes(app, guestActionsRateLimit);
+  // Guest firewall aliases + IP sets (`guestFirewallRefsRoutes.ts`, T73): same bucket, same rationale.
+  registerGuestFirewallRefsRoutes(app, guestActionsRateLimit);
 }

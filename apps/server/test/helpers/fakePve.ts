@@ -316,6 +316,16 @@ export interface FakePve {
     failure: { status: number; message: string; errors?: Record<string, string> } | undefined,
   ) => void;
   // --- end T69 ---
+  // --- T73 guest firewall aliases and IP sets ---
+  /** Every guest firewall alias / IP set write PVE has received (`POST`/`PUT`/`DELETE`
+   * `/nodes/{node}/{type}/{vmid}/firewall/aliases[/{name}]` and `.../firewall/ipset[/{name}[/{cidr}]]`),
+   * in order: method + the raw request path (so an encoded `%2F` in an ipset CIDR is visible) + the
+   * parsed form body (POST/PUT) or query string (DELETE). Used by `guestFirewallRefsRoutes.test.ts` (T73). */
+  guestRefsCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }>;
+  /** Makes every guest firewall alias / IP set write fail with the given status/message until called
+   * again with `undefined`. */
+  setGuestRefsError: (failure: { status: number; message: string } | undefined) => void;
+  // --- end T73 ---
   close: () => Promise<void>;
 }
 
@@ -1378,6 +1388,47 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     reply.send({ data: null });
   });
   // --- end T69 ---
+  // --- T73 guest firewall aliases and IP sets ---
+  // `POST`/`PUT`/`DELETE /nodes/{node}/{qemu|lxc}/{vmid}/firewall/{aliases,ipset}[...]` that
+  // `src/actions/guestFirewallRefsRoutes.ts` issues, recorded like the datacenter block above, plus
+  // the four reads the web goes through the proxy for (aliases, ipset list, one set's entries, refs).
+  const guestRefsCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }> = [];
+  let guestRefsFailure: { status: number; message: string } | undefined;
+  for (const type of ['qemu', 'lxc'] as const) {
+    for (const route of ['aliases', 'aliases/:name', 'ipset', 'ipset/:name', 'ipset/:name/:cidr']) {
+      for (const method of ['POST', 'PUT', 'DELETE'] as const) {
+        app.route({
+          method,
+          url: `/api2/json/nodes/:node/${type}/:vmid/firewall/${route}`,
+          handler: async (req, reply) => {
+            const body = (method === 'DELETE' ? req.query : req.body) ?? {};
+            guestRefsCalls.push({ method, path: req.url.split('?')[0]!, body: { ...(body as Record<string, string>) } });
+            if (guestRefsFailure) {
+              reply.code(guestRefsFailure.status).send({ data: null, message: guestRefsFailure.message });
+              return;
+            }
+            reply.send({ data: null });
+          },
+        });
+      }
+    }
+    app.get(`/api2/json/nodes/:node/${type}/:vmid/firewall/aliases`, async () => ({
+      data: [{ name: 'web-net', cidr: '10.1.0.0/24', digest: 'guestfwdigest' }],
+    }));
+    app.get(`/api2/json/nodes/:node/${type}/:vmid/firewall/ipset`, async () => ({
+      data: [{ name: 'allowed', comment: 'Allowed hosts', digest: 'guestfwdigest' }],
+    }));
+    app.get(`/api2/json/nodes/:node/${type}/:vmid/firewall/ipset/:name`, async () => ({
+      data: [{ cidr: '10.1.0.5', nomatch: 0, digest: 'guestfwdigest' }],
+    }));
+    app.get(`/api2/json/nodes/:node/${type}/:vmid/firewall/refs`, async () => ({
+      data: [
+        { ref: 'guest/web-net', name: 'web-net', type: 'alias', scope: 'guest' },
+        { ref: '+dc/trusted', name: 'trusted', type: 'ipset', scope: 'dc' },
+      ],
+    }));
+  }
+  // --- end T73 ---
 
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
@@ -1706,6 +1757,14 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       else networkErrors.delete(op);
     },
     // --- end T69 ---
+    // --- T73 guest firewall aliases and IP sets ---
+    get guestRefsCalls() {
+      return guestRefsCalls;
+    },
+    setGuestRefsError: (failure: { status: number; message: string } | undefined) => {
+      guestRefsFailure = failure;
+    },
+    // --- end T73 ---
     close: () => app.close(),
   };
 }

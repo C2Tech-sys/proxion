@@ -1,4 +1,4 @@
-import { useState, type ComponentType } from 'react';
+import { useMemo, useState, type ComponentType } from 'react';
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -7,7 +7,11 @@ import { Panel } from '@/components/Panel';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { TabStrip } from '@/components/TabStrip';
+import { AliasesPanel } from '@/components/clusterfirewall/AliasesPanel';
+import { IpSetsPanel } from '@/components/clusterfirewall/IpSetsPanel';
 import { DeleteRuleDialog } from '@/components/firewall/DeleteRuleDialog';
 import { EditRuleDialog } from '@/components/firewall/EditRuleDialog';
 import { FirewallOptionsCard } from '@/components/firewall/FirewallOptionsCard';
@@ -18,10 +22,19 @@ import { errorMessage } from '@/api/errors';
 import { hardwareErrorMessage } from '@/api/hardwareHooks';
 import { useFirewallOptions, useFirewallRules, useUpdateFirewallRule } from '@/api/firewallHooks';
 import type { FirewallRule, FirewallRuleType } from '@/api/firewall';
+import type { FirewallTarget } from '@/api/clusterFirewall';
 import { cn } from '@/lib/utils';
 import type { VmTabProps } from '@/pages/vm/tabs';
 
 const FIREWALL_PRIVILEGE = 'VM.Config.Network';
+
+const SUB_TABS = [
+  { value: 'rules', label: 'Rules' },
+  { value: 'aliases', label: 'Aliases' },
+  { value: 'ipsets', label: 'IP Sets' },
+] as const;
+
+type SubTab = (typeof SUB_TABS)[number]['value'];
 
 type DialogTarget =
   | { kind: 'add'; initialType: FirewallRuleType }
@@ -72,36 +85,22 @@ function RuleActionButton({
   );
 }
 
-/**
- * The guest's firewall (PVE's per-guest Firewall panel): the firewall options as one card and the
- * rule list as a table, with add / edit / delete / enable-disable / reorder. Reads go through the
- * read-only `/api/pve/*` proxy; every change goes through the allow-listed
- * `/api/actions/guest/.../firewall/*` routes, which need a signed-in session and `VM.Config.Network`
- * on the guest (that is what pve-firewall checks) -- the controls are gated on the same two
- * conditions, a disabled one carrying the reason as its tooltip. Aliases, IP sets, the firewall log
- * and the datacenter/node firewall are not part of this tab.
- *
- * Edits, deletes, moves and option changes forward the digest of the last read, so editing a
- * firewall someone else just changed is rejected by PVE rather than silently overwriting their
- * rules (adding a rule appends and needs no digest).
- */
-export function FirewallTab({ node, type, vmid }: VmTabProps) {
-  const auth = useAuthMe();
-  const permissions = usePermissions(vmid);
+interface RulesSectionProps {
+  node: string;
+  type: 'qemu' | 'lxc';
+  vmid: number;
+  /** When set, every control is disabled and this is its tooltip. */
+  disabledReason: string | undefined;
+}
+
+/** The firewall options as one card and the rule list as a table, with add / edit / delete /
+ * enable-disable / reorder. */
+function RulesSection({ node, type, vmid, disabledReason }: RulesSectionProps) {
   const config = useVmConfig(node, type, vmid);
   const rules = useFirewallRules(node, type, vmid);
   const options = useFirewallOptions(node, type, vmid);
   const update = useUpdateFirewallRule();
   const [dialog, setDialog] = useState<DialogTarget | null>(null);
-
-  // Fixture/demo mode has no real session concept -- it always demonstrates the enabled state,
-  // same as the Hardware tab.
-  const isSessionMode = USE_FIXTURES || auth.data?.mode === 'session';
-  const disabledReason = !isSessionMode
-    ? 'Read-only: signed in with a service token'
-    : permissions.data?.can(FIREWALL_PRIVILEGE) !== true
-      ? `You don't have ${FIREWALL_PRIVILEGE} on this guest`
-      : undefined;
   const locked = disabledReason !== undefined;
 
   const list = rules.data ?? [];
@@ -150,7 +149,7 @@ export function FirewallTab({ node, type, vmid }: VmTabProps) {
   );
 
   return (
-    <div data-testid="firewall-tab">
+    <>
       {options.isLoading ? (
         <Skeleton className="mb-4 h-40 w-full" />
       ) : options.isError ? (
@@ -322,6 +321,52 @@ export function FirewallTab({ node, type, vmid }: VmTabProps) {
           digest={digest}
         />
       )}
+    </>
+  );
+}
+
+/**
+ * The guest's firewall (PVE's per-guest Firewall panel) as three sub-tabs: Rules (the firewall
+ * options and the rule list), Aliases and IP Sets. Reads go through the read-only `/api/pve/*`
+ * proxy; every change goes through the allow-listed `/api/actions/guest/.../firewall/*` routes,
+ * which need a signed-in session and `VM.Config.Network` on the guest (that is what pve-firewall
+ * checks) -- the controls are gated on the same two conditions, a disabled one carrying the reason as
+ * its tooltip. The aliases and IP sets are the datacenter firewall's panels pointed at this guest.
+ * The firewall log and the datacenter/node firewall are not part of this tab.
+ *
+ * Edits, deletes, moves and option changes forward the digest of the last read, so editing a
+ * firewall someone else just changed is rejected by PVE rather than silently overwriting their
+ * rules (adding a rule appends and needs no digest).
+ */
+export function FirewallTab({ node, type, vmid }: VmTabProps) {
+  const auth = useAuthMe();
+  const permissions = usePermissions(vmid);
+  const [sub, setSub] = useState<SubTab>('rules');
+  const target = useMemo<FirewallTarget>(() => ({ kind: 'guest', node, type, vmid }), [node, type, vmid]);
+
+  // Fixture/demo mode has no real session concept -- it always demonstrates the enabled state,
+  // same as the Hardware tab.
+  const isSessionMode = USE_FIXTURES || auth.data?.mode === 'session';
+  const disabledReason = !isSessionMode
+    ? 'Read-only: signed in with a service token'
+    : permissions.data?.can(FIREWALL_PRIVILEGE) !== true
+      ? `You don't have ${FIREWALL_PRIVILEGE} on this guest`
+      : undefined;
+
+  return (
+    <div data-testid="firewall-tab">
+      <Tabs value={sub} onValueChange={(next) => setSub(next as SubTab)}>
+        <TabStrip tabs={[...SUB_TABS]} />
+        <TabsContent value="rules">
+          <RulesSection node={node} type={type} vmid={vmid} disabledReason={disabledReason} />
+        </TabsContent>
+        <TabsContent value="aliases">
+          <AliasesPanel target={target} disabledReason={disabledReason} />
+        </TabsContent>
+        <TabsContent value="ipsets">
+          <IpSetsPanel target={target} disabledReason={disabledReason} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
