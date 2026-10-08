@@ -37,6 +37,15 @@ export interface NotifierOptions {
   getResources?: () => readonly ResourceLike[];
   /** Per-batch channel-send attempts before giving up and logging at `error`. Default 3. */
   maxAttempts?: number;
+  /** Master switch (T64). `false` -> nothing is ever sent, but snapshots still advance the
+   *  baseline (see `isSuppressed`). Default `true`. */
+  enabled?: boolean;
+  /** ISO timestamp (T64): while it is in the future nothing is sent (same semantics as
+   *  `enabled: false`). An expired value is simply ignored. */
+  muteUntil?: string | undefined;
+  /** Alert kinds that are never notified (T64) -- their events are dropped after the transition
+   *  bookkeeping, so un-muting a kind does not replay what happened while it was muted. */
+  mutedKinds?: readonly Alert['kind'][];
 }
 
 interface PersistedState {
@@ -89,6 +98,8 @@ export class Notifier {
    *  deterministically wait for that flush's channel sends (and their retries) to finish, rather
    *  than racing them. */
   private lastFlush: Promise<void> = Promise.resolve();
+  /** Set by `stop()` (T64): a replaced notifier ignores further snapshots. */
+  private stopped = false;
 
   private constructor(private readonly options: NotifierOptions) {
     this.clock = options.clock ?? (() => Date.now());
@@ -123,7 +134,38 @@ export class Notifier {
    *  async work is chained internally; `processSnapshot` itself never rejects (it catches and
    *  logs internally), so this chain never produces an unhandled rejection either. */
   onAlerts(alerts: Alert[]): void {
+    if (this.stopped) return;
     this.chain = this.chain.then(() => this.processSnapshot(alerts));
+  }
+
+  /** Retires this notifier (T64 hot reload): waits for in-flight snapshot processing so
+   *  `notify-state.json` is fully written before the replacement reads it, cancels the debounce
+   *  timer and drops any not-yet-sent batch, and ignores later snapshots. The dropped batch is
+   *  deliberate: settings were just changed (possibly "mute"), and a batch that was held back
+   *  for the debounce window must not be sent under the old rules. A send already in flight is
+   *  left to finish. Idempotent. */
+  async stop(): Promise<void> {
+    this.stopped = true;
+    await this.chain; // a snapshot already in flight may still schedule a flush -- clear it after
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = undefined;
+    }
+    this.pendingEvents = [];
+  }
+
+  /** True while nothing may be sent: the master switch is off, or `muteUntil` is in the future.
+   *  Evaluated per snapshot (and per test-free flush), so an expiring mute needs no timer. */
+  private isSuppressed(): boolean {
+    if (this.options.enabled === false) return true;
+    const until = this.options.muteUntil ? Date.parse(this.options.muteUntil) : Number.NaN;
+    return !Number.isNaN(until) && until > this.clock();
+  }
+
+  private dropMutedKinds(events: NotifyEvent[]): NotifyEvent[] {
+    const muted = this.options.mutedKinds;
+    if (!muted || muted.length === 0) return events;
+    return events.filter((event) => !muted.includes(event.kind));
   }
 
   /** Waits for every currently-chained/in-flight snapshot processing (and, on tests using a real
@@ -156,8 +198,13 @@ export class Notifier {
       this.known = nextKnown;
       await this.persistState();
 
-      if (events.length === 0) return;
-      this.pendingEvents.push(...this.enrich(events));
+      // Muting (T64) happens AFTER the transition bookkeeping above: `known` and the persisted
+      // state keep following reality, so un-muting never replays what happened meanwhile -- the
+      // events are simply not queued.
+      if (this.isSuppressed()) return;
+      const wanted = this.dropMutedKinds(events);
+      if (wanted.length === 0) return;
+      this.pendingEvents.push(...this.enrich(wanted));
       this.scheduleFlush();
     } catch (error) {
       this.options.log.error({ err: describeError(error) }, 'Notifier: failed to process alerts snapshot');
@@ -199,7 +246,13 @@ export class Notifier {
     this.known = nextKnown;
     this.firstRun = false;
     await this.persistState();
-    await this.deliver({ kind: 'summary', siteName: this.options.siteName, events: summaryEvents });
+    // T64: the baseline is seeded either way; a muted/disabled notifier just skips the
+    // "notifications are active" summary (it is not replayed on un-mute), and a summary whose
+    // every alert belongs to a muted kind is skipped rather than claiming "no current alerts".
+    if (this.isSuppressed()) return;
+    const wanted = this.dropMutedKinds(summaryEvents);
+    if (wanted.length === 0 && summaryEvents.length > 0) return;
+    await this.deliver({ kind: 'summary', siteName: this.options.siteName, events: wanted });
   }
 
   /** The resources snapshot for presentation lookups -- never throws (a failing provider just

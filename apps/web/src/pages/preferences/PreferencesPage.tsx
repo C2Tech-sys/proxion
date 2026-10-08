@@ -3,6 +3,7 @@ import { Check } from 'lucide-react';
 
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { Panel } from '@/components/Panel';
+import { NotificationSettingsForm } from '@/components/notifications/NotificationSettingsForm';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -121,7 +122,7 @@ function NotificationsSection({
         description={
           hasAnyChannel
             ? `Configured: ${channelNames.join(', ')}`
-            : 'Set PROXION_NOTIFY_WEBHOOK_URL, or PROXION_NOTIFY_SMTP_URL with PROXION_NOTIFY_EMAIL_FROM/_TO, to enable notifications.'
+            : 'Add a webhook or email below, or set PROXION_NOTIFY_WEBHOOK_URL, or PROXION_NOTIFY_SMTP_URL with PROXION_NOTIFY_EMAIL_FROM/_TO, to enable notifications.'
         }
       >
         {readOnly ? (
@@ -343,7 +344,7 @@ export function PreferencesPage() {
           </div>
         </Panel>
 
-        <Panel title="Notifications">
+        <Panel title="Notifications" className="lg:col-span-2">
           <NotificationsSection
             readOnly={readOnly}
             configured={notifyStatus?.configured}
@@ -351,6 +352,9 @@ export function PreferencesPage() {
             onSendTest={() => sendTest.mutate()}
             sending={sendTest.isPending}
           />
+          <div className="border-t border-border">
+            <NotificationSettingsForm />
+          </div>
         </Panel>
 
         <Panel title="Account" className="lg:col-span-2">

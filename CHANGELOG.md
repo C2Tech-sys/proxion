@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Notification settings in the app: the Preferences page can now switch notifications on or off,
+  snooze them (1 h, 8 h, 24 h, 7 days), mute individual alert kinds (backups, failed tasks, storage
+  usage), and edit the delivery options and the webhook / email channel details, with no command
+  line. Needs a signed-in session and `Sys.Modify` on `/`. The `PROXION_NOTIFY_*` variables stay the
+  defaults; saving writes `notify-settings.json` (mode 0600) into the data directory, which then
+  takes over and is applied immediately, without a restart. Secrets are never sent back to the
+  browser. New routes: `GET`/`PUT /api/notify/settings` and `POST /api/notify/mute`.
+
 ## [0.11.0] - 2026-10-06
 
 ### Added

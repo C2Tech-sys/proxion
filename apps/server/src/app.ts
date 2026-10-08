@@ -24,8 +24,12 @@ import { Poller } from './poller/poller.js';
 import { createPveDispatcher, createPveWsAgent } from './pve/dispatcher.js';
 import { buildPveClient } from './pve/client.js';
 import { Notifier } from './notify/notifier.js';
-import { createWebhookChannel } from './notify/channels/webhook.js';
-import { createEmailChannel } from './notify/channels/email.js';
+import {
+  NotifySettingsStore,
+  buildNotifyChannels,
+  effectiveNotifySettings,
+  type EffectiveNotifySettings,
+} from './notify/settingsStore.js';
 import type { NotifyChannel } from './notify/types.js';
 import type { ResourceLike } from '@proxion/core';
 
@@ -76,73 +80,78 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const poller = tokenClient ? new Poller(tokenClient, app.log) : undefined;
   app.decorate('proxionPoller', poller);
 
-  // --- Alert notifications (T43) -- one channel per configured webhook/SMTP target, and a
-  // Notifier only when at least one exists (a deployment with none configured just never
-  // decorates `app.notifier`; see notify/routes.ts's `not-configured` response). ---
+  // --- Alert notifications (T43, runtime-editable since T64) -- one channel per configured
+  // webhook/SMTP target, and a Notifier only when at least one exists (a deployment with none
+  // configured just leaves `app.notifier` undefined; see notify/routes.ts's `not-configured`
+  // response). The configuration in force is `notify-settings.json` when it exists, else the
+  // PROXION_NOTIFY_* env values (`effectiveNotifySettings`); `app.reloadNotifier()` re-reads it
+  // and swaps the notifier without a restart. ---
   // A bad PROXION_NOTIFY_* value (`config.notifyConfigError`, T59) disables notifications with
   // one loud warning instead of ever stopping the server; `loadConfig` has already dropped every
-  // channel field in that case, so the channel list below is empty by construction.
-  const notifyChannels: NotifyChannel[] = [];
-  if (config.PROXION_NOTIFY_WEBHOOK_URL && !config.notifyConfigError) {
-    notifyChannels.push(
-      createWebhookChannel({
-        url: config.PROXION_NOTIFY_WEBHOOK_URL,
-        format: config.PROXION_NOTIFY_WEBHOOK_FORMAT,
-        token: config.PROXION_NOTIFY_WEBHOOK_TOKEN,
-      }),
-    );
-  }
-  if (
-    !config.notifyConfigError &&
-    config.PROXION_NOTIFY_SMTP_URL &&
-    config.PROXION_NOTIFY_EMAIL_FROM &&
-    config.PROXION_NOTIFY_EMAIL_TO
-  ) {
-    notifyChannels.push(
-      createEmailChannel({
-        smtpUrl: config.PROXION_NOTIFY_SMTP_URL,
-        from: config.PROXION_NOTIFY_EMAIL_FROM,
-        to: config.PROXION_NOTIFY_EMAIL_TO,
-      }),
-    );
-  }
-  // Host names only -- never the webhook URL/token or the SMTP connection string.
-  if (config.notifyConfigError) {
-    app.log.warn(`Notifications disabled: ${config.notifyConfigError}`);
-  } else {
-    app.log.info(
-      {
-        channels: notifyChannels.length > 0 ? notifyChannels.map((c) => ({ name: c.name, host: c.host })) : [],
-      },
-      notifyChannels.length > 0
-        ? 'Proxion notification channels configured'
-        : 'Proxion notification channels: none configured',
-    );
-  }
+  // channel field in that case, so the env-derived channel list is empty by construction.
+  const notifyDataDir = path.resolve(process.cwd(), config.PROXION_DATA_DIR);
+  const notifySettingsStore = await NotifySettingsStore.load(notifyDataDir, app.log);
+  app.decorate('notifySettingsStore', notifySettingsStore);
 
-  const notifier =
-    notifyChannels.length > 0
-      ? await Notifier.create({
-          dataDir: path.resolve(process.cwd(), config.PROXION_DATA_DIR),
-          minSeverity: config.PROXION_NOTIFY_MIN_SEVERITY,
-          includeResolved: config.PROXION_NOTIFY_INCLUDE_RESOLVED,
-          debounceMs: config.PROXION_NOTIFY_DEBOUNCE_MS,
-          siteName: config.PROXION_NOTIFY_SITE_NAME,
-          publicUrl: config.PROXION_PUBLIC_URL,
-          channels: notifyChannels,
-          log: app.log,
-          getResources: () => (poller?.getSnapshot().resources ?? []) as ResourceLike[],
-        })
-      : undefined;
-  app.decorate('notifier', notifier);
-  if (notifier && poller) {
+  const startNotifier = async (settings: EffectiveNotifySettings, channels: NotifyChannel[]) => {
+    // Host names only -- never the webhook URL/token or the SMTP connection string.
+    if (config.notifyConfigError && settings.source === 'env') {
+      app.log.warn(`Notifications disabled: ${config.notifyConfigError}`);
+    } else {
+      app.log.info(
+        { channels: channels.map((c) => ({ name: c.name, host: c.host })) },
+        channels.length > 0
+          ? 'Proxion notification channels configured'
+          : 'Proxion notification channels: none configured',
+      );
+    }
+    if (channels.length === 0) return undefined;
+    return Notifier.create({
+      dataDir: notifyDataDir,
+      minSeverity: settings.minSeverity,
+      includeResolved: settings.includeResolved,
+      debounceMs: settings.debounceMs,
+      siteName: settings.siteName,
+      publicUrl: settings.publicUrl,
+      channels,
+      log: app.log,
+      getResources: () => (poller?.getSnapshot().resources ?? []) as ResourceLike[],
+      enabled: settings.enabled,
+      muteUntil: settings.muteUntil,
+      mutedKinds: settings.mutedKinds,
+    });
+  };
+
+  const initialSettings = effectiveNotifySettings(config, notifySettingsStore.current);
+  app.decorate('notifier', await startNotifier(initialSettings, buildNotifyChannels(initialSettings)));
+
+  // Reloads are serialised. Channels are built BEFORE the old notifier is retired, so a settings
+  // value that cannot produce a channel leaves the running notifier untouched; the old one is
+  // then stopped (state flushed to notify-state.json, pending batch dropped) before its
+  // replacement reads that state, so there is no re-notification storm.
+  let reloadChain: Promise<void> = Promise.resolve();
+  app.decorate('reloadNotifier', () => {
+    const run = reloadChain.then(async () => {
+      const settings = effectiveNotifySettings(config, notifySettingsStore.current);
+      const channels = buildNotifyChannels(settings);
+      const previous = app.notifier;
+      await previous?.stop();
+      app.notifier = await startNotifier(settings, channels);
+    });
+    reloadChain = run.catch(() => undefined);
+    return run;
+  });
+
+  // Resolved at event time (not captured), so a reloaded notifier receives the very next snapshot.
+  if (poller) {
     poller.on((event) => {
-      if (event.type === 'alerts') notifier.onAlerts(event.data);
+      if (event.type === 'alerts') app.notifier?.onAlerts(event.data);
     });
   }
 
   app.addHook('onClose', async () => {
     poller?.stop();
+    await app.notifier?.stop();
     pveWsAgent?.destroy();
     if (pveDispatcher) await pveDispatcher.close();
   });

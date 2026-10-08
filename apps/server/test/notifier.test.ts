@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Alert } from '@proxion/core';
 import { summaryHeadline } from '../src/notify/format.js';
-import { Notifier } from '../src/notify/notifier.js';
+import { Notifier, type NotifierOptions } from '../src/notify/notifier.js';
 import type { NotifyChannel, NotifyMessage } from '../src/notify/types.js';
 
 /** A `NotifyLogger` (structurally -- `Notifier.create` accepts it as one) whose three methods are
@@ -452,5 +452,144 @@ describe('Notifier', () => {
     await notifier.sendTest();
     const message = channel.send.mock.calls[0]![0] as NotifyMessage;
     expect(message.events.every((event) => event.url === undefined)).toBe(true);
+  });
+});
+
+// --- T64: master switch, snooze and per-kind muting ---------------------------------------------
+describe('Notifier muting (T64)', () => {
+  let dataDir: string;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    dataDir = mkdtempSync(path.join(os.tmpdir(), 'proxion-notify-mute-test-'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const backupFailed = alert({ id: 'backup:100', kind: 'backup', severity: 'error', title: 'Backup of VM 100 failed' });
+  const diskFull = alert({ id: 'storage:local', kind: 'storage', severity: 'error', title: 'Storage local is full' });
+
+  /** Seeds the first-run baseline with an empty snapshot, then clears the summary send. */
+  async function seeded(extra: Partial<NotifierOptions> = {}) {
+    const channel = fakeChannel('webhook');
+    const notifier = await Notifier.create({
+      ...BASE_OPTIONS,
+      dataDir,
+      channels: [channel],
+      log: fakeLogger(),
+      ...extra,
+    });
+    notifier.onAlerts([]);
+    await notifier.flushForTest();
+    channel.send.mockClear();
+    return { channel, notifier };
+  }
+
+  it('drops events of a muted kind and still sends the others', async () => {
+    const { channel, notifier } = await seeded({ mutedKinds: ['backup'] });
+    notifier.onAlerts([backupFailed, diskFull]);
+    await notifier.flushForTest();
+    await advanceAndFlush(notifier, BASE_OPTIONS.debounceMs);
+
+    expect(channel.send).toHaveBeenCalledTimes(1);
+    const message = channel.send.mock.calls[0]![0] as NotifyMessage;
+    expect(message.events.map((event) => event.kind)).toEqual(['storage']);
+  });
+
+  it('a muted kind is still tracked: un-muting does not replay it', async () => {
+    const { channel, notifier } = await seeded({ mutedKinds: ['backup'] });
+    notifier.onAlerts([backupFailed]);
+    await notifier.flushForTest();
+    await advanceAndFlush(notifier, BASE_OPTIONS.debounceMs);
+    expect(channel.send).not.toHaveBeenCalled();
+
+    // A new notifier over the same state, with nothing muted: the alert is already known/open.
+    const fresh = fakeChannel('webhook');
+    const unmuted = await Notifier.create({ ...BASE_OPTIONS, dataDir, channels: [fresh], log: fakeLogger() });
+    unmuted.onAlerts([backupFailed]);
+    await unmuted.flushForTest();
+    await advanceAndFlush(unmuted, BASE_OPTIONS.debounceMs);
+    expect(fresh.send).not.toHaveBeenCalled();
+  });
+
+  it('enabled: false sends nothing, not even the first-run summary, but seeds the baseline', async () => {
+    const channel = fakeChannel('webhook');
+    const notifier = await Notifier.create({
+      ...BASE_OPTIONS,
+      dataDir,
+      channels: [channel],
+      log: fakeLogger(),
+      enabled: false,
+    });
+    notifier.onAlerts([backupFailed]);
+    await notifier.flushForTest();
+    notifier.onAlerts([backupFailed, diskFull]);
+    await notifier.flushForTest();
+    await advanceAndFlush(notifier, BASE_OPTIONS.debounceMs);
+    expect(channel.send).not.toHaveBeenCalled();
+
+    const state = JSON.parse(readFileSync(path.join(dataDir, 'notify-state.json'), 'utf8')) as {
+      alerts: Record<string, unknown>;
+    };
+    expect(Object.keys(state.alerts).sort()).toEqual(['backup:100', 'storage:local']);
+  });
+
+  it('a future muteUntil sends nothing; once it has expired new alerts are sent again', async () => {
+    const muteUntil = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const { channel, notifier } = await seeded({ muteUntil });
+
+    notifier.onAlerts([backupFailed]);
+    await notifier.flushForTest();
+    await advanceAndFlush(notifier, BASE_OPTIONS.debounceMs);
+    expect(channel.send).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000); // snooze over
+    notifier.onAlerts([backupFailed, diskFull]);
+    await notifier.flushForTest();
+    await advanceAndFlush(notifier, BASE_OPTIONS.debounceMs);
+
+    // Only the alert that opened after the snooze -- the one from during it is not replayed.
+    expect(channel.send).toHaveBeenCalledTimes(1);
+    const message = channel.send.mock.calls[0]![0] as NotifyMessage;
+    expect(message.events.map((event) => event.title)).toEqual(['Storage local is full']);
+  });
+
+  it('an already-expired muteUntil does not mute', async () => {
+    const muteUntil = new Date(Date.now() - 1000).toISOString();
+    const { channel, notifier } = await seeded({ muteUntil });
+    notifier.onAlerts([backupFailed]);
+    await notifier.flushForTest();
+    await advanceAndFlush(notifier, BASE_OPTIONS.debounceMs);
+    expect(channel.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('sendTest ignores enabled, muteUntil and mutedKinds', async () => {
+    const channel = fakeChannel('webhook');
+    const notifier = await Notifier.create({
+      ...BASE_OPTIONS,
+      dataDir,
+      channels: [channel],
+      log: fakeLogger(),
+      enabled: false,
+      muteUntil: new Date(Date.now() + 3_600_000).toISOString(),
+      mutedKinds: ['backup', 'task', 'storage'],
+    });
+    await expect(notifier.sendTest()).resolves.toEqual({ webhook: 'ok' });
+    expect(channel.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('stop() drops the unsent batch and ignores later snapshots', async () => {
+    const { channel, notifier } = await seeded();
+    notifier.onAlerts([backupFailed]);
+    await notifier.flushForTest(); // queued, debounce timer pending
+    await notifier.stop();
+    await vi.advanceTimersByTimeAsync(BASE_OPTIONS.debounceMs * 2);
+    notifier.onAlerts([backupFailed, diskFull]);
+    await notifier.flushForTest();
+    await vi.advanceTimersByTimeAsync(BASE_OPTIONS.debounceMs * 2);
+    expect(channel.send).not.toHaveBeenCalled();
   });
 });
