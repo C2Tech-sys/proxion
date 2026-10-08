@@ -263,6 +263,22 @@ export interface FakePve {
   /** Sets the `GET /cluster/backup/{id}/included_volumes` response for a job. */
   setBackupJobIncludedVolumes: (id: string, data: unknown) => void;
   // --- end T66 ---
+  // --- T68 access ---
+  /** Every `/access/*` write PVE has received (users, groups, acl, password, tokens), in order:
+   * method + path (as PVE saw it, percent-encoding intact) + the parsed form body (POST/PUT) or query
+   * string (DELETE). Used by `accessRoutes.test.ts` (T68). */
+  accessCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }>;
+  /** Makes every `/access/*` write fail with the given status/message/errors, until called again
+   * with `undefined`. */
+  setAccessError: (failure: { status: number; message: string; errors?: Record<string, string> } | undefined) => void;
+  /** Sets exactly which privileges `/access/permissions?path=<path>` reports for an `/access...` or
+   * `/pool/...` path (no defaults: absent a call, such a path grants nothing). */
+  setPathPermissions: (path: string, privs: Record<string, boolean>) => void;
+  /** Every `path` queried on `GET /access/permissions` that fell under `/access` or `/pool/`, in order. */
+  accessPermissionPaths: string[];
+  /** The API token secret `POST /access/users/{userid}/token/{tokenid}` returns (once). */
+  accessTokenSecret: string;
+  // --- end T68 ---
   close: () => Promise<void>;
 }
 
@@ -1120,6 +1136,74 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     reply.send({ data: null });
   });
   // --- end T66 ---
+  // --- T68 access ---
+  // `/access/users`, `/access/groups`, `/access/acl`, `/access/password` and the token endpoints,
+  // used by `src/actions/accessRoutes.ts`; plus `/access/permissions` answers for `/access...` and
+  // `/pool/...` paths (via a preHandler so the existing permissions handler stays untouched).
+  const accessCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }> = [];
+  let accessError: { status: number; message: string; errors?: Record<string, string> } | undefined;
+  const pathPerms = new Map<string, Record<string, boolean>>();
+  const accessPermissionPaths: string[] = [];
+  const ACCESS_TOKEN_SECRET = '5f1d7c1e-9a52-4c0e-8f0a-3b6f1a2d4e77';
+  app.addHook('preHandler', async (req, reply) => {
+    if (req.method !== 'GET' || req.url.split('?')[0] !== '/api2/json/access/permissions') return;
+    const path = (req.query as { path?: string }).path ?? '';
+    if (!(path === '/access' || path.startsWith('/access/') || path.startsWith('/pool/'))) return;
+    accessPermissionPaths.push(path);
+    const granted: Record<string, number> = {};
+    for (const [priv, grant] of Object.entries(pathPerms.get(path) ?? {})) {
+      if (grant) granted[priv] = 1;
+    }
+    return reply.send({ data: { [path]: granted } });
+  });
+  const recordAccess = (
+    method: 'POST' | 'PUT' | 'DELETE',
+    req: import('fastify').FastifyRequest,
+    reply: import('fastify').FastifyReply,
+  ): boolean => {
+    const body = (method === 'DELETE' ? req.query : req.body) ?? {};
+    accessCalls.push({ method, path: req.url.split('?')[0]!, body: { ...(body as Record<string, string>) } });
+    if (accessError) {
+      reply
+        .code(accessError.status)
+        .send({ data: null, message: accessError.message, ...(accessError.errors ? { errors: accessError.errors } : {}) });
+      return false;
+    }
+    return true;
+  };
+  for (const [method, route] of [
+    ['POST', '/api2/json/access/users'],
+    ['PUT', '/api2/json/access/users/:userid'],
+    ['DELETE', '/api2/json/access/users/:userid'],
+    ['PUT', '/api2/json/access/password'],
+    ['POST', '/api2/json/access/groups'],
+    ['PUT', '/api2/json/access/groups/:groupid'],
+    ['DELETE', '/api2/json/access/groups/:groupid'],
+    ['PUT', '/api2/json/access/acl'],
+    ['PUT', '/api2/json/access/users/:userid/token/:tokenid'],
+    ['DELETE', '/api2/json/access/users/:userid/token/:tokenid'],
+  ] as const) {
+    app.route({
+      method,
+      url: route,
+      handler: async (req, reply) => {
+        if (recordAccess(method, req, reply)) reply.send({ data: null });
+      },
+    });
+  }
+  app.post('/api2/json/access/users/:userid/token/:tokenid', async (req, reply) => {
+    if (!recordAccess('POST', req, reply)) return;
+    const { userid, tokenid } = req.params as { userid: string; tokenid: string };
+    const { privsep, comment, expire } = (req.body ?? {}) as Record<string, string | undefined>;
+    reply.send({
+      data: {
+        'full-tokenid': `${userid}!${tokenid}`,
+        info: { ...(comment !== undefined ? { comment } : {}), ...(expire !== undefined ? { expire: Number(expire) } : {}), privsep: privsep ?? '1' },
+        value: ACCESS_TOKEN_SECRET,
+      },
+    });
+  });
+  // --- end T68 ---
 
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
@@ -1389,6 +1473,21 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       backupJobVolumes.set(id, data);
     },
     // --- end T66 ---
+    // --- T68 access ---
+    get accessCalls() {
+      return accessCalls;
+    },
+    setAccessError: (failure: { status: number; message: string; errors?: Record<string, string> } | undefined) => {
+      accessError = failure;
+    },
+    setPathPermissions: (path: string, privs: Record<string, boolean>) => {
+      pathPerms.set(path, privs);
+    },
+    get accessPermissionPaths() {
+      return accessPermissionPaths;
+    },
+    accessTokenSecret: ACCESS_TOKEN_SECRET,
+    // --- end T68 ---
     close: () => app.close(),
   };
 }
