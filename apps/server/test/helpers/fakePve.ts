@@ -241,6 +241,18 @@ export interface FakePve {
   /** Makes the next `POST .../{type}/{vmid}/template` call for `vmid` fail with the given status/message. */
   setTemplateError: (type: 'qemu' | 'lxc', vmid: number, status: number, message: string) => void;
   // --- end T63 ---
+  // --- T66 backup jobs ---
+  /** Replaces the cluster's vzdump job list (`GET /cluster/backup`); rows are returned verbatim. */
+  setBackupJobs: (jobs: Array<Record<string, unknown>>) => void;
+  /** Every `POST /cluster/backup`, `PUT /cluster/backup/{id}` and `DELETE /cluster/backup/{id}` PVE
+   * has received, in order: method + job id (empty for the POST) + the parsed form body. Used by
+   * `backupJobRoutes.test.ts` (T66). */
+  backupJobCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; id: string; body: Record<string, string> }>;
+  /** Makes every backup-job write fail with the given status/message until called with `undefined`. */
+  setBackupJobError: (failure: { status: number; message: string; errors?: Record<string, string> } | undefined) => void;
+  /** Sets the `GET /cluster/backup/{id}/included_volumes` response for a job. */
+  setBackupJobIncludedVolumes: (id: string, data: unknown) => void;
+  // --- end T66 ---
   close: () => Promise<void>;
 }
 
@@ -988,6 +1000,73 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
   }
   // --- end T63 ---
 
+  // --- T66 backup jobs ---
+  // `GET/POST /cluster/backup`, `GET/PUT/DELETE /cluster/backup/{id}` and
+  // `GET /cluster/backup/{id}/included_volumes`, used by `src/actions/backupJobRoutes.ts`. A create
+  // answers `null` and generates the id itself, like real PVE. "Run now" reuses the vzdump recorder.
+  let backupJobs: Array<Record<string, unknown>> = [];
+  let backupJobSeq = 0;
+  let backupJobError: { status: number; message: string; errors?: Record<string, string> } | undefined;
+  const backupJobCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; id: string; body: Record<string, string> }> = [];
+  const backupJobVolumes = new Map<string, unknown>();
+  const failBackupJobWrite = (reply: { code: (n: number) => { send: (b: unknown) => void } }): boolean => {
+    if (!backupJobError) return false;
+    const failure = backupJobError;
+    reply
+      .code(failure.status)
+      .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
+    return true;
+  };
+  app.get('/api2/json/cluster/backup', async () => ({ data: backupJobs }));
+  app.get('/api2/json/cluster/backup/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const job = backupJobs.find((j) => j.id === id);
+    if (!job) {
+      reply.code(404).send({ data: null, message: `no such vzdump job ${id}` });
+      return;
+    }
+    reply.send({ data: job });
+  });
+  app.get('/api2/json/cluster/backup/:id/included_volumes', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!backupJobs.some((j) => j.id === id)) {
+      reply.code(404).send({ data: null, message: `no such vzdump job ${id}` });
+      return;
+    }
+    reply.send({ data: backupJobVolumes.get(id) ?? { children: [] } });
+  });
+  app.post('/api2/json/cluster/backup', async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, string>;
+    backupJobCalls.push({ method: 'POST', id: '', body });
+    if (failBackupJobWrite(reply)) return;
+    backupJobSeq += 1;
+    backupJobs.push({ ...body, id: body.id ?? `backup-fake-${backupJobSeq}` });
+    reply.send({ data: null });
+  });
+  app.put('/api2/json/cluster/backup/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, string>;
+    backupJobCalls.push({ method: 'PUT', id, body });
+    if (failBackupJobWrite(reply)) return;
+    const job = backupJobs.find((j) => j.id === id);
+    if (!job) {
+      reply.code(500).send({ data: null, message: `no such vzdump job ${id}` });
+      return;
+    }
+    const { delete: toDelete, ...rest } = body;
+    for (const key of (toDelete ?? '').split(',').filter(Boolean)) delete job[key];
+    Object.assign(job, rest);
+    reply.send({ data: null });
+  });
+  app.delete('/api2/json/cluster/backup/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    backupJobCalls.push({ method: 'DELETE', id, body: {} });
+    if (failBackupJobWrite(reply)) return;
+    backupJobs = backupJobs.filter((j) => j.id !== id);
+    reply.send({ data: null });
+  });
+  // --- end T66 ---
+
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
   return {
@@ -1234,6 +1313,20 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       templateErrors.set(`${type}:${vmid}`, { status, message });
     },
     // --- end T63 ---
+    // --- T66 backup jobs ---
+    setBackupJobs: (jobs: Array<Record<string, unknown>>) => {
+      backupJobs = jobs.map((j) => ({ ...j }));
+    },
+    get backupJobCalls() {
+      return backupJobCalls;
+    },
+    setBackupJobError: (failure: { status: number; message: string; errors?: Record<string, string> } | undefined) => {
+      backupJobError = failure;
+    },
+    setBackupJobIncludedVolumes: (id: string, data: unknown) => {
+      backupJobVolumes.set(id, data);
+    },
+    // --- end T66 ---
     close: () => app.close(),
   };
 }

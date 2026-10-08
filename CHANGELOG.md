@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Datacenter -> Backup Jobs: the Datacenter page's Backup Jobs tab manages the cluster's scheduled
+  vzdump jobs like PVE's Datacenter -> Backup panel. The table shows each job's schedule, next run,
+  storage, mode, which guests it covers, compression, retention and comment, with an inline
+  Enabled switch; add and edit a job (schedule presets or a custom calendar event, all guests with
+  an exclude list, a pool or chosen guests, keep-* retention, email notification, advanced
+  options), "Run now", a "Show included guests" sheet with each guest's volumes (a drive with
+  `backup=0` is marked), and delete behind a typed-job-id confirmation. Needs a signed-in session
+  and `Sys.Modify` on `/` (Run now: `VM.Backup` on each guest and `Datastore.AllocateSpace` on the
+  storage).
+
 ## [0.11.1] - 2026-10-08
 
 ### Security

@@ -20,6 +20,7 @@ import { registerCloudInitRoutes } from './cloudInitRoutes.js';
 import { registerDeviceRoutes } from './deviceRoutes.js';
 import { registerFirewallRoutes } from './firewallRoutes.js';
 import { registerTemplateRoutes } from './templateRoutes.js';
+import { registerBackupJobRoutes } from './backupJobRoutes.js';
 import {
   guestTypeSchema,
   vmidSchema,
@@ -457,4 +458,7 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // Guest firewall rule add/edit/delete/move + options (`firewallRoutes.ts`) share the same bucket,
   // same rationale.
   registerFirewallRoutes(app, guestActionsRateLimit);
+
+  // Datacenter backup jobs: create/edit/delete/run-now (`backupJobRoutes.ts`) share the same bucket.
+  registerBackupJobRoutes(app, guestActionsRateLimit);
 }

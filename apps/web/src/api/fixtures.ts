@@ -1111,3 +1111,158 @@ export function muteFixtureNotifications(span: FixtureMuteSpan | null): FixtureN
 export function resetFixtureNotifySettings(): void {
   fixtureNotifyStored = initialFixtureNotifyStored();
 }
+
+// --- T66 backup jobs ---
+import type { BackupJob } from '@/api/backupJobs';
+
+/** Backup-capable storages the demo's job dialog offers (`content` includes `backup`). */
+export const FIXTURE_BACKUP_STORAGES: Array<{ id: string; type: string }> = [
+  { id: 'backup-nfs', type: 'nfs' },
+  { id: 'local', type: 'dir' },
+  { id: 'tank-backups', type: 'zfspool' },
+];
+
+/** The demo's resource pools and which guests they hold (the pool picker + "Run now"). */
+export const FIXTURE_POOLS: string[] = ['lab', 'prod'];
+export const FIXTURE_POOL_MEMBERS: Record<string, number[]> = {
+  prod: [300, 301, 302, 303, 304, 305],
+  lab: [104, 105],
+};
+
+function initialFixtureBackupJobs(): BackupJob[] {
+  const now = Math.floor(Date.now() / 1000);
+  return [
+    {
+      id: 'backup-nightly',
+      enabled: true,
+      schedule: '02:00',
+      storage: 'backup-nfs',
+      mode: 'snapshot',
+      compress: 'zstd',
+      selection: { kind: 'all', exclude: [104, 105] },
+      mailto: [],
+      retention: { keepAll: false, keepLast: 3, keepDaily: 7 },
+      comment: 'Nightly, all production guests',
+      nextRun: now + 6 * 3600,
+      repeatMissed: true,
+      protected: false,
+    },
+    {
+      id: 'backup-weekly-prod',
+      enabled: true,
+      schedule: 'sun 01:00',
+      storage: 'tank-backups',
+      mode: 'snapshot',
+      compress: 'zstd',
+      selection: { kind: 'pool', pool: 'prod' },
+      mailto: ['ops@example.com'],
+      mailnotification: 'failure',
+      retention: { keepAll: false, keepWeekly: 4, keepMonthly: 6 },
+      nextRun: now + 3 * 86400,
+      repeatMissed: false,
+      protected: false,
+    },
+    {
+      id: 'backup-archive',
+      enabled: false,
+      schedule: '*-*-01 03:00',
+      storage: 'backup-nfs',
+      mode: 'stop',
+      compress: 'gzip',
+      selection: { kind: 'vmids', vmids: [106, 107, 111] },
+      mailto: [],
+      retention: { keepAll: true },
+      comment: 'Monthly cold copy of the Windows servers',
+      repeatMissed: false,
+      protected: true,
+    },
+  ];
+}
+
+/** The demo's vzdump jobs. Mutated in place by the mutators below (the demo's "database"). */
+export const fixtureBackupJobs: BackupJob[] = initialFixtureBackupJobs();
+
+let fixtureBackupJobSeq = 0;
+
+/** Test/demo-only (T66): appends a job and returns it with a generated id (PVE generates one too). */
+export function addFixtureBackupJob(job: Omit<BackupJob, 'id'>): BackupJob {
+  fixtureBackupJobSeq += 1;
+  const created: BackupJob = { ...job, id: `backup-demo-${fixtureBackupJobSeq}` };
+  fixtureBackupJobs.push(created);
+  return created;
+}
+
+/** Test/demo-only (T66): replaces the job with the same id, in place. */
+export function replaceFixtureBackupJob(job: BackupJob): void {
+  const index = fixtureBackupJobs.findIndex((j) => j.id === job.id);
+  if (index !== -1) fixtureBackupJobs[index] = job;
+}
+
+/** Test/demo-only (T66): removes a job; `false` when there was no such job. */
+export function removeFixtureBackupJob(id: string): boolean {
+  const index = fixtureBackupJobs.findIndex((j) => j.id === id);
+  if (index === -1) return false;
+  fixtureBackupJobs.splice(index, 1);
+  return true;
+}
+
+/** Test-only (T66): puts the demo jobs back to their initial state. */
+export function resetFixtureBackupJobs(): void {
+  fixtureBackupJobs.splice(0, fixtureBackupJobs.length, ...initialFixtureBackupJobs());
+  fixtureBackupJobSeq = 0;
+}
+
+/** `GET /cluster/backup/{id}/included_volumes` for the demo's first two jobs, in PVE's own shape
+ * (`children: guest -> volumes`); `reason: 'disabled'` is a drive with `backup=0`. */
+const fixtureBackupJobVolumes: Record<string, unknown> = {
+  'backup-nightly': {
+    children: [
+      {
+        id: 100,
+        name: 'web-prod-01',
+        type: 'qemu',
+        children: [
+          { id: 'scsi0', name: 'local-zfs:vm-100-disk-0', included: true, reason: 'included' },
+          { id: 'scsi1', name: 'local-zfs:vm-100-disk-1', included: false, reason: 'disabled' },
+        ],
+      },
+      {
+        id: 102,
+        name: 'db-prod-01',
+        type: 'qemu',
+        children: [
+          { id: 'scsi0', name: 'local-zfs:vm-102-disk-0', included: true, reason: 'included' },
+          { id: 'scsi1', name: 'tank:vm-102-disk-1', included: true, reason: 'included' },
+        ],
+      },
+      {
+        id: 201,
+        name: 'pihole',
+        type: 'lxc',
+        children: [{ id: 'rootfs', name: 'local-zfs:subvol-201-disk-0', included: true, reason: 'included' }],
+      },
+    ],
+  },
+  'backup-weekly-prod': {
+    children: [
+      {
+        id: 300,
+        name: 'app-prod-01',
+        type: 'qemu',
+        children: [{ id: 'scsi0', name: 'local-zfs:vm-300-disk-0', included: true, reason: 'included' }],
+      },
+      {
+        id: 301,
+        name: 'app-prod-02',
+        type: 'qemu',
+        children: [{ id: 'scsi0', name: 'local-zfs:vm-301-disk-0', included: true, reason: 'included' }],
+      },
+    ],
+  },
+};
+
+/** Test/demo-only (T66): the `included_volumes` payload for a job (empty for one with no fixture). */
+export function getFixtureBackupJobVolumes(id: string): unknown {
+  return fixtureBackupJobVolumes[id] ?? { children: [] };
+}
+// --- end T66 ---
