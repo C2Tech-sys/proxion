@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Alert, ResourceLike } from '@proxion/core';
+import { WebhookSendError } from './channels/webhook.js';
 import { buildDeepLink, enrichEvent } from './format.js';
 import { computeTransitions, type KnownAlert } from './transitions.js';
 import type { NotifyChannel, NotifyEvent, NotifyMessage } from './types.js';
@@ -378,20 +379,20 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.constructor.name : typeof error;
 }
 
-const MAX_SANITISED_ERROR_LENGTH = 200;
-
-/** Unlike `describeError` (for logs), the test-button response IS shown to the signed-in operator
- *  who just clicked it, so it's worth keeping the error's own wording where possible (a webhook's
- *  own "404 Not Found" or a timeout message is genuinely useful) -- but any URL-shaped substring
- *  (which could carry a query-string token) or `Bearer <token>` header value, and nodemailer
- *  errors that echo the full `smtp(s)://user:pass@host` connection string, must never reach the
- *  caller verbatim. */
+/** What the "Send test" button reports for a failed channel. Deliberately coarse: the operator
+ *  who clicked it gets "HTTP 502", "timeout" or "network" -- no status text, host, port, address,
+ *  redirect target or response body -- so the endpoint cannot be used to map the network behind
+ *  the server (refused vs. filtered vs. open) or to read internal responses. Logs and the full
+ *  error stay server-side (and are themselves free of URLs, see `describeError`). */
 function sanitiseTestError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  const redacted = message
-    .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '[redacted]')
-    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]');
-  return redacted.length > MAX_SANITISED_ERROR_LENGTH
-    ? `${redacted.slice(0, MAX_SANITISED_ERROR_LENGTH - 1)}…`
-    : redacted;
+  if (error instanceof WebhookSendError) {
+    return error.kind === 'http' ? `request failed (HTTP ${error.status})` : `request failed (${error.kind})`;
+  }
+  // Email (nodemailer): authentication is worth saying out loud; everything else is collapsed.
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === 'EAUTH') return 'authentication failed';
+  if (code === 'ETIMEDOUT' || (error instanceof Error && /timed? ?out/i.test(error.message))) {
+    return 'request failed (timeout)';
+  }
+  return 'request failed (network)';
 }

@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import type { Config } from '../config.js';
+import { hostIsAllowed, parseAllowedHosts, type Config } from '../config.js';
 import { createEmailChannel } from './channels/email.js';
 import { createWebhookChannel } from './channels/webhook.js';
 import type { NotifyLogger } from './notifier.js';
@@ -149,11 +149,38 @@ export function toPersistable(effective: EffectiveNotifySettings): NotifySetting
   return rest;
 }
 
+/** The configured allowlist (`PROXION_NOTIFY_ALLOWED_HOSTS`), normalised; `null` = unrestricted.
+ *  Fails closed: an invalid value (`config.allowedHostsError`) is deny-all (`[]`), never "unset". */
+export function allowedNotifyHosts(config: Config): string[] | null {
+  if (config.allowedHostsError !== undefined) return [];
+  return parseAllowedHosts(config.PROXION_NOTIFY_ALLOWED_HOSTS);
+}
+
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
 /** One channel per configured target (webhook, then email). Throws if a channel can't be built
- *  from the given values; callers that take user input build channels BEFORE writing the file. */
-export function buildNotifyChannels(settings: NotifySettings): NotifyChannel[] {
+ *  from the given values; callers that take user input build channels BEFORE writing the file.
+ *  With an allowlist, a target whose host is not on it is dropped with a warning that names the
+ *  setting and the channel, never the host. */
+export function buildNotifyChannels(
+  settings: NotifySettings,
+  options: { allowedHosts?: readonly string[] | null; log?: Pick<NotifyLogger, 'warn'> } = {},
+): NotifyChannel[] {
+  const allowed = options.allowedHosts ?? null;
+  const dropped: string[] = [];
+  const permitted = (channel: 'webhook' | 'email', url: string): boolean => {
+    if (hostIsAllowed(hostnameOf(url), allowed)) return true;
+    dropped.push(channel);
+    return false;
+  };
   const channels: NotifyChannel[] = [];
-  if (settings.webhook) {
+  if (settings.webhook && permitted('webhook', settings.webhook.url)) {
     channels.push(
       createWebhookChannel({
         url: settings.webhook.url,
@@ -162,13 +189,19 @@ export function buildNotifyChannels(settings: NotifySettings): NotifyChannel[] {
       }),
     );
   }
-  if (settings.email) {
+  if (settings.email && permitted('email', settings.email.smtpUrl)) {
     channels.push(
       createEmailChannel({
         smtpUrl: settings.email.smtpUrl,
         from: settings.email.from,
         to: settings.email.to.join(','),
       }),
+    );
+  }
+  if (dropped.length > 0) {
+    options.log?.warn(
+      { key: 'PROXION_NOTIFY_ALLOWED_HOSTS', channels: dropped },
+      'Notification channels dropped: their host is not allowed by PROXION_NOTIFY_ALLOWED_HOSTS',
     );
   }
   return channels;
@@ -254,6 +287,9 @@ declare module 'fastify' {
   interface FastifyInstance {
     /** The persisted, runtime-editable notification settings (T64). */
     notifySettingsStore: NotifySettingsStore;
+    /** Which channels the CURRENT notifier was actually built with (after the allowlist drop),
+     *  as opposed to which are merely stored in the settings (T64). */
+    notifierChannels: { webhook: boolean; email: boolean };
     /** Rebuilds the channels from the effective settings and swaps `app.notifier` without a
      *  restart (T64). Resolves once the swap is done; rejects if the new notifier cannot be built
      *  (the previous one then stays in place). */

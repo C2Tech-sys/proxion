@@ -4,11 +4,13 @@ import { PveApiError, type PveClient } from '@proxion/pve-api';
 import { resolveIdentity } from '../pve/identity.js';
 import { SESSION_COOKIE } from '../auth/session.js';
 import { formatPveErrorMessage, sanitizeMessage } from '../actions/shared.js';
+import { hostIsAllowed } from '../config.js';
 import {
   MAX_DEBOUNCE_MS,
   MIN_DEBOUNCE_MS,
   NOTIFY_KINDS,
   WEBHOOK_FORMATS,
+  allowedNotifyHosts,
   buildNotifyChannels,
   emailAddressField,
   effectiveNotifySettings,
@@ -64,6 +66,9 @@ export interface NotifySettingsView {
     to: string[];
   };
   channels: { webhook: boolean; email: boolean };
+  /** `PROXION_NOTIFY_ALLOWED_HOSTS` (normalised), `null` when destinations are unrestricted, `[]`
+   *  (deny-all) when the variable is invalid -- then `error` says so. */
+  allowedHosts: string[] | null;
   /** The T59 environment error; only reported while the environment is what is in force. */
   error?: string;
 }
@@ -71,6 +76,16 @@ export interface NotifySettingsView {
 function hostOf(url: string): string {
   try {
     return new URL(url).host;
+  } catch {
+    return '';
+  }
+}
+
+const NOT_ALLOWED = 'host is not in PROXION_NOTIFY_ALLOWED_HOSTS';
+
+function hostnameOfUrl(url: string): string {
+  try {
+    return new URL(url).hostname;
   } catch {
     return '';
   }
@@ -104,6 +119,9 @@ export function maskNotifySettings(
   effective: EffectiveNotifySettings,
   envError: string | undefined,
   nowMs: number,
+  allowedHosts: string[] | null,
+  built: { webhook: boolean; email: boolean },
+  allowedHostsError: string | undefined,
 ): NotifySettingsView {
   const view: NotifySettingsView = {
     source: effective.source,
@@ -113,7 +131,8 @@ export function maskNotifySettings(
     includeResolved: effective.includeResolved,
     debounceMs: effective.debounceMs,
     siteName: effective.siteName,
-    channels: { webhook: Boolean(effective.webhook), email: Boolean(effective.email) },
+    channels: { webhook: built.webhook, email: built.email },
+    allowedHosts,
   };
   if (effective.muteUntil && isMuted(effective, nowMs)) view.muteUntil = effective.muteUntil;
   if (effective.publicUrl) view.publicUrl = effective.publicUrl;
@@ -131,7 +150,9 @@ export function maskNotifySettings(
       to: effective.email.to,
     };
   }
-  if (envError && effective.source === 'env') view.error = envError;
+  // The allowlist error is a security control that failed closed: always shown, whatever the source.
+  if (allowedHostsError) view.error = allowedHostsError;
+  else if (envError && effective.source === 'env') view.error = envError;
   return view;
 }
 
@@ -210,7 +231,11 @@ type ResolveResult = { ok: true; settings: NotifySettings } | { ok: false; messa
  *  what is in force now. A kept token is only honoured while the webhook origin (scheme, host, port) is unchanged --
  *  otherwise a caller with `Sys.Modify` could repoint the webhook at their own server and have
  *  the stored token sent there. */
-function resolvePut(body: PutBody, current: EffectiveNotifySettings): ResolveResult {
+function resolvePut(
+  body: PutBody,
+  current: EffectiveNotifySettings,
+  allowedHosts: readonly string[] | null,
+): ResolveResult {
   const settings: NotifySettings = {
     version: 1,
     enabled: body.enabled,
@@ -244,6 +269,9 @@ function resolvePut(body: PutBody, current: EffectiveNotifySettings): ResolveRes
     } else if (typeof body.webhook.token === 'string') {
       token = body.webhook.token;
     }
+    if (!hostIsAllowed(hostnameOfUrl(url), allowedHosts)) {
+      return { ok: false, message: `webhook.url: ${NOT_ALLOWED}` };
+    }
     settings.webhook = { url, format: body.webhook.format, ...(token !== undefined ? { token } : {}) };
   }
 
@@ -254,6 +282,9 @@ function resolvePut(body: PutBody, current: EffectiveNotifySettings): ResolveRes
       smtpUrl = current.email.smtpUrl;
     } else {
       smtpUrl = body.email.smtpUrl;
+    }
+    if (!hostIsAllowed(hostnameOfUrl(smtpUrl), allowedHosts)) {
+      return { ok: false, message: `email.smtpUrl: ${NOT_ALLOWED}` };
     }
     settings.email = { smtpUrl, from: body.email.from, to: body.email.to };
   }
@@ -301,7 +332,14 @@ export default async function notifyRoutes(app: FastifyInstance): Promise<void> 
   const currentSettings = (): EffectiveNotifySettings =>
     effectiveNotifySettings(app.proxionConfig, app.notifySettingsStore.current);
   const view = (): NotifySettingsView =>
-    maskNotifySettings(currentSettings(), app.proxionConfig.notifyConfigError, Date.now());
+    maskNotifySettings(
+      currentSettings(),
+      app.proxionConfig.notifyConfigError,
+      Date.now(),
+      allowedNotifyHosts(app.proxionConfig),
+      app.notifierChannels,
+      app.proxionConfig.allowedHostsError,
+    );
 
   app.get('/api/notify/status', async (req, reply) => {
     const identity = await resolveIdentity(app, req);
@@ -312,7 +350,7 @@ export default async function notifyRoutes(app: FastifyInstance): Promise<void> 
 
     const settings = currentSettings();
     const body: NotifyStatusResponse = {
-      configured: { webhook: Boolean(settings.webhook), email: Boolean(settings.email) },
+      configured: { webhook: app.notifierChannels.webhook, email: app.notifierChannels.email },
       minSeverity: settings.minSeverity,
       includeResolved: settings.includeResolved,
     };
@@ -350,6 +388,11 @@ export default async function notifyRoutes(app: FastifyInstance): Promise<void> 
     } catch (error) {
       if (sendPveError(reply, error)) return false;
       throw error;
+    }
+    if (app.proxionConfig.allowedHostsError) {
+      // Fail closed: with the allowlist unreadable nothing may be saved (and nothing is sent).
+      reply.code(400).send({ error: 'invalid-settings', message: app.proxionConfig.allowedHostsError });
+      return false;
     }
     return true;
   }
@@ -390,7 +433,7 @@ export default async function notifyRoutes(app: FastifyInstance): Promise<void> 
         reply.code(400).send({ error: 'invalid-settings', message: describeIssues(parsed.error) });
         return;
       }
-      const resolved = resolvePut(parsed.data, currentSettings());
+      const resolved = resolvePut(parsed.data, currentSettings(), allowedNotifyHosts(app.proxionConfig));
       if (!resolved.ok) {
         reply.code(400).send({ error: 'invalid-settings', message: resolved.message });
         return;
@@ -435,12 +478,9 @@ export default async function notifyRoutes(app: FastifyInstance): Promise<void> 
         return;
       }
       if (!app.notifier) {
-        const { notifyConfigError } = app.proxionConfig;
-        reply.code(400).send(
-          notifyConfigError && currentSettings().source === 'env'
-            ? { error: 'not-configured', message: notifyConfigError }
-            : { error: 'not-configured' },
-        );
+        const { notifyConfigError, allowedHostsError } = app.proxionConfig;
+        const message = allowedHostsError ?? (currentSettings().source === 'env' ? notifyConfigError : undefined);
+        reply.code(400).send(message ? { error: 'not-configured', message } : { error: 'not-configured' });
         return;
       }
 

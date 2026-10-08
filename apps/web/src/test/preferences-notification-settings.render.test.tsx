@@ -93,6 +93,7 @@ function view(overrides: Partial<NotifySettingsView> = {}): NotifySettingsView {
     publicUrl: 'https://proxion.example.com',
     webhook: { url: { host: 'ntfy.example.com', masked: true }, format: 'ntfy', token: { set: true } },
     channels: { webhook: true, email: false },
+    allowedHosts: null,
     ...overrides,
   };
 }
@@ -188,6 +189,29 @@ describe('Preferences: notification settings form', () => {
     expect(screen.getByLabelText('Site name')).toHaveValue('Proxion');
     expect(screen.getByRole('checkbox', { name: 'Backups' })).toBeChecked();
     expect(screen.getByText('Tests always send, even while muted.')).toBeInTheDocument();
+  });
+
+  it('shows the operator allowlist as a hint only when one is set', async () => {
+    await renderEditableForm(view({ allowedHosts: ['hooks.example.com', '*.lan'] }));
+    expect(screen.getAllByText('Allowed hosts: hooks.example.com, *.lan')).toHaveLength(2); // webhook + email
+  });
+
+  it('an invalid allowlist (allowedHosts: []) shows the error in red and keeps Save disabled', async () => {
+    const message = 'PROXION_NOTIFY_ALLOWED_HOSTS is invalid; fix proxion.env and redeploy';
+    await renderEditableForm(view({ source: 'file', allowedHosts: [], error: message }));
+
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(message);
+    expect(alert).toHaveClass('text-destructive');
+    expect(screen.queryByText(/Allowed hosts:/)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Site name'), { target: { value: 'Changed' } });
+    expect(save()).toBeDisabled();
+  });
+
+  it('shows no allowlist hint when destinations are unrestricted', async () => {
+    await renderEditableForm();
+    expect(screen.queryByText(/Allowed hosts:/)).not.toBeInTheDocument();
   });
 
   it('Save is disabled until something changes, and Discard puts the form back', async () => {

@@ -103,6 +103,8 @@ export interface NotifySettingsView {
     to: string[];
   };
   channels: { webhook: boolean; email: boolean };
+  /** `PROXION_NOTIFY_ALLOWED_HOSTS` (host names, `*.example.com` wildcards), or `null` when destinations are unrestricted. */
+  allowedHosts: string[] | null;
   /** The `PROXION_NOTIFY_*` error (T59), while the environment is what is in force. */
   error?: string;
 }

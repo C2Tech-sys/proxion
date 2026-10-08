@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Alert } from '@proxion/core';
 import { summaryHeadline } from '../src/notify/format.js';
+import { WebhookSendError } from '../src/notify/channels/webhook.js';
 import { Notifier, type NotifierOptions } from '../src/notify/notifier.js';
 import type { NotifyChannel, NotifyMessage } from '../src/notify/types.js';
 
@@ -591,5 +592,55 @@ describe('Notifier muting (T64)', () => {
     await notifier.flushForTest();
     await vi.advanceTimersByTimeAsync(BASE_OPTIONS.debounceMs * 2);
     expect(channel.send).not.toHaveBeenCalled();
+  });
+});
+
+// --- T64 hardening: what "Send test" may tell the operator about a failure ---------------------
+describe('Notifier.sendTest failure reporting', () => {
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(path.join(os.tmpdir(), 'proxion-notify-sanitise-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  async function reportFor(name: 'webhook' | 'email', error: unknown): Promise<string> {
+    const channel = fakeChannel(name, () => Promise.reject(error));
+    const notifier = await Notifier.create({ ...BASE_OPTIONS, dataDir, channels: [channel], log: fakeLogger() });
+    const results = await notifier.sendTest();
+    return results[name]!;
+  }
+
+  it('reduces a webhook HTTP failure to its status code only', async () => {
+    expect(await reportFor('webhook', new WebhookSendError('http', 502))).toBe('request failed (HTTP 502)');
+    expect(await reportFor('webhook', new WebhookSendError('http', 302))).toBe('request failed (HTTP 302)');
+  });
+
+  it('reduces a webhook timeout and a network failure to one word each', async () => {
+    expect(await reportFor('webhook', new WebhookSendError('timeout'))).toBe('request failed (timeout)');
+    expect(await reportFor('webhook', new WebhookSendError('network'))).toBe('request failed (network)');
+  });
+
+  it('collapses any other error: no host, port, address or URL ever comes back', async () => {
+    const leaky = new Error('connect ECONNREFUSED 10.0.0.5:25 via https://user:pw@internal.example.com/x?key=1');
+    const report = await reportFor('webhook', leaky);
+    expect(report).toBe('request failed (network)');
+    const emailReport = await reportFor('email', Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:25'), { code: 'ESOCKET' }));
+    expect(emailReport).toBe('request failed (network)');
+    for (const text of [report, emailReport]) {
+      expect(text).not.toMatch(/10\.0\.0\.5|internal|ECONNREFUSED|pw|key=/);
+    }
+  });
+
+  it('keeps the two email answers that help an operator: authentication and timeout', async () => {
+    expect(await reportFor('email', Object.assign(new Error('Invalid login: 535 5.7.8 for user@host'), { code: 'EAUTH' }))).toBe(
+      'authentication failed',
+    );
+    expect(await reportFor('email', Object.assign(new Error('Connection timeout'), { code: 'ETIMEDOUT' }))).toBe(
+      'request failed (timeout)',
+    );
   });
 });

@@ -918,6 +918,7 @@ export interface FixtureNotifySettingsView {
     to: string[];
   };
   channels: { webhook: boolean; email: boolean };
+  allowedHosts: string[] | null;
   error?: string;
 }
 
@@ -981,6 +982,7 @@ function maskFixtureNotify(stored: FixtureNotifyStored, nowMs: number): FixtureN
     debounceMs: stored.debounceMs,
     siteName: stored.siteName,
     channels: { webhook: Boolean(stored.webhook), email: Boolean(stored.email) },
+    allowedHosts: null,
   };
   if (stored.muteUntil && Date.parse(stored.muteUntil) > nowMs) view.muteUntil = stored.muteUntil;
   if (stored.publicUrl) view.publicUrl = stored.publicUrl;

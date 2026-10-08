@@ -2,10 +2,11 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadConfig } from '../src/config.js';
+import { hostIsAllowed, loadConfig, parseAllowedHosts } from '../src/config.js';
 import {
   NOTIFY_SETTINGS_FILE_NAME,
   NotifySettingsStore,
+  allowedNotifyHosts,
   buildNotifyChannels,
   effectiveNotifySettings,
   isMuted,
@@ -225,5 +226,102 @@ describe('effectiveNotifySettings', () => {
       ['webhook', 'hooks.example.com'],
       ['email', 'smtp.example.com:465'],
     ]);
+  });
+});
+
+describe('PROXION_NOTIFY_ALLOWED_HOSTS', () => {
+  const baseEnv = { NODE_ENV: 'test', PVE_URL: 'https://pve.example.com:8006' };
+
+  it('parseAllowedHosts: unset or empty = unrestricted; entries are lower-cased, de-dotted and de-duplicated', () => {
+    expect(parseAllowedHosts(undefined)).toBeNull();
+    expect(parseAllowedHosts('')).toBeNull();
+    expect(parseAllowedHosts(' , ,')).toBeNull();
+    expect(parseAllowedHosts('Hooks.Example.COM., ntfy.lan,hooks.example.com')).toStrictEqual(['hooks.example.com', 'ntfy.lan']);
+  });
+
+  it('hostIsAllowed: exact match after normalisation, ports ignored, null allows everything', () => {
+    expect(hostIsAllowed('anything.example', null)).toBe(true);
+    const allowed = ['hooks.example.com', 'ntfy.lan'];
+    expect(hostIsAllowed('hooks.example.com', allowed)).toBe(true);
+    expect(hostIsAllowed('HOOKS.Example.Com', allowed)).toBe(true);
+    expect(hostIsAllowed('hooks.example.com.', allowed)).toBe(true); // trailing dot
+    expect(hostIsAllowed('evil-hooks.example.com', allowed)).toBe(false);
+    expect(hostIsAllowed('hooks.example.com.evil.net', allowed)).toBe(false);
+    expect(hostIsAllowed('x.hooks.example.com', allowed)).toBe(false);
+    expect(hostIsAllowed('', allowed)).toBe(false);
+  });
+
+  it('hostIsAllowed: *.example.com matches exactly one extra label', () => {
+    const allowed = ['*.example.com'];
+    expect(hostIsAllowed('hooks.example.com', allowed)).toBe(true);
+    expect(hostIsAllowed('HOOKS.EXAMPLE.COM.', allowed)).toBe(true);
+    expect(hostIsAllowed('example.com', allowed)).toBe(false);
+    expect(hostIsAllowed('a.b.example.com', allowed)).toBe(false);
+    expect(hostIsAllowed('hooksexample.com', allowed)).toBe(false);
+    expect(hostIsAllowed('.example.com', allowed)).toBe(false);
+  });
+
+  it('config: a good value is kept as written; a bad value FAILS CLOSED (deny-all) and leaves the other notify values alone', () => {
+    expect(loadConfig({ ...baseEnv, PROXION_NOTIFY_ALLOWED_HOSTS: 'hooks.example.com,*.lan' }).notifyConfigError).toBeUndefined();
+    expect(loadConfig(baseEnv).PROXION_NOTIFY_ALLOWED_HOSTS).toBeUndefined();
+    expect(allowedNotifyHosts(loadConfig({ ...baseEnv, PROXION_NOTIFY_ALLOWED_HOSTS: 'Hooks.Example.COM.,*.lan' }))).toStrictEqual([
+      'hooks.example.com',
+      '*.lan',
+    ]);
+    expect(allowedNotifyHosts(loadConfig(baseEnv))).toBeNull();
+    expect(allowedNotifyHosts(loadConfig({ ...baseEnv, PROXION_NOTIFY_ALLOWED_HOSTS: ' , ' }))).toBeNull();
+
+    const message = 'PROXION_NOTIFY_ALLOWED_HOSTS is invalid; fix proxion.env and redeploy';
+    for (const bad of [
+      'hooks.example.com:443',
+      'http://hooks.example.com',
+      'hooks.example.com/path',
+      'a b',
+      '*',
+      '**.example.com',
+      'ex*ample.com',
+    ]) {
+      const config = loadConfig({
+        ...baseEnv,
+        PROXION_NOTIFY_WEBHOOK_URL: 'https://hooks.example.com/x',
+        PROXION_NOTIFY_ALLOWED_HOSTS: bad,
+      });
+      expect(config.allowedHostsError, bad).toBe(message);
+      expect(config.PROXION_NOTIFY_ALLOWED_HOSTS).toBeUndefined();
+      expect(allowedNotifyHosts(config), bad).toStrictEqual([]); // deny-all, NOT "unset"
+      // the rest of the notify env is untouched (T59 behaviour is unchanged)
+      expect(config.notifyConfigError).toBeUndefined();
+      expect(config.PROXION_NOTIFY_WEBHOOK_URL).toBe('https://hooks.example.com/x');
+    }
+
+    // an allowlist error and a T59 error are independent
+    const both = loadConfig({ ...baseEnv, PROXION_NOTIFY_WEBHOOK_FORMAT: 'nope', PROXION_NOTIFY_ALLOWED_HOSTS: 'a:1' });
+    expect(both.allowedHostsError).toBe(message);
+    expect(both.notifyConfigError).toContain('PROXION_NOTIFY_WEBHOOK_FORMAT');
+  });
+
+  it('deny-all builds nothing and warns once, naming the key and not the hosts', () => {
+    const warn = vi.fn();
+    expect(buildNotifyChannels(FULL, { allowedHosts: [], log: { warn } })).toHaveLength(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain('PROXION_NOTIFY_ALLOWED_HOSTS');
+    expect(logged).not.toContain('example.com');
+  });
+
+  it('buildNotifyChannels drops a target outside the allowlist with a warning naming the key, never the host', () => {
+    const warn = vi.fn();
+    const channels = buildNotifyChannels(FULL, { allowedHosts: ['smtp.example.com'], log: { warn } });
+    expect(channels.map((c) => c.name)).toStrictEqual(['email']);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain('PROXION_NOTIFY_ALLOWED_HOSTS');
+    expect(logged).toContain('webhook');
+    expect(logged).not.toContain('hooks.example.com');
+    expect(logged).not.toContain('smtp.example.com');
+
+    expect(buildNotifyChannels(FULL, { allowedHosts: ['*.example.com'], log: { warn } })).toHaveLength(2);
+    expect(buildNotifyChannels(FULL, { allowedHosts: ['other.net'], log: { warn } })).toHaveLength(0);
+    expect(buildNotifyChannels(FULL, { allowedHosts: null })).toHaveLength(2);
   });
 });

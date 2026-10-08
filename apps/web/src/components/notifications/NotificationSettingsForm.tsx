@@ -171,6 +171,11 @@ function Field({ label, htmlFor, hint, children }: { label: string; htmlFor: str
   );
 }
 
+/** The operator's `PROXION_NOTIFY_ALLOWED_HOSTS`, when set: the server refuses any other host. */
+function AllowedHostsHint({ hosts }: { hosts: string[] }) {
+  return <p className="text-xs text-muted-foreground">Allowed hosts: {hosts.join(', ')}</p>;
+}
+
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-3 py-3">
@@ -239,6 +244,9 @@ function SettingsFormBody({
   const dirty = JSON.stringify(built) !== JSON.stringify(baselineBuilt);
   const problem = 'problem' in built ? built.problem : undefined;
 
+  // `allowedHosts: []` is the server's deny-all: PROXION_NOTIFY_ALLOWED_HOSTS is set but invalid.
+  const allowlistBroken = view.allowedHosts !== null && view.allowedHosts.length === 0;
+
   const locked = !canEdit;
   const lockTitle = locked ? lockedReason : undefined;
   const busy = save.isPending || mute.isPending;
@@ -254,6 +262,11 @@ function SettingsFormBody({
 
   return (
     <div className="flex flex-col divide-y divide-border">
+      {allowlistBroken && view.error ? (
+        <p role="alert" className="py-2 text-sm text-destructive">
+          {view.error}
+        </p>
+      ) : null}
       <section className="flex flex-col gap-2 py-3">
         <StatusLine key={view.muteUntil ?? 'not-muted'} view={view} />
         {view.source === 'env' ? (
@@ -384,6 +397,7 @@ function SettingsFormBody({
       </Group>
 
       <Group title="Webhook">
+        {view.allowedHosts && view.allowedHosts.length > 0 ? <AllowedHostsHint hosts={view.allowedHosts} /> : null}
         {draft.webhookOn ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Format" htmlFor={`${id}-wh-format`}>
@@ -473,6 +487,7 @@ function SettingsFormBody({
       </Group>
 
       <Group title="Email">
+        {view.allowedHosts && view.allowedHosts.length > 0 ? <AllowedHostsHint hosts={view.allowedHosts} /> : null}
         {draft.emailOn ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field
@@ -552,7 +567,7 @@ function SettingsFormBody({
           <Button
             type="button"
             size="sm"
-            disabled={locked || !dirty || Boolean(problem) || busy}
+            disabled={locked || !dirty || Boolean(problem) || allowlistBroken || busy}
             title={lockTitle}
             onClick={onSave}
           >
