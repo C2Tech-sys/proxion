@@ -13,6 +13,7 @@ import { registerHardwareRoutes } from './hardwareRoutes.js';
 import { registerBootOrderRoutes } from './bootOrderRoutes.js';
 import { registerDiskRoutes } from './diskRoutes.js';
 import { registerNetworkRoutes } from './networkRoutes.js';
+import { registerNodeNetworkRoutes } from './nodeNetworkRoutes.js';
 import { registerCreateCtRoutes } from './createCtRoutes.js';
 import { registerCreateVmRoutes } from './createVmRoutes.js';
 import { registerOptionsRoutes } from './optionsRoutes.js';
@@ -474,4 +475,7 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // create/edit/members/delete (`poolRoutes.ts`) share the same bucket, same rationale.
   registerStorageConfigRoutes(app, guestActionsRateLimit);
   registerPoolRoutes(app, guestActionsRateLimit);
+  // Node network editor: interface create/edit/delete + apply/revert (`nodeNetworkRoutes.ts`) share the
+  // same bucket, same rationale.
+  registerNodeNetworkRoutes(app, guestActionsRateLimit);
 }

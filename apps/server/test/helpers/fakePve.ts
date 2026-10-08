@@ -300,6 +300,22 @@ export interface FakePve {
   /** Every `GET /nodes/{node}/scan/<kind>` PVE has received (kind + the query string it saw). */
   scanCalls: Array<{ kind: string; query: Record<string, string> }>;
   // --- end T70 ---
+  // --- T69 node network ---
+  /** Every node network write PVE has received (`POST`/`PUT`/`DELETE` `/nodes/{node}/network[/{iface}]`),
+   * in order: method + path + the parsed form body (POST/PUT) or query string (DELETE). Used by
+   * `nodeNetworkRoutes.test.ts` (T69). */
+  networkCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }>;
+  /** Sets the rows `GET /nodes/{node}/network` returns for `node` (default: a small pve1-like set). */
+  setNetworkInterfaces: (node: string, rows: Array<Record<string, unknown>>) => void;
+  /** Sets the top-level `changes` diff string `GET /nodes/{node}/network` returns beside `data`. */
+  setNetworkChanges: (node: string, changes: string) => void;
+  /** Makes every node network write of `op` fail with the given status/message/errors until called
+   * again with `undefined`. */
+  setNetworkError: (
+    op: 'create' | 'update' | 'delete' | 'apply' | 'revert',
+    failure: { status: number; message: string; errors?: Record<string, string> } | undefined,
+  ) => void;
+  // --- end T69 ---
   close: () => Promise<void>;
 }
 
@@ -1300,6 +1316,68 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     });
   }
   // --- end T70 ---
+  // --- T69 node network ---
+  // `GET/POST/PUT/DELETE /nodes/{node}/network[/{iface}]`, used by `src/actions/nodeNetworkRoutes.ts`.
+  // The list carries PVE's top-level `changes` string beside `data`. Writes are recorded, not applied.
+  const networkCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }> = [];
+  const networkRows = new Map<string, Array<Record<string, unknown>>>();
+  const networkChanges = new Map<string, string>();
+  const networkErrors = new Map<string, { status: number; message: string; errors?: Record<string, string> }>();
+  const defaultNetworkRows: Array<Record<string, unknown>> = [
+    { iface: 'eno1', type: 'eth', method: 'manual', active: 1, autostart: 1 },
+    { iface: 'eno2', type: 'eth', method: 'manual', active: 1, autostart: 1 },
+    {
+      iface: 'vmbr0',
+      type: 'bridge',
+      method: 'static',
+      active: 1,
+      autostart: 1,
+      address: '192.0.2.11',
+      netmask: '255.255.255.0',
+      cidr: '192.0.2.11/24',
+      gateway: '192.0.2.1',
+      bridge_ports: 'eno1',
+      bridge_vlan_aware: 1,
+    },
+  ];
+  function networkFail(op: string, reply: { code: (status: number) => { send: (body: unknown) => void } }): boolean {
+    const failure = networkErrors.get(op);
+    if (!failure) return false;
+    reply
+      .code(failure.status)
+      .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
+    return true;
+  }
+  app.get('/api2/json/nodes/:node/network', async (req) => {
+    const { node } = req.params as { node: string };
+    return { data: networkRows.get(node) ?? defaultNetworkRows, changes: networkChanges.get(node) ?? '' };
+  });
+  app.post('/api2/json/nodes/:node/network', async (req, reply) => {
+    networkCalls.push({ method: 'POST', path: req.url, body: (req.body ?? {}) as Record<string, string> });
+    if (networkFail('create', reply)) return;
+    reply.send({ data: null });
+  });
+  app.put('/api2/json/nodes/:node/network', async (req, reply) => {
+    networkCalls.push({ method: 'PUT', path: req.url, body: (req.body ?? {}) as Record<string, string> });
+    if (networkFail('apply', reply)) return;
+    reply.send({ data: 'UPID:fakepve:00000001:00000000:00000000:srvreload:networking:root@pam:' });
+  });
+  app.delete('/api2/json/nodes/:node/network', async (req, reply) => {
+    networkCalls.push({ method: 'DELETE', path: req.url, body: (req.query ?? {}) as Record<string, string> });
+    if (networkFail('revert', reply)) return;
+    reply.send({ data: null });
+  });
+  app.put('/api2/json/nodes/:node/network/:iface', async (req, reply) => {
+    networkCalls.push({ method: 'PUT', path: req.url, body: (req.body ?? {}) as Record<string, string> });
+    if (networkFail('update', reply)) return;
+    reply.send({ data: null });
+  });
+  app.delete('/api2/json/nodes/:node/network/:iface', async (req, reply) => {
+    networkCalls.push({ method: 'DELETE', path: req.url, body: (req.query ?? {}) as Record<string, string> });
+    if (networkFail('delete', reply)) return;
+    reply.send({ data: null });
+  });
+  // --- end T69 ---
 
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
@@ -1610,6 +1688,24 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       return scanCalls;
     },
     // --- end T70 ---
+    // --- T69 node network ---
+    get networkCalls() {
+      return networkCalls;
+    },
+    setNetworkInterfaces: (node: string, rows: Array<Record<string, unknown>>) => {
+      networkRows.set(node, rows);
+    },
+    setNetworkChanges: (node: string, changes: string) => {
+      networkChanges.set(node, changes);
+    },
+    setNetworkError: (
+      op: 'create' | 'update' | 'delete' | 'apply' | 'revert',
+      failure: { status: number; message: string; errors?: Record<string, string> } | undefined,
+    ) => {
+      if (failure) networkErrors.set(op, failure);
+      else networkErrors.delete(op);
+    },
+    // --- end T69 ---
     close: () => app.close(),
   };
 }

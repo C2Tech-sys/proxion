@@ -2056,3 +2056,192 @@ export function resetFixturePools(): void {
   fixturePools = initialFixturePools();
 }
 // --- end T70 ---
+// --- T69 node network ---
+
+/** One `GET /nodes/{node}/network` row, in PVE's wire shape (booleans as 1/0). */
+export type FixtureNetRow = Record<string, string | number | undefined>;
+
+function initialFixtureNetRows(): FixtureNetRow[] {
+  return [
+    { iface: 'eno1', type: 'eth', method: 'manual', active: 1, autostart: 1 },
+    { iface: 'eno2', type: 'eth', method: 'manual', active: 1, autostart: 1 },
+    {
+      iface: 'vmbr0',
+      type: 'bridge',
+      method: 'static',
+      active: 1,
+      autostart: 1,
+      cidr: '10.0.0.11/24',
+      gateway: '10.0.0.1',
+      bridge_ports: 'eno1',
+      bridge_vlan_aware: 1,
+      comments: 'LAN',
+    },
+    {
+      iface: 'bond0',
+      type: 'bond',
+      method: 'manual',
+      active: 1,
+      autostart: 1,
+      slaves: 'eno2',
+      bond_mode: 'active-backup',
+    },
+    {
+      iface: 'vmbr1',
+      type: 'bridge',
+      method: 'manual',
+      active: 1,
+      autostart: 1,
+      bridge_ports: 'bond0',
+      comments: 'Storage / backup network',
+    },
+    {
+      iface: 'vmbr1.20',
+      type: 'vlan',
+      method: 'static',
+      active: 1,
+      autostart: 1,
+      cidr: '10.20.0.11/24',
+      'vlan-id': 20,
+      'vlan-raw-device': 'vmbr1',
+    },
+  ];
+}
+
+interface FixtureNodeNet {
+  /** What the node is running now (and what Revert goes back to). */
+  committed: FixtureNetRow[];
+  /** `interfaces.new`: the committed config plus every staged edit. */
+  pending: FixtureNetRow[];
+}
+
+const fixtureNodeNet = new Map<string, FixtureNodeNet>();
+
+function cloneNetRows(rows: FixtureNetRow[]): FixtureNetRow[] {
+  return rows.map((row) => ({ ...row }));
+}
+
+function fixtureNodeNetFor(node: string): FixtureNodeNet {
+  let state = fixtureNodeNet.get(node);
+  if (!state) {
+    state = { committed: initialFixtureNetRows(), pending: initialFixtureNetRows() };
+    fixtureNodeNet.set(node, state);
+  }
+  return state;
+}
+
+/** The `/etc/network/interfaces` stanza for one row (a simplified rendering, enough for a diff). */
+function renderFixtureNetStanza(row: FixtureNetRow): string[] {
+  const lines: string[] = [];
+  if (row.autostart === 1) lines.push(`auto ${row.iface}`);
+  const family = row.cidr !== undefined ? 'static' : 'manual';
+  lines.push(`iface ${row.iface} inet ${family}`);
+  if (row.cidr !== undefined) lines.push(`    address ${row.cidr}`);
+  if (row.gateway !== undefined) lines.push(`    gateway ${row.gateway}`);
+  if (row.cidr6 !== undefined) lines.push(`iface ${row.iface} inet6 static`, `    address ${row.cidr6}`);
+  if (row.gateway6 !== undefined) lines.push(`    gateway ${row.gateway6}`);
+  if (row.mtu !== undefined) lines.push(`    mtu ${row.mtu}`);
+  if (row.type === 'bridge') {
+    lines.push(`    bridge-ports ${row.bridge_ports === undefined || row.bridge_ports === '' ? 'none' : row.bridge_ports}`);
+    lines.push('    bridge-stp off', '    bridge-fd 0');
+    if (row.bridge_vlan_aware === 1) lines.push('    bridge-vlan-aware yes', '    bridge-vids 2-4094');
+  }
+  if (row.type === 'bond') {
+    lines.push(`    bond-slaves ${row.slaves ?? 'none'}`, '    bond-miimon 100', `    bond-mode ${row.bond_mode ?? 'balance-rr'}`);
+    if (row.bond_xmit_hash_policy !== undefined) lines.push(`    bond-xmit-hash-policy ${row.bond_xmit_hash_policy}`);
+    if (row['bond-primary'] !== undefined) lines.push(`    bond-primary ${row['bond-primary']}`);
+  }
+  if (row.type === 'vlan') {
+    if (row['vlan-raw-device'] !== undefined) lines.push(`    vlan-raw-device ${row['vlan-raw-device']}`);
+    if (row['vlan-id'] !== undefined) lines.push(`    vlan-id ${row['vlan-id']}`);
+  }
+  if (row.comments !== undefined && row.comments !== '') lines.push(`#${row.comments}`);
+  return lines;
+}
+
+/** PVE's `changes` string: a unified-style diff of the committed vs the staged interfaces file;
+ * empty when nothing is staged. */
+function fixtureNetDiff(state: FixtureNodeNet): string {
+  const before = new Map(state.committed.map((row) => [String(row.iface), renderFixtureNetStanza(row)]));
+  const after = new Map(state.pending.map((row) => [String(row.iface), renderFixtureNetStanza(row)]));
+  const out: string[] = [];
+  for (const [name, oldLines] of before) {
+    const newLines = after.get(name);
+    if (newLines === undefined || newLines.join('\n') !== oldLines.join('\n')) {
+      out.push(...oldLines.map((line) => `-${line}`));
+    }
+  }
+  for (const [name, newLines] of after) {
+    const oldLines = before.get(name);
+    if (oldLines === undefined || newLines.join('\n') !== oldLines.join('\n')) {
+      out.push(...newLines.map((line) => `+${line}`));
+    }
+  }
+  if (out.length === 0) return '';
+  return ['--- /etc/network/interfaces', '+++ /etc/network/interfaces.new', ...out].join('\n');
+}
+
+/** Demo/test-only (T69): `GET /nodes/{node}/network` -- the staged rows plus PVE's top-level
+ * `changes` diff. */
+export function getFixtureNodeNetwork(node: string): { data: FixtureNetRow[]; changes: string } {
+  const state = fixtureNodeNetFor(node);
+  return { data: cloneNetRows(state.pending), changes: fixtureNetDiff(state) };
+}
+
+/** Wire fields a fixture write copies onto a row (booleans become 1/0). */
+function applyFixtureNetFields(row: FixtureNetRow, body: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(body)) {
+    if (key === 'type' || key === 'iface' || key === 'method') continue;
+    if (value === null) {
+      delete row[key];
+    } else if (typeof value === 'boolean') {
+      row[key] = value ? 1 : 0;
+    } else if (typeof value === 'string' || typeof value === 'number') {
+      if (key === 'bridge_ports' && value === '') delete row[key];
+      else row[key] = value;
+    }
+  }
+  row.method = row.cidr !== undefined ? 'static' : 'manual';
+}
+
+/** Demo/test-only (T69): stages a new bridge/bond/vlan. */
+export function createFixtureNetIface(node: string, body: Record<string, unknown>): void {
+  const state = fixtureNodeNetFor(node);
+  const iface = String(body.iface);
+  if (state.pending.some((row) => row.iface === iface)) throw new Error(`interface ${iface} already exists`);
+  const row: FixtureNetRow = { iface, type: String(body.type), active: 0, autostart: 1 };
+  applyFixtureNetFields(row, body);
+  state.pending.push(row);
+}
+
+/** Demo/test-only (T69): stages an edit; a `null` field is cleared. */
+export function updateFixtureNetIface(node: string, iface: string, body: Record<string, unknown>): void {
+  const row = fixtureNodeNetFor(node).pending.find((r) => r.iface === iface);
+  if (!row) throw new Error(`${iface} does not exist on this node`);
+  applyFixtureNetFields(row, body);
+}
+
+/** Demo/test-only (T69): stages a deletion. */
+export function deleteFixtureNetIface(node: string, iface: string): void {
+  const state = fixtureNodeNetFor(node);
+  if (!state.pending.some((row) => row.iface === iface)) throw new Error(`${iface} does not exist on this node`);
+  state.pending = state.pending.filter((row) => row.iface !== iface);
+}
+
+/** Demo/test-only (T69): makes the staged configuration the running one. */
+export function applyFixtureNodeNetwork(node: string): void {
+  const state = fixtureNodeNetFor(node);
+  state.committed = cloneNetRows(state.pending);
+}
+
+/** Demo/test-only (T69): discards the staged changes. */
+export function revertFixtureNodeNetwork(node: string): void {
+  const state = fixtureNodeNetFor(node);
+  state.pending = cloneNetRows(state.committed);
+}
+
+/** Test-only (T69): puts every node's fixture network back to its initial state. */
+export function resetFixtureNodeNetwork(): void {
+  fixtureNodeNet.clear();
+}
+// --- end T69 ---
