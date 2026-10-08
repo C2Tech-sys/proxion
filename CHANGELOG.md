@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Datacenter > Firewall: the cluster-wide firewall in five inner tabs -- the datacenter's rules
+  (add, edit, delete, enable or disable, reorder, reusing the guest firewall's rule dialog), the
+  options (a master Enable switch that asks you to type `ENABLE` first because an inbound DROP
+  policy can lock you out of every node, input and output policy, ebtables, the log rate limit),
+  security groups and the rules inside them, aliases, and IP sets with their entries (including the
+  `nomatch` exclusion flag). Needs a signed-in session and `Sys.Modify` on `/`; changes forward
+  PVE's digest where it accepts one. New routes under `/api/actions/datacenter/firewall/*`.
+
 ## [0.11.1] - 2026-10-08
 
 ### Security

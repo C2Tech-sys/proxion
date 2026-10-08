@@ -30,23 +30,29 @@ import {
   useSecurityGroups,
   useUpdateFirewallRule,
 } from '@/api/firewallHooks';
+import { useAddClusterRule, useClusterRefs, useUpdateClusterRule } from '@/api/clusterFirewallHooks';
+import type { FirewallTarget } from '@/api/clusterFirewall';
 import { FIREWALL_LOG_LEVELS, FIREWALL_VERDICTS, type FirewallRule, type FirewallRuleType } from '@/api/firewall';
 import type { GuestType } from '@/api/types';
 
 export interface EditRuleDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  node: string;
-  type: GuestType;
-  vmid: number;
+  /** Where the rule lives (T67): a guest (the default, from `node`/`type`/`vmid`), the datacenter's
+   * own rule list, or one security group's. The interface picker is hidden for the last two. */
+  target?: FirewallTarget | undefined;
+  /** The guest the rule belongs to; required unless `target` is a datacenter / group target. */
+  node?: string | undefined;
+  type?: GuestType | undefined;
+  vmid?: number | undefined;
   /** The rule being edited. Omit to add a new rule (appended to the end of the list). */
   rule?: FirewallRule | undefined;
   /** The type a new rule starts as: `group` for the "Add security group" button. */
   initialType?: FirewallRuleType | undefined;
   /** How many rules the guest has now: a new rule is inserted at this position (the end). */
   ruleCount: number;
-  /** The guest's `net<n>` config keys, for the interface picker. */
-  netKeys: string[];
+  /** The guest's `net<n>` config keys, for the interface picker (guest targets only). */
+  netKeys?: string[] | undefined;
   /** The digest of the last rules read, forwarded on edits for optimistic concurrency. */
   digest?: string | undefined;
 }
@@ -99,22 +105,32 @@ function Field({
 export function EditRuleDialog({
   open,
   onOpenChange,
-  node,
-  type,
-  vmid,
+  target,
+  node = '',
+  type = 'qemu',
+  vmid = 0,
   rule,
   initialType,
   ruleCount,
-  netKeys,
+  netKeys = [],
   digest,
 }: EditRuleDialogProps) {
   const id = useId();
   const isNew = rule === undefined;
-  const add = useAddFirewallRule();
-  const update = useUpdateFirewallRule();
+  const scope = target ?? { kind: 'guest' as const, node, type, vmid };
+  const isGuest = scope.kind === 'guest';
+  // A security group's own rules are in/out only: PVE does not nest groups.
+  const allowedTypes = scope.kind === 'group' ? RULE_TYPES.filter((t) => t !== 'group') : RULE_TYPES;
+  const addGuest = useAddFirewallRule();
+  const updateGuest = useUpdateFirewallRule();
+  const addCluster = useAddClusterRule();
+  const updateCluster = useUpdateClusterRule();
+  const add = isGuest ? addGuest : addCluster;
+  const update = isGuest ? updateGuest : updateCluster;
   const mutation = isNew ? add : update;
   const groups = useSecurityGroups();
   const macros = useFirewallMacros();
+  const refs = useClusterRefs(!isGuest);
 
   const [form, setForm] = useState<RuleForm>(() => formFromRule(rule, initialType ?? 'in'));
   const set = <K extends keyof RuleForm>(key: K, value: RuleForm[K]) => setForm((prev) => ({ ...prev, [key]: value }));
@@ -153,10 +169,17 @@ export function EditRuleDialog({
 
   function submit() {
     if (!canSave) return;
+    const done = { onSuccess: () => onOpenChange(false) };
     if (isNew) {
-      add.mutate({ node, type, vmid, body: buildCreateBody(form, ruleCount) }, { onSuccess: () => onOpenChange(false) });
+      const body = buildCreateBody(form, ruleCount);
+      if (scope.kind === 'guest') addGuest.mutate({ node: scope.node, type: scope.type, vmid: scope.vmid, body }, done);
+      else addCluster.mutate({ scope, body }, done);
     } else if (rule !== undefined && patch !== undefined) {
-      update.mutate({ node, type, vmid, pos: rule.pos, patch }, { onSuccess: () => onOpenChange(false) });
+      if (scope.kind === 'guest') {
+        updateGuest.mutate({ node: scope.node, type: scope.type, vmid: scope.vmid, pos: rule.pos, patch }, done);
+      } else {
+        updateCluster.mutate({ scope, pos: rule.pos, patch }, done);
+      }
     }
   }
 
@@ -172,6 +195,7 @@ export function EditRuleDialog({
       ? 'Add security group'
       : 'Add firewall rule'
     : `Edit firewall rule (${rule.pos})`;
+  const refOptions = (refs.data ?? []).map((r) => ({ value: r.ref, label: r.comment ?? r.name }));
 
   return (
     <Dialog
@@ -195,7 +219,7 @@ export function EditRuleDialog({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Type" htmlFor={`${id}-type`}>
               <NativeSelect id={`${id}-type`} value={form.type} onChange={(e) => changeType(e.target.value)} disabled={busy}>
-                {RULE_TYPES.map((t) => (
+                {allowedTypes.map((t) => (
                   <option key={t} value={t}>
                     {TYPE_LABELS[t]}
                   </option>
@@ -295,6 +319,7 @@ export function EditRuleDialog({
                 <Field label="Source" htmlFor={`${id}-source`} error={errors.source} hint="IP, CIDR, range, alias or +ipset.">
                   <Input
                     id={`${id}-source`}
+                    list={isGuest ? undefined : `${id}-refs`}
                     value={form.source}
                     onChange={(e) => set('source', e.target.value)}
                     disabled={busy}
@@ -306,6 +331,7 @@ export function EditRuleDialog({
                 <Field label="Destination" htmlFor={`${id}-dest`} error={errors.dest} hint="IP, CIDR, range, alias or +ipset.">
                   <Input
                     id={`${id}-dest`}
+                    list={isGuest ? undefined : `${id}-refs`}
                     value={form.dest}
                     onChange={(e) => set('dest', e.target.value)}
                     disabled={busy}
@@ -313,6 +339,15 @@ export function EditRuleDialog({
                     autoComplete="off"
                   />
                 </Field>
+                {!isGuest && (
+                  <datalist id={`${id}-refs`}>
+                    {refOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </datalist>
+                )}
                 <Field label="Source port" htmlFor={`${id}-sport`} error={errors.sport} hint="80, 8000:8100, a service name or a list.">
                   <Input
                     id={`${id}-sport`}
@@ -339,16 +374,18 @@ export function EditRuleDialog({
           )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Interface" htmlFor={`${id}-iface`}>
-              <NativeSelect id={`${id}-iface`} value={form.iface} onChange={(e) => set('iface', e.target.value)} disabled={busy}>
-                <option value="">Any</option>
-                {ifaceOptions.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
+            {isGuest && (
+              <Field label="Interface" htmlFor={`${id}-iface`}>
+                <NativeSelect id={`${id}-iface`} value={form.iface} onChange={(e) => set('iface', e.target.value)} disabled={busy}>
+                  <option value="">Any</option>
+                  {ifaceOptions.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+            )}
             {!isGroup && (
               <Field label="Log level" htmlFor={`${id}-log`}>
                 <NativeSelect

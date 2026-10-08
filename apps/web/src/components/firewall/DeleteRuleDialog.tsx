@@ -12,15 +12,21 @@ import {
 } from '@/components/ui/alert-dialog';
 import { hardwareErrorMessage } from '@/api/hardwareHooks';
 import { useDeleteFirewallRule } from '@/api/firewallHooks';
+import { useDeleteClusterRule } from '@/api/clusterFirewallHooks';
+import type { FirewallTarget } from '@/api/clusterFirewall';
 import type { FirewallRule } from '@/api/firewall';
 import type { GuestType } from '@/api/types';
 
 export interface DeleteRuleDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  node: string;
-  type: GuestType;
-  vmid: number;
+  /** Where the rule lives (T67): a guest (the default, from `node`/`type`/`vmid`), the datacenter's
+   * own rule list, or one security group's. */
+  target?: FirewallTarget | undefined;
+  /** The guest the rule belongs to; required unless `target` is a datacenter / group target. */
+  node?: string | undefined;
+  type?: GuestType | undefined;
+  vmid?: number | undefined;
   rule: FirewallRule;
   /** The digest of the last rules read, forwarded so a concurrent change is rejected. */
   digest?: string | undefined;
@@ -42,12 +48,29 @@ function describeRule(rule: FirewallRule): string {
  *
  * Mount it fresh per open (the Firewall tab renders it conditionally).
  */
-export function DeleteRuleDialog({ open, onOpenChange, node, type, vmid, rule, digest }: DeleteRuleDialogProps) {
-  const mutation = useDeleteFirewallRule();
+export function DeleteRuleDialog({
+  open,
+  onOpenChange,
+  target,
+  node = '',
+  type = 'qemu',
+  vmid = 0,
+  rule,
+  digest,
+}: DeleteRuleDialogProps) {
+  const scope = target ?? { kind: 'guest' as const, node, type, vmid };
+  const guestMutation = useDeleteFirewallRule();
+  const clusterMutation = useDeleteClusterRule();
+  const mutation = scope.kind === 'guest' ? guestMutation : clusterMutation;
 
   function confirm() {
     if (mutation.isPending) return;
-    mutation.mutate({ node, type, vmid, pos: rule.pos, digest }, { onSuccess: () => onOpenChange(false) });
+    const done = { onSuccess: () => onOpenChange(false) };
+    if (scope.kind === 'guest') {
+      guestMutation.mutate({ node: scope.node, type: scope.type, vmid: scope.vmid, pos: rule.pos, digest }, done);
+    } else {
+      clusterMutation.mutate({ scope, pos: rule.pos, digest }, done);
+    }
   }
 
   return (

@@ -1111,3 +1111,341 @@ export function muteFixtureNotifications(span: FixtureMuteSpan | null): FixtureN
 export function resetFixtureNotifySettings(): void {
   fixtureNotifyStored = initialFixtureNotifyStored();
 }
+
+// --- T67 datacenter firewall -----------------------------------------------------------------
+
+/** Where a cluster-level rule lives: the datacenter's own rule list, or one security group's. */
+export type FixtureClusterRuleScope = { kind: 'cluster' } | { kind: 'group'; group: string };
+
+export interface FixtureClusterGroup {
+  group: string;
+  comment?: string;
+  rules: FirewallRule[];
+}
+
+export interface FixtureClusterAlias {
+  name: string;
+  cidr: string;
+  comment?: string;
+}
+
+export interface FixtureClusterIpsetEntry {
+  cidr: string;
+  nomatch?: boolean;
+  comment?: string;
+}
+
+export interface FixtureClusterIpset {
+  name: string;
+  comment?: string;
+  entries: FixtureClusterIpsetEntry[];
+}
+
+/** The demo's datacenter firewall: PVE keeps all of it in one config file, so one digest covers the
+ * rules, options, groups, aliases and IP sets and every change bumps it. */
+export interface FixtureClusterFirewall {
+  options: Record<string, number | string>;
+  rules: FirewallRule[];
+  groups: FixtureClusterGroup[];
+  aliases: FixtureClusterAlias[];
+  ipsets: FixtureClusterIpset[];
+  digest: string;
+  version: number;
+}
+
+function initialFixtureClusterFirewall(): FixtureClusterFirewall {
+  const numbered = (rules: Array<Omit<FirewallRule, 'pos' | 'digest'>>): FirewallRule[] =>
+    rules.map((rule, pos) => ({ ...rule, pos }));
+  return {
+    // The datacenter firewall ships disabled: enabling it is the demo of the typed confirmation.
+    options: {
+      enable: 0,
+      policy_in: 'DROP',
+      policy_out: 'ACCEPT',
+      ebtables: 1,
+      log_ratelimit: 'enable=1,burst=5,rate=1/second',
+    },
+    rules: numbered([
+      { type: 'in', action: 'ACCEPT', enable: 1, macro: 'SSH', source: '10.0.0.0/24', comment: 'SSH from the office' },
+      { type: 'in', action: 'ACCEPT', enable: 1, proto: 'icmp', comment: 'Ping' },
+      { type: 'out', action: 'DROP', enable: 0, proto: 'tcp', dport: '25', comment: 'No outbound SMTP' },
+    ]),
+    groups: [
+      {
+        group: 'dbservers',
+        comment: 'Database ports',
+        rules: numbered([
+          { type: 'in', action: 'ACCEPT', enable: 1, macro: 'MySQL', source: '10.0.1.0/24' },
+          { type: 'in', action: 'ACCEPT', enable: 1, macro: 'PostgreSQL', source: '10.0.1.0/24' },
+        ]),
+      },
+      {
+        group: 'webservers',
+        comment: 'HTTP and HTTPS',
+        rules: numbered([
+          { type: 'in', action: 'ACCEPT', enable: 1, macro: 'HTTP' },
+          { type: 'in', action: 'ACCEPT', enable: 1, macro: 'HTTPS', comment: 'TLS' },
+        ]),
+      },
+    ],
+    aliases: [
+      { name: 'jumphost', cidr: '192.168.1.10', comment: 'Jump host' },
+      { name: 'office', cidr: '10.0.0.0/24', comment: 'Office LAN' },
+    ],
+    ipsets: [
+      {
+        name: 'trusted',
+        comment: 'Admin networks',
+        entries: [
+          { cidr: '10.0.0.0/24', comment: 'Office' },
+          { cidr: '192.168.1.10', comment: 'Jump host' },
+        ],
+      },
+    ],
+    digest: 'fixture-dc-fw-1',
+    version: 1,
+  };
+}
+
+let fixtureClusterFirewall = initialFixtureClusterFirewall();
+
+/** Test/demo-only lookup (T67): the datacenter firewall. */
+export function getFixtureClusterFirewall(): FixtureClusterFirewall {
+  return fixtureClusterFirewall;
+}
+
+function touchFixtureClusterFirewall(mutate: (state: FixtureClusterFirewall) => void): void {
+  mutate(fixtureClusterFirewall);
+  fixtureClusterFirewall.rules = fixtureClusterFirewall.rules.map((rule, pos) => ({ ...rule, pos }));
+  for (const group of fixtureClusterFirewall.groups) {
+    group.rules = group.rules.map((rule, pos) => ({ ...rule, pos }));
+  }
+  fixtureClusterFirewall.version += 1;
+  fixtureClusterFirewall.digest = `fixture-dc-fw-${fixtureClusterFirewall.version}`;
+}
+
+function fixtureRuleList(state: FixtureClusterFirewall, scope: FixtureClusterRuleScope): FirewallRule[] | undefined {
+  return scope.kind === 'cluster' ? state.rules : state.groups.find((g) => g.group === scope.group)?.rules;
+}
+
+/** Test/demo-only mutator (T67): inserts a rule at `pos` (default: the end); `false` for an unknown group. */
+export function addFixtureClusterRule(
+  scope: FixtureClusterRuleScope,
+  rule: Omit<FirewallRule, 'pos' | 'digest'>,
+  pos?: number,
+): boolean {
+  if (fixtureRuleList(fixtureClusterFirewall, scope) === undefined) return false;
+  touchFixtureClusterFirewall((state) => {
+    const list = fixtureRuleList(state, scope)!;
+    const at = pos === undefined ? list.length : Math.min(Math.max(pos, 0), list.length);
+    list.splice(at, 0, { ...stripUndefined(rule), pos: at });
+  });
+  return true;
+}
+
+/** Test/demo-only mutator (T67): applies `patch`, clears the `clear` fields, optionally moves the
+ * rule to `moveto`. `false` when no rule sits at `pos`. */
+export function updateFixtureClusterRule(
+  scope: FixtureClusterRuleScope,
+  pos: number,
+  patch: Partial<Omit<FirewallRule, 'pos' | 'digest'>>,
+  clear: string[],
+  moveto?: number,
+): boolean {
+  if (fixtureRuleList(fixtureClusterFirewall, scope)?.[pos] === undefined) return false;
+  touchFixtureClusterFirewall((state) => {
+    const list = fixtureRuleList(state, scope)!;
+    const next: Record<string, unknown> = { ...list[pos], ...stripUndefined(patch) };
+    for (const field of clear) delete next[field];
+    list.splice(pos, 1);
+    const at = moveto === undefined ? pos : Math.min(Math.max(moveto, 0), list.length);
+    list.splice(at, 0, next as unknown as FirewallRule);
+  });
+  return true;
+}
+
+/** Test/demo-only mutator (T67): removes the rule at `pos`; `false` when there is none. */
+export function deleteFixtureClusterRule(scope: FixtureClusterRuleScope, pos: number): boolean {
+  if (fixtureRuleList(fixtureClusterFirewall, scope)?.[pos] === undefined) return false;
+  touchFixtureClusterFirewall((state) => {
+    fixtureRuleList(state, scope)!.splice(pos, 1);
+  });
+  return true;
+}
+
+/** Test/demo-only mutator (T67): merges options; booleans are stored 0/1 like PVE reports them. */
+export function patchFixtureClusterOptions(patch: Record<string, boolean | string | undefined>): void {
+  touchFixtureClusterFirewall((state) => {
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) continue;
+      state.options[key] = typeof value === 'boolean' ? (value ? 1 : 0) : value;
+    }
+  });
+}
+
+/** Test/demo-only mutator (T67), PVE's own semantics: `group` is the (new) name, `rename` the
+ * EXISTING group being renamed or (same value) re-commented. Returns an error message or
+ * `undefined`. */
+export function upsertFixtureClusterGroup(
+  group: string,
+  comment: string | undefined,
+  rename?: string,
+): string | undefined {
+  const state = fixtureClusterFirewall;
+  if (rename === undefined) {
+    if (state.groups.some((g) => g.group === group)) return `Security group '${group}' already exists`;
+    touchFixtureClusterFirewall((s) => {
+      s.groups.push({ group, ...(comment !== undefined ? { comment } : {}), rules: [] });
+      s.groups.sort((a, b) => a.group.localeCompare(b.group));
+    });
+    return undefined;
+  }
+  if (!state.groups.some((g) => g.group === rename)) return `Security group '${rename}' does not exist`;
+  if (group !== rename && state.groups.some((g) => g.group === group)) {
+    return `Security group '${group}' already exists`;
+  }
+  touchFixtureClusterFirewall((s) => {
+    const target = s.groups.find((g) => g.group === rename)!;
+    target.group = group;
+    if (comment === undefined) delete target.comment;
+    else target.comment = comment;
+    s.groups.sort((a, b) => a.group.localeCompare(b.group));
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T67): removes a group; an error message when it is missing. */
+export function deleteFixtureClusterGroup(group: string): string | undefined {
+  if (!fixtureClusterFirewall.groups.some((g) => g.group === group)) {
+    return `Security group '${group}' does not exist`;
+  }
+  touchFixtureClusterFirewall((s) => {
+    s.groups = s.groups.filter((g) => g.group !== group);
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T67): adds an alias; an error message on a duplicate name. */
+export function addFixtureClusterAlias(alias: FixtureClusterAlias): string | undefined {
+  if (fixtureClusterFirewall.aliases.some((a) => a.name === alias.name)) return `Alias '${alias.name}' already exists`;
+  touchFixtureClusterFirewall((s) => {
+    s.aliases.push(stripUndefined(alias));
+    s.aliases.sort((a, b) => a.name.localeCompare(b.name));
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T67): edits (and optionally renames) an alias. */
+export function updateFixtureClusterAlias(
+  name: string,
+  next: { cidr: string; comment?: string | undefined; rename?: string | undefined },
+): string | undefined {
+  const state = fixtureClusterFirewall;
+  if (!state.aliases.some((a) => a.name === name)) return `Alias '${name}' does not exist`;
+  if (next.rename !== undefined && next.rename !== name && state.aliases.some((a) => a.name === next.rename)) {
+    return `Alias '${next.rename}' already exists`;
+  }
+  touchFixtureClusterFirewall((s) => {
+    const target = s.aliases.find((a) => a.name === name)!;
+    target.name = next.rename ?? name;
+    target.cidr = next.cidr;
+    if (next.comment === undefined || next.comment === '') delete target.comment;
+    else target.comment = next.comment;
+    s.aliases.sort((a, b) => a.name.localeCompare(b.name));
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T67): removes an alias. */
+export function deleteFixtureClusterAlias(name: string): string | undefined {
+  if (!fixtureClusterFirewall.aliases.some((a) => a.name === name)) return `Alias '${name}' does not exist`;
+  touchFixtureClusterFirewall((s) => {
+    s.aliases = s.aliases.filter((a) => a.name !== name);
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T67), PVE's own semantics (see `upsertFixtureClusterGroup`). */
+export function upsertFixtureClusterIpset(
+  name: string,
+  comment: string | undefined,
+  rename?: string,
+): string | undefined {
+  const state = fixtureClusterFirewall;
+  if (rename === undefined) {
+    if (state.ipsets.some((i) => i.name === name)) return `IPSet '${name}' already exists`;
+    touchFixtureClusterFirewall((s) => {
+      s.ipsets.push({ name, ...(comment !== undefined ? { comment } : {}), entries: [] });
+      s.ipsets.sort((a, b) => a.name.localeCompare(b.name));
+    });
+    return undefined;
+  }
+  if (!state.ipsets.some((i) => i.name === rename)) return `IPSet '${rename}' does not exist`;
+  if (name !== rename && state.ipsets.some((i) => i.name === name)) return `IPSet '${name}' already exists`;
+  touchFixtureClusterFirewall((s) => {
+    const target = s.ipsets.find((i) => i.name === rename)!;
+    target.name = name;
+    if (comment === undefined) delete target.comment;
+    else target.comment = comment;
+    s.ipsets.sort((a, b) => a.name.localeCompare(b.name));
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T67): removes an IP set; without `force` a non-empty one is refused, like PVE. */
+export function deleteFixtureClusterIpset(name: string, force: boolean): string | undefined {
+  const target = fixtureClusterFirewall.ipsets.find((i) => i.name === name);
+  if (!target) return `IPSet '${name}' does not exist`;
+  if (target.entries.length > 0 && !force) return `IPSet '${name}' is not empty`;
+  touchFixtureClusterFirewall((s) => {
+    s.ipsets = s.ipsets.filter((i) => i.name !== name);
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T67): adds an entry to an IP set. */
+export function addFixtureClusterIpsetEntry(name: string, entry: FixtureClusterIpsetEntry): string | undefined {
+  const target = fixtureClusterFirewall.ipsets.find((i) => i.name === name);
+  if (!target) return `IPSet '${name}' does not exist`;
+  if (target.entries.some((e) => e.cidr === entry.cidr)) return `'${entry.cidr}' already exists in IPSet '${name}'`;
+  touchFixtureClusterFirewall((s) => {
+    s.ipsets.find((i) => i.name === name)!.entries.push(stripUndefined(entry));
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T67): edits an entry's nomatch / comment (an omitted or empty comment clears it). */
+export function updateFixtureClusterIpsetEntry(
+  name: string,
+  cidr: string,
+  next: { nomatch?: boolean | undefined; comment?: string | undefined },
+): string | undefined {
+  const entry = fixtureClusterFirewall.ipsets.find((i) => i.name === name)?.entries.find((e) => e.cidr === cidr);
+  if (!entry) return `'${cidr}' is not in IPSet '${name}'`;
+  touchFixtureClusterFirewall((s) => {
+    const target = s.ipsets.find((i) => i.name === name)!.entries.find((e) => e.cidr === cidr)!;
+    if (next.nomatch === true) target.nomatch = true;
+    else if (next.nomatch === false) delete target.nomatch;
+    // Like PVE, an omitted comment clears it.
+    if (next.comment === undefined || next.comment === '') delete target.comment;
+    else target.comment = next.comment;
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T67): removes an entry from an IP set. */
+export function deleteFixtureClusterIpsetEntry(name: string, cidr: string): string | undefined {
+  const target = fixtureClusterFirewall.ipsets.find((i) => i.name === name);
+  if (!target?.entries.some((e) => e.cidr === cidr)) return `'${cidr}' is not in IPSet '${name}'`;
+  touchFixtureClusterFirewall((s) => {
+    const set = s.ipsets.find((i) => i.name === name)!;
+    set.entries = set.entries.filter((e) => e.cidr !== cidr);
+  });
+  return undefined;
+}
+
+/** Test-only (T67): puts the fixture datacenter firewall back to its initial state. */
+export function resetFixtureClusterFirewall(): void {
+  fixtureClusterFirewall = initialFixtureClusterFirewall();
+}
+// --- end T67 ---
