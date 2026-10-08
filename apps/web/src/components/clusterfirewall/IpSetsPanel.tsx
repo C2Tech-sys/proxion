@@ -29,21 +29,22 @@ import {
   useSaveIpset,
   useUpdateIpsetEntry,
 } from '@/api/clusterFirewallHooks';
-import type { ClusterIpset, ClusterIpsetEntry } from '@/api/clusterFirewall';
+import { CLUSTER_FIREWALL_TARGET, type ClusterIpset, type ClusterIpsetEntry, type FirewallTarget } from '@/api/clusterFirewall';
 
 interface IpsetDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The set being edited. Omit to create one. */
   ipset?: ClusterIpset | undefined;
+  target: FirewallTarget;
 }
 
 /** Creates an IP set, or renames / re-comments one. PVE's own field semantics: `name` is the (new)
  * name and `rename` the existing one (equal to `name` to change only the comment). Mount it fresh
  * per open. */
-function IpsetDialog({ open, onOpenChange, ipset }: IpsetDialogProps) {
+function IpsetDialog({ open, onOpenChange, ipset, target }: IpsetDialogProps) {
   const id = useId();
-  const mutation = useSaveIpset();
+  const mutation = useSaveIpset(target);
   const isNew = ipset === undefined;
   const [name, setName] = useState(ipset?.name ?? '');
   const [comment, setComment] = useState(ipset?.comment ?? '');
@@ -138,15 +139,16 @@ interface EntryDialogProps {
   ipset: string;
   /** The entry being edited. Omit to add one. */
   entry?: ClusterIpsetEntry | undefined;
+  target: FirewallTarget;
 }
 
 /** Adds an entry to an IP set, or edits one's `nomatch` flag and comment (the address is the entry's
  * identity, so it cannot change). `nomatch` excludes the address from the set, e.g. a host inside a
  * network that is otherwise listed. Mount it fresh per open. */
-function EntryDialog({ open, onOpenChange, ipset, entry }: EntryDialogProps) {
+function EntryDialog({ open, onOpenChange, ipset, entry, target }: EntryDialogProps) {
   const id = useId();
-  const add = useAddIpsetEntry();
-  const update = useUpdateIpsetEntry();
+  const add = useAddIpsetEntry(target);
+  const update = useUpdateIpsetEntry(target);
   const mutation = entry === undefined ? add : update;
   const [cidr, setCidr] = useState(entry?.cidr ?? '');
   const [nomatch, setNomatch] = useState(entry?.nomatch ?? false);
@@ -257,8 +259,16 @@ function EntryDialog({ open, onOpenChange, ipset, entry }: EntryDialogProps) {
   );
 }
 
-function DeleteIpsetDialog({ ipset, onOpenChange }: { ipset: ClusterIpset; onOpenChange: (open: boolean) => void }) {
-  const mutation = useDeleteIpset();
+function DeleteIpsetDialog({
+  ipset,
+  target,
+  onOpenChange,
+}: {
+  ipset: ClusterIpset;
+  target: FirewallTarget;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const mutation = useDeleteIpset(target);
   return (
     <ConfirmDialog
       open
@@ -276,13 +286,15 @@ function DeleteIpsetDialog({ ipset, onOpenChange }: { ipset: ClusterIpset; onOpe
 function DeleteEntryDialog({
   ipset,
   entry,
+  target,
   onOpenChange,
 }: {
   ipset: string;
   entry: ClusterIpsetEntry;
+  target: FirewallTarget;
   onOpenChange: (open: boolean) => void;
 }) {
-  const mutation = useDeleteIpsetEntry();
+  const mutation = useDeleteIpsetEntry(target);
   return (
     <ConfirmDialog
       open
@@ -305,14 +317,23 @@ type EntryDialogTarget =
   | { kind: 'edit'; entry: ClusterIpsetEntry }
   | { kind: 'delete'; entry: ClusterIpsetEntry };
 
-function EntriesPanel({ ipset, disabledReason }: { ipset: string; disabledReason: string | undefined }) {
-  const entries = useIpsetEntries(ipset);
+function EntriesPanel({
+  ipset,
+  disabledReason,
+  target,
+}: {
+  ipset: string;
+  disabledReason: string | undefined;
+  target: FirewallTarget;
+}) {
+  const entries = useIpsetEntries(ipset, target);
+  const tid = target.kind === 'guest' ? 'guest-fw' : 'dc-fw';
   const [dialog, setDialog] = useState<EntryDialogTarget | null>(null);
   const locked = disabledReason !== undefined;
   const list = entries.data ?? [];
 
   return (
-    <div data-testid="dc-fw-ipset-entries">
+    <div data-testid={`${tid}-ipset-entries`}>
       <Panel
         title={`Entries: ${ipset}`}
         action={
@@ -349,7 +370,7 @@ function EntriesPanel({ ipset, disabledReason }: { ipset: string; disabledReason
             </TableHeader>
             <TableBody>
               {list.map((e) => (
-                <TableRow key={e.cidr} data-testid={`dc-fw-ipset-entry-${e.cidr}`}>
+                <TableRow key={e.cidr} data-testid={`${tid}-ipset-entry-${e.cidr}`}>
                   <TableCell className="font-medium">{e.cidr}</TableCell>
                   <TableCell>{e.nomatch ? 'nomatch' : <span className="text-muted-foreground">-</span>}</TableCell>
                   <TableCell>
@@ -379,12 +400,25 @@ function EntriesPanel({ ipset, disabledReason }: { ipset: string; disabledReason
         )}
       </Panel>
 
-      {dialog?.kind === 'add' && <EntryDialog open onOpenChange={(open) => !open && setDialog(null)} ipset={ipset} />}
+      {dialog?.kind === 'add' && (
+        <EntryDialog open onOpenChange={(open) => !open && setDialog(null)} ipset={ipset} target={target} />
+      )}
       {dialog?.kind === 'edit' && (
-        <EntryDialog open onOpenChange={(open) => !open && setDialog(null)} ipset={ipset} entry={dialog.entry} />
+        <EntryDialog
+          open
+          onOpenChange={(open) => !open && setDialog(null)}
+          ipset={ipset}
+          entry={dialog.entry}
+          target={target}
+        />
       )}
       {dialog?.kind === 'delete' && (
-        <DeleteEntryDialog ipset={ipset} entry={dialog.entry} onOpenChange={(open) => !open && setDialog(null)} />
+        <DeleteEntryDialog
+          ipset={ipset}
+          entry={dialog.entry}
+          target={target}
+          onOpenChange={(open) => !open && setDialog(null)}
+        />
       )}
     </div>
   );
@@ -393,12 +427,15 @@ function EntriesPanel({ ipset, disabledReason }: { ipset: string; disabledReason
 export interface IpSetsPanelProps {
   /** When set, every control is disabled and this is its tooltip. */
   disabledReason: string | undefined;
+  /** Whose IP sets: the datacenter firewall's (the default) or one guest's. */
+  target?: FirewallTarget;
 }
 
-/** PVE's Datacenter -> Firewall -> IPSet: the sets (create / rename / delete) and the entries of the
- * selected set (add / edit / remove, with the `nomatch` exclusion flag). */
-export function IpSetsPanel({ disabledReason }: IpSetsPanelProps) {
-  const ipsets = useClusterIpsets();
+/** PVE's Firewall -> IPSet (datacenter or guest): the sets (create / rename / delete) and the entries
+ * of the selected set (add / edit / remove, with the `nomatch` exclusion flag). */
+export function IpSetsPanel({ disabledReason, target = CLUSTER_FIREWALL_TARGET }: IpSetsPanelProps) {
+  const ipsets = useClusterIpsets(target);
+  const tid = target.kind === 'guest' ? 'guest-fw' : 'dc-fw';
   const [dialog, setDialog] = useState<SetDialog | null>(null);
   const [selected, setSelected] = useState<string | undefined>(undefined);
   const locked = disabledReason !== undefined;
@@ -406,7 +443,7 @@ export function IpSetsPanel({ disabledReason }: IpSetsPanelProps) {
   const selectedSet = list.find((s) => s.name === selected)?.name;
 
   return (
-    <div data-testid="dc-fw-ipsets" className="flex flex-col gap-4">
+    <div data-testid={`${tid}-ipsets`} className="flex flex-col gap-4">
       <Panel
         title="IP sets"
         action={
@@ -442,7 +479,7 @@ export function IpSetsPanel({ disabledReason }: IpSetsPanelProps) {
             </TableHeader>
             <TableBody>
               {list.map((s) => (
-                <TableRow key={s.name} data-testid={`dc-fw-ipset-${s.name}`} data-state={s.name === selectedSet ? 'selected' : undefined}>
+                <TableRow key={s.name} data-testid={`${tid}-ipset-${s.name}`} data-state={s.name === selectedSet ? 'selected' : undefined}>
                   <TableCell className="font-medium">{s.name}</TableCell>
                   <TableCell>
                     <Cell value={s.comment} />
@@ -482,14 +519,18 @@ export function IpSetsPanel({ disabledReason }: IpSetsPanelProps) {
         )}
       </Panel>
 
-      {selectedSet !== undefined && <EntriesPanel key={selectedSet} ipset={selectedSet} disabledReason={disabledReason} />}
+      {selectedSet !== undefined && (
+        <EntriesPanel key={selectedSet} ipset={selectedSet} disabledReason={disabledReason} target={target} />
+      )}
 
-      {dialog?.kind === 'create' && <IpsetDialog open onOpenChange={(open) => !open && setDialog(null)} />}
+      {dialog?.kind === 'create' && (
+        <IpsetDialog open onOpenChange={(open) => !open && setDialog(null)} target={target} />
+      )}
       {dialog?.kind === 'edit' && (
-        <IpsetDialog open onOpenChange={(open) => !open && setDialog(null)} ipset={dialog.ipset} />
+        <IpsetDialog open onOpenChange={(open) => !open && setDialog(null)} ipset={dialog.ipset} target={target} />
       )}
       {dialog?.kind === 'delete' && (
-        <DeleteIpsetDialog ipset={dialog.ipset} onOpenChange={(open) => !open && setDialog(null)} />
+        <DeleteIpsetDialog ipset={dialog.ipset} target={target} onOpenChange={(open) => !open && setDialog(null)} />
       )}
     </div>
   );

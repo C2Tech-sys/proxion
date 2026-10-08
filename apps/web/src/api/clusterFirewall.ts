@@ -2,6 +2,8 @@ import { USE_FIXTURES } from '@/api/client';
 import { GuestActionError } from '@/api/actions';
 import {
   addFixtureClusterAlias,
+  addFixtureGuestAlias,
+  addFixtureGuestIpsetEntry,
   addFixtureClusterIpsetEntry,
   addFixtureClusterRule,
   deleteFixtureClusterAlias,
@@ -9,13 +11,20 @@ import {
   deleteFixtureClusterIpset,
   deleteFixtureClusterIpsetEntry,
   deleteFixtureClusterRule,
+  deleteFixtureGuestAlias,
+  deleteFixtureGuestIpset,
+  deleteFixtureGuestIpsetEntry,
   getFixtureClusterFirewall,
+  getFixtureGuestRefs,
   patchFixtureClusterOptions,
   updateFixtureClusterAlias,
   updateFixtureClusterIpsetEntry,
   updateFixtureClusterRule,
+  updateFixtureGuestAlias,
+  updateFixtureGuestIpsetEntry,
   upsertFixtureClusterGroup,
   upsertFixtureClusterIpset,
+  upsertFixtureGuestIpset,
   type FixtureClusterRuleScope,
 } from '@/api/fixtures';
 import {
@@ -38,6 +47,22 @@ import type { GuestType } from '@/api/types';
 /** Where a rule lives: a guest's firewall, the datacenter's own rule list, or one security group's. */
 export type ClusterRuleScope = FixtureClusterRuleScope;
 export type FirewallTarget = { kind: 'guest'; node: string; type: GuestType; vmid: number } | ClusterRuleScope;
+export type GuestFirewallTarget = Extract<FirewallTarget, { kind: 'guest' }>;
+
+/** The default target of the alias / IP set functions: the datacenter firewall. */
+export const CLUSTER_FIREWALL_TARGET: FirewallTarget = { kind: 'cluster' };
+
+/** The guest an alias / IP set call addresses, or `undefined` for the datacenter (a security group has
+ * no aliases or IP sets of its own, so a group scope reads as the datacenter). */
+function guestOf(target: FirewallTarget): GuestFirewallTarget | undefined {
+  return target.kind === 'guest' ? target : undefined;
+}
+
+/** Read-proxy path (below `/api/pve/`) of the firewall the target addresses. */
+function readBase(target: FirewallTarget): string {
+  const guest = guestOf(target);
+  return guest ? `nodes/${encodeURIComponent(guest.node)}/${guest.type}/${guest.vmid}/firewall` : 'cluster/firewall';
+}
 
 export interface ClusterLogRatelimit {
   enabled: boolean;
@@ -135,8 +160,10 @@ async function throwActionError(res: Response): Promise<never> {
 
 const STALE_DIGEST_MESSAGE = 'The firewall configuration changed since it was loaded. Reload and try again.';
 
-function checkFixtureDigest(digest: string | undefined): void {
-  if (digest !== undefined && digest !== getFixtureClusterFirewall().digest) {
+function checkFixtureDigest(digest: string | undefined, target: FirewallTarget = CLUSTER_FIREWALL_TARGET): void {
+  const guest = guestOf(target);
+  const current = guest ? getFixtureGuestRefs(guest.vmid).digest : getFixtureClusterFirewall().digest;
+  if (digest !== undefined && digest !== current) {
     throw new GuestActionError(400, STALE_DIGEST_MESSAGE);
   }
 }
@@ -239,37 +266,45 @@ export async function getClusterGroups(): Promise<ClusterSecurityGroup[]> {
     .sort((a, b) => a.group.localeCompare(b.group));
 }
 
-export async function getClusterAliases(): Promise<ClusterAlias[]> {
+/** The aliases of the datacenter firewall, or of one guest's when `target` is a guest. */
+export async function getClusterAliases(target: FirewallTarget = CLUSTER_FIREWALL_TARGET): Promise<ClusterAlias[]> {
   if (USE_FIXTURES) {
-    const fw = getFixtureClusterFirewall();
+    const guest = guestOf(target);
+    const fw = guest ? getFixtureGuestRefs(guest.vmid) : getFixtureClusterFirewall();
     return fw.aliases.map((a) => ({ name: a.name, cidr: a.cidr, comment: a.comment, digest: fw.digest }));
   }
-  return asRows(await readProxy('cluster/firewall/aliases'))
+  return asRows(await readProxy(`${readBase(target)}/aliases`))
     .filter((row): row is Record<string, unknown> & { name: string; cidr: string } =>
       typeof row.name === 'string' && typeof row.cidr === 'string')
     .map((row) => ({ name: row.name, cidr: row.cidr, comment: str(row.comment), digest: str(row.digest) }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function getClusterIpsets(): Promise<ClusterIpset[]> {
+/** The IP sets of the datacenter firewall, or of one guest's when `target` is a guest. */
+export async function getClusterIpsets(target: FirewallTarget = CLUSTER_FIREWALL_TARGET): Promise<ClusterIpset[]> {
   if (USE_FIXTURES) {
-    const fw = getFixtureClusterFirewall();
+    const guest = guestOf(target);
+    const fw = guest ? getFixtureGuestRefs(guest.vmid) : getFixtureClusterFirewall();
     return fw.ipsets.map((i) => ({ name: i.name, comment: i.comment, digest: fw.digest }));
   }
-  return asRows(await readProxy('cluster/firewall/ipset'))
+  return asRows(await readProxy(`${readBase(target)}/ipset`))
     .filter((row): row is Record<string, unknown> & { name: string } => typeof row.name === 'string')
     .map((row) => ({ name: row.name, comment: str(row.comment), digest: str(row.digest) }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function getIpsetEntries(name: string): Promise<ClusterIpsetEntry[]> {
+export async function getIpsetEntries(
+  name: string,
+  target: FirewallTarget = CLUSTER_FIREWALL_TARGET,
+): Promise<ClusterIpsetEntry[]> {
   if (USE_FIXTURES) {
-    const fw = getFixtureClusterFirewall();
+    const guest = guestOf(target);
+    const fw = guest ? getFixtureGuestRefs(guest.vmid) : getFixtureClusterFirewall();
     const found = fw.ipsets.find((i) => i.name === name);
     if (!found) throw new GuestActionError(404, `IPSet '${name}' does not exist`);
     return found.entries.map((e) => ({ cidr: e.cidr, nomatch: e.nomatch === true, comment: e.comment, digest: fw.digest }));
   }
-  return asRows(await readProxy(`cluster/firewall/ipset/${encodeURIComponent(name)}`))
+  return asRows(await readProxy(`${readBase(target)}/ipset/${encodeURIComponent(name)}`))
     .filter((row): row is Record<string, unknown> & { cidr: string } => typeof row.cidr === 'string')
     .map((row) => ({
       cidr: row.cidr,
@@ -279,12 +314,29 @@ export async function getIpsetEntries(name: string): Promise<ClusterIpsetEntry[]
     }));
 }
 
-/** The aliases and IP sets a rule's source / destination can name (`GET /cluster/firewall/refs`).
- * A 403 is tolerated: the picker just offers nothing. */
-export async function getClusterRefs(): Promise<ClusterRef[]> {
+/** The aliases and IP sets a rule's source / destination can name (`GET /cluster/firewall/refs`, or a
+ * guest's `GET /nodes/{node}/{type}/{vmid}/firewall/refs`, which adds the guest's own ones to the
+ * inherited datacenter ones). A 403 is tolerated: the picker just offers nothing. */
+export async function getClusterRefs(target: FirewallTarget = CLUSTER_FIREWALL_TARGET): Promise<ClusterRef[]> {
   if (USE_FIXTURES) {
     const fw = getFixtureClusterFirewall();
+    const guest = guestOf(target);
+    const own = guest ? getFixtureGuestRefs(guest.vmid) : undefined;
     return [
+      ...(own?.aliases ?? []).map((a) => ({
+        ref: `guest/${a.name}`,
+        name: a.name,
+        type: 'alias' as const,
+        scope: 'guest',
+        comment: a.comment,
+      })),
+      ...(own?.ipsets ?? []).map((i) => ({
+        ref: `+guest/${i.name}`,
+        name: i.name,
+        type: 'ipset' as const,
+        scope: 'guest',
+        comment: i.comment,
+      })),
       ...fw.aliases.map((a) => ({
         ref: `dc/${a.name}`,
         name: a.name,
@@ -301,7 +353,7 @@ export async function getClusterRefs(): Promise<ClusterRef[]> {
       })),
     ];
   }
-  const res = await fetch('/api/pve/cluster/firewall/refs');
+  const res = await fetch(`/api/pve/${readBase(target)}/refs`);
   if (res.status === 403) return [];
   if (!res.ok) throw new GuestActionError(res.status, `Failed to load firewall references: ${res.status}`);
   const envelope = (await res.json()) as { data?: unknown };
@@ -323,14 +375,25 @@ export async function getClusterRefs(): Promise<ClusterRef[]> {
 
 const BASE = '/api/actions/datacenter/firewall';
 
+/** The allow-listed write route of the firewall the target addresses. */
+function writeBase(target: FirewallTarget): string {
+  const guest = guestOf(target);
+  return guest ? `/api/actions/guest/${encodeURIComponent(guest.node)}/${guest.type}/${guest.vmid}/firewall` : BASE;
+}
+
 /** Sends one write; `200`/`201` is success, anything else throws the mapped error. */
-async function send(method: 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<void> {
+async function send(
+  method: 'POST' | 'PUT' | 'DELETE',
+  path: string,
+  body?: unknown,
+  target: FirewallTarget = CLUSTER_FIREWALL_TARGET,
+): Promise<void> {
   const init: RequestInit = { method };
   if (body !== undefined) {
     init.headers = { 'content-type': 'application/json' };
     init.body = JSON.stringify(body);
   }
-  const res = await fetch(`${BASE}${path}`, init);
+  const res = await fetch(`${writeBase(target)}${path}`, init);
   if (res.status === 200 || res.status === 201) return;
   return throwActionError(res);
 }
@@ -465,14 +528,16 @@ export interface AliasCreate {
   comment?: string | undefined;
 }
 
-export async function createAlias(alias: AliasCreate): Promise<void> {
+export async function createAlias(alias: AliasCreate, target: FirewallTarget = CLUSTER_FIREWALL_TARGET): Promise<void> {
   if (USE_FIXTURES) {
-    failOn(addFixtureClusterAlias({ name: alias.name, cidr: alias.cidr, ...(alias.comment ? { comment: alias.comment } : {}) }));
+    const entry = { name: alias.name, cidr: alias.cidr, ...(alias.comment ? { comment: alias.comment } : {}) };
+    const guest = guestOf(target);
+    failOn(guest ? addFixtureGuestAlias(guest.vmid, entry) : addFixtureClusterAlias(entry));
     return;
   }
   const body: Record<string, string> = { name: alias.name, cidr: alias.cidr };
   if (alias.comment !== undefined) body.comment = alias.comment;
-  return send('POST', '/aliases', body);
+  return send('POST', '/aliases', body, target);
 }
 
 export interface AliasUpdate {
@@ -485,26 +550,33 @@ export interface AliasUpdate {
   digest?: string | undefined;
 }
 
-export async function updateAlias(update: AliasUpdate): Promise<void> {
+export async function updateAlias(update: AliasUpdate, target: FirewallTarget = CLUSTER_FIREWALL_TARGET): Promise<void> {
   if (USE_FIXTURES) {
-    checkFixtureDigest(update.digest);
-    failOn(updateFixtureClusterAlias(update.name, { cidr: update.cidr, comment: update.comment, rename: update.rename }));
+    checkFixtureDigest(update.digest, target);
+    const next = { cidr: update.cidr, comment: update.comment, rename: update.rename };
+    const guest = guestOf(target);
+    failOn(guest ? updateFixtureGuestAlias(guest.vmid, update.name, next) : updateFixtureClusterAlias(update.name, next));
     return;
   }
   const body: Record<string, string> = { cidr: update.cidr };
   if (update.comment !== undefined) body.comment = update.comment;
   if (update.rename !== undefined) body.rename = update.rename;
   if (update.digest !== undefined) body.digest = update.digest;
-  return send('PUT', `/aliases/${encodeURIComponent(update.name)}`, body);
+  return send('PUT', `/aliases/${encodeURIComponent(update.name)}`, body, target);
 }
 
-export async function deleteAlias(name: string, digest?: string): Promise<void> {
+export async function deleteAlias(
+  name: string,
+  digest?: string,
+  target: FirewallTarget = CLUSTER_FIREWALL_TARGET,
+): Promise<void> {
   if (USE_FIXTURES) {
-    checkFixtureDigest(digest);
-    failOn(deleteFixtureClusterAlias(name));
+    checkFixtureDigest(digest, target);
+    const guest = guestOf(target);
+    failOn(guest ? deleteFixtureGuestAlias(guest.vmid, name) : deleteFixtureClusterAlias(name));
     return;
   }
-  return send('DELETE', `/aliases/${encodeURIComponent(name)}${digestQuery(digest)}`);
+  return send('DELETE', `/aliases/${encodeURIComponent(name)}${digestQuery(digest)}`, undefined, target);
 }
 
 export interface IpsetSave {
@@ -517,26 +589,36 @@ export interface IpsetSave {
 }
 
 /** Creates an IP set, or edits an existing one when `rename` names it: `POST .../ipsets`. */
-export async function saveIpset(save: IpsetSave): Promise<void> {
+export async function saveIpset(save: IpsetSave, target: FirewallTarget = CLUSTER_FIREWALL_TARGET): Promise<void> {
   if (USE_FIXTURES) {
-    checkFixtureDigest(save.digest);
-    failOn(upsertFixtureClusterIpset(save.name, save.comment, save.rename));
+    checkFixtureDigest(save.digest, target);
+    const guest = guestOf(target);
+    failOn(
+      guest
+        ? upsertFixtureGuestIpset(guest.vmid, save.name, save.comment, save.rename)
+        : upsertFixtureClusterIpset(save.name, save.comment, save.rename),
+    );
     return;
   }
   const body: Record<string, string> = { name: save.name };
   if (save.comment !== undefined) body.comment = save.comment;
   if (save.rename !== undefined) body.rename = save.rename;
   if (save.digest !== undefined) body.digest = save.digest;
-  return send('POST', '/ipsets', body);
+  return send('POST', '/ipsets', body, target);
 }
 
 /** Removes an IP set (`force` also drops its entries): `DELETE .../ipsets/:name[?force=1]`. */
-export async function deleteIpset(name: string, force: boolean): Promise<void> {
+export async function deleteIpset(
+  name: string,
+  force: boolean,
+  target: FirewallTarget = CLUSTER_FIREWALL_TARGET,
+): Promise<void> {
   if (USE_FIXTURES) {
-    failOn(deleteFixtureClusterIpset(name, force));
+    const guest = guestOf(target);
+    failOn(guest ? deleteFixtureGuestIpset(guest.vmid, name, force) : deleteFixtureClusterIpset(name, force));
     return;
   }
-  return send('DELETE', `/ipsets/${encodeURIComponent(name)}${force ? '?force=1' : ''}`);
+  return send('DELETE', `/ipsets/${encodeURIComponent(name)}${force ? '?force=1' : ''}`, undefined, target);
 }
 
 export interface IpsetEntryCreate {
@@ -546,21 +628,21 @@ export interface IpsetEntryCreate {
   comment?: string | undefined;
 }
 
-export async function addIpsetEntry(entry: IpsetEntryCreate): Promise<void> {
+export async function addIpsetEntry(entry: IpsetEntryCreate, target: FirewallTarget = CLUSTER_FIREWALL_TARGET): Promise<void> {
   if (USE_FIXTURES) {
-    failOn(
-      addFixtureClusterIpsetEntry(entry.name, {
-        cidr: entry.cidr,
-        ...(entry.nomatch ? { nomatch: true } : {}),
-        ...(entry.comment ? { comment: entry.comment } : {}),
-      }),
-    );
+    const row = {
+      cidr: entry.cidr,
+      ...(entry.nomatch ? { nomatch: true } : {}),
+      ...(entry.comment ? { comment: entry.comment } : {}),
+    };
+    const guest = guestOf(target);
+    failOn(guest ? addFixtureGuestIpsetEntry(guest.vmid, entry.name, row) : addFixtureClusterIpsetEntry(entry.name, row));
     return;
   }
   const body: Record<string, string | boolean> = { cidr: entry.cidr };
   if (entry.nomatch !== undefined) body.nomatch = entry.nomatch;
   if (entry.comment !== undefined) body.comment = entry.comment;
-  return send('POST', `/ipsets/${encodeURIComponent(entry.name)}`, body);
+  return send('POST', `/ipsets/${encodeURIComponent(entry.name)}`, body, target);
 }
 
 export interface IpsetEntryUpdate {
@@ -571,24 +653,44 @@ export interface IpsetEntryUpdate {
   digest?: string | undefined;
 }
 
-export async function updateIpsetEntry(update: IpsetEntryUpdate): Promise<void> {
+export async function updateIpsetEntry(
+  update: IpsetEntryUpdate,
+  target: FirewallTarget = CLUSTER_FIREWALL_TARGET,
+): Promise<void> {
   if (USE_FIXTURES) {
-    checkFixtureDigest(update.digest);
-    failOn(updateFixtureClusterIpsetEntry(update.name, update.cidr, { nomatch: update.nomatch, comment: update.comment }));
+    checkFixtureDigest(update.digest, target);
+    const next = { nomatch: update.nomatch, comment: update.comment };
+    const guest = guestOf(target);
+    failOn(
+      guest
+        ? updateFixtureGuestIpsetEntry(guest.vmid, update.name, update.cidr, next)
+        : updateFixtureClusterIpsetEntry(update.name, update.cidr, next),
+    );
     return;
   }
   const body: Record<string, string | boolean> = {};
   if (update.nomatch !== undefined) body.nomatch = update.nomatch;
   if (update.comment !== undefined) body.comment = update.comment;
   if (update.digest !== undefined) body.digest = update.digest;
-  return send('PUT', `/ipsets/${encodeURIComponent(update.name)}/${encodeURIComponent(update.cidr)}`, body);
+  return send('PUT', `/ipsets/${encodeURIComponent(update.name)}/${encodeURIComponent(update.cidr)}`, body, target);
 }
 
-export async function deleteIpsetEntry(name: string, cidr: string, digest?: string): Promise<void> {
+export async function deleteIpsetEntry(
+  name: string,
+  cidr: string,
+  digest?: string,
+  target: FirewallTarget = CLUSTER_FIREWALL_TARGET,
+): Promise<void> {
   if (USE_FIXTURES) {
-    checkFixtureDigest(digest);
-    failOn(deleteFixtureClusterIpsetEntry(name, cidr));
+    checkFixtureDigest(digest, target);
+    const guest = guestOf(target);
+    failOn(guest ? deleteFixtureGuestIpsetEntry(guest.vmid, name, cidr) : deleteFixtureClusterIpsetEntry(name, cidr));
     return;
   }
-  return send('DELETE', `/ipsets/${encodeURIComponent(name)}/${encodeURIComponent(cidr)}${digestQuery(digest)}`);
+  return send(
+    'DELETE',
+    `/ipsets/${encodeURIComponent(name)}/${encodeURIComponent(cidr)}${digestQuery(digest)}`,
+    undefined,
+    target,
+  );
 }

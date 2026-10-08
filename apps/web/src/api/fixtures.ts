@@ -2245,3 +2245,186 @@ export function resetFixtureNodeNetwork(): void {
   fixtureNodeNet.clear();
 }
 // --- end T69 ---
+
+// --- T73 guest firewall aliases and IP sets ---
+
+/** One guest's firewall aliases and IP sets (the demo's `{vmid}.fw` file: PVE keeps them next to the
+ * guest's rules and options, so one digest covers them and every change bumps it). */
+export interface FixtureGuestRefs {
+  aliases: FixtureClusterAlias[];
+  ipsets: FixtureClusterIpset[];
+  digest: string;
+  version: number;
+}
+
+function initialFixtureGuestRefs(): Record<string, FixtureGuestRefs> {
+  return {
+    '100': {
+      aliases: [
+        { name: 'db-host', cidr: '10.20.0.5', comment: 'Database host' },
+        { name: 'web-net', cidr: '10.20.0.0/24', comment: 'Web tier' },
+      ],
+      ipsets: [
+        {
+          name: 'allowed',
+          comment: 'Allowed clients',
+          entries: [
+            { cidr: '10.20.0.0/24', comment: 'Web tier' },
+            { cidr: '203.0.113.7', comment: 'Monitoring' },
+          ],
+        },
+      ],
+      digest: 'fixture-fwrefs-100-1',
+      version: 1,
+    },
+    '200': {
+      aliases: [{ name: 'ct-net', cidr: '172.16.0.0/16', comment: 'Container network' }],
+      ipsets: [],
+      digest: 'fixture-fwrefs-200-1',
+      version: 1,
+    },
+  };
+}
+
+let fixtureGuestRefs = initialFixtureGuestRefs();
+
+/** Test/demo-only lookup (T73): one guest's aliases and IP sets (empty for a guest without any). */
+export function getFixtureGuestRefs(vmid: number): FixtureGuestRefs {
+  return fixtureGuestRefs[String(vmid)] ?? { aliases: [], ipsets: [], digest: `fixture-fwrefs-${vmid}-1`, version: 1 };
+}
+
+function touchFixtureGuestRefs(vmid: number, mutate: (state: FixtureGuestRefs) => void): void {
+  const key = String(vmid);
+  const state = fixtureGuestRefs[key] ?? { aliases: [], ipsets: [], digest: '', version: 0 };
+  mutate(state);
+  state.version += 1;
+  state.digest = `fixture-fwrefs-${vmid}-${state.version}`;
+  fixtureGuestRefs[key] = state;
+}
+
+/** Test/demo-only mutator (T73): adds a guest alias; an error message on a duplicate name. */
+export function addFixtureGuestAlias(vmid: number, alias: FixtureClusterAlias): string | undefined {
+  if (getFixtureGuestRefs(vmid).aliases.some((a) => a.name === alias.name)) return `Alias '${alias.name}' already exists`;
+  touchFixtureGuestRefs(vmid, (s) => {
+    s.aliases.push(stripUndefined(alias));
+    s.aliases.sort((a, b) => a.name.localeCompare(b.name));
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T73): edits (and optionally renames) a guest alias. */
+export function updateFixtureGuestAlias(
+  vmid: number,
+  name: string,
+  next: { cidr: string; comment?: string | undefined; rename?: string | undefined },
+): string | undefined {
+  const state = getFixtureGuestRefs(vmid);
+  if (!state.aliases.some((a) => a.name === name)) return `Alias '${name}' does not exist`;
+  if (next.rename !== undefined && next.rename !== name && state.aliases.some((a) => a.name === next.rename)) {
+    return `Alias '${next.rename}' already exists`;
+  }
+  touchFixtureGuestRefs(vmid, (s) => {
+    const target = s.aliases.find((a) => a.name === name)!;
+    target.name = next.rename ?? name;
+    target.cidr = next.cidr;
+    if (next.comment === undefined || next.comment === '') delete target.comment;
+    else target.comment = next.comment;
+    s.aliases.sort((a, b) => a.name.localeCompare(b.name));
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T73): removes a guest alias. */
+export function deleteFixtureGuestAlias(vmid: number, name: string): string | undefined {
+  if (!getFixtureGuestRefs(vmid).aliases.some((a) => a.name === name)) return `Alias '${name}' does not exist`;
+  touchFixtureGuestRefs(vmid, (s) => {
+    s.aliases = s.aliases.filter((a) => a.name !== name);
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T73), PVE's own semantics (see `upsertFixtureClusterGroup`). */
+export function upsertFixtureGuestIpset(
+  vmid: number,
+  name: string,
+  comment: string | undefined,
+  rename?: string,
+): string | undefined {
+  const state = getFixtureGuestRefs(vmid);
+  if (rename === undefined) {
+    if (state.ipsets.some((i) => i.name === name)) return `IPSet '${name}' already exists`;
+    touchFixtureGuestRefs(vmid, (s) => {
+      s.ipsets.push({ name, ...(comment !== undefined ? { comment } : {}), entries: [] });
+      s.ipsets.sort((a, b) => a.name.localeCompare(b.name));
+    });
+    return undefined;
+  }
+  if (!state.ipsets.some((i) => i.name === rename)) return `IPSet '${rename}' does not exist`;
+  if (name !== rename && state.ipsets.some((i) => i.name === name)) return `IPSet '${name}' already exists`;
+  touchFixtureGuestRefs(vmid, (s) => {
+    const target = s.ipsets.find((i) => i.name === rename)!;
+    target.name = name;
+    if (comment === undefined) delete target.comment;
+    else target.comment = comment;
+    s.ipsets.sort((a, b) => a.name.localeCompare(b.name));
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T73): removes a guest IP set; without `force` a non-empty one is refused, like PVE. */
+export function deleteFixtureGuestIpset(vmid: number, name: string, force: boolean): string | undefined {
+  const target = getFixtureGuestRefs(vmid).ipsets.find((i) => i.name === name);
+  if (!target) return `IPSet '${name}' does not exist`;
+  if (target.entries.length > 0 && !force) return `IPSet '${name}' is not empty`;
+  touchFixtureGuestRefs(vmid, (s) => {
+    s.ipsets = s.ipsets.filter((i) => i.name !== name);
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T73): adds an entry to a guest IP set. */
+export function addFixtureGuestIpsetEntry(vmid: number, name: string, entry: FixtureClusterIpsetEntry): string | undefined {
+  const target = getFixtureGuestRefs(vmid).ipsets.find((i) => i.name === name);
+  if (!target) return `IPSet '${name}' does not exist`;
+  if (target.entries.some((e) => e.cidr === entry.cidr)) return `'${entry.cidr}' already exists in IPSet '${name}'`;
+  touchFixtureGuestRefs(vmid, (s) => {
+    s.ipsets.find((i) => i.name === name)!.entries.push(stripUndefined(entry));
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T73): edits a guest IP set entry's nomatch / comment (an omitted or empty comment clears it). */
+export function updateFixtureGuestIpsetEntry(
+  vmid: number,
+  name: string,
+  cidr: string,
+  next: { nomatch?: boolean | undefined; comment?: string | undefined },
+): string | undefined {
+  const entry = getFixtureGuestRefs(vmid).ipsets.find((i) => i.name === name)?.entries.find((e) => e.cidr === cidr);
+  if (!entry) return `'${cidr}' is not in IPSet '${name}'`;
+  touchFixtureGuestRefs(vmid, (s) => {
+    const target = s.ipsets.find((i) => i.name === name)!.entries.find((e) => e.cidr === cidr)!;
+    if (next.nomatch === true) target.nomatch = true;
+    else if (next.nomatch === false) delete target.nomatch;
+    if (next.comment === undefined || next.comment === '') delete target.comment;
+    else target.comment = next.comment;
+  });
+  return undefined;
+}
+
+/** Test/demo-only mutator (T73): removes an entry from a guest IP set. */
+export function deleteFixtureGuestIpsetEntry(vmid: number, name: string, cidr: string): string | undefined {
+  const target = getFixtureGuestRefs(vmid).ipsets.find((i) => i.name === name);
+  if (!target?.entries.some((e) => e.cidr === cidr)) return `'${cidr}' is not in IPSet '${name}'`;
+  touchFixtureGuestRefs(vmid, (s) => {
+    const set = s.ipsets.find((i) => i.name === name)!;
+    set.entries = set.entries.filter((e) => e.cidr !== cidr);
+  });
+  return undefined;
+}
+
+/** Test-only (T73): puts every guest's fixture aliases and IP sets back to their initial state. */
+export function resetFixtureGuestRefs(): void {
+  fixtureGuestRefs = initialFixtureGuestRefs();
+}
+// --- end T73 ---

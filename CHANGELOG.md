@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- VM/CT Firewall tab (T73): inner Rules / Aliases / IP Sets tabs. Aliases and IP sets are the
+  datacenter firewall's panels pointed at the guest (add, edit, rename and delete aliases; create,
+  rename and delete IP sets and add, edit and remove their entries, including the `nomatch` flag),
+  and the rule dialog's source and destination fields now suggest the guest's own aliases and IP sets
+  next to the inherited datacenter ones. Needs a signed-in session and `VM.Config.Network` on the
+  guest; changes forward PVE's digest. New routes under
+  `/api/actions/guest/{node}/{type}/{vmid}/firewall/{aliases,ipsets}`.
+
 ## [0.12.0] - 2026-10-08
 
 ### Added

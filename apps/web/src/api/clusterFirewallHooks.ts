@@ -24,10 +24,12 @@ import {
   updateClusterOptions,
   updateClusterRule,
   updateIpsetEntry,
+  CLUSTER_FIREWALL_TARGET,
   type AliasCreate,
   type AliasUpdate,
   type ClusterOptionsPatch,
   type ClusterRuleScope,
+  type FirewallTarget,
   type IpsetEntryCreate,
   type IpsetEntryUpdate,
   type IpsetSave,
@@ -47,6 +49,34 @@ export const clusterAliasesKey = [ROOT, 'aliases'] as const;
 export const clusterIpsetsKey = [ROOT, 'ipsets'] as const;
 export const clusterIpsetEntriesKey = (name: string) => [ROOT, 'ipset-entries', name] as const;
 export const clusterRefsKey = [ROOT, 'refs'] as const;
+
+/** A guest's aliases, IP sets and refs live under their own prefix (one per guest), so a guest and
+ * the datacenter -- or two guests -- never share a cache entry and a write refreshes only its own. */
+const GUEST_ROOT = 'guest-firewall-refs';
+
+function targetRoot(target: FirewallTarget) {
+  return target.kind === 'guest'
+    ? ([GUEST_ROOT, target.node, target.type, target.vmid] as const)
+    : ([ROOT] as const);
+}
+
+export const aliasesKey = (target: FirewallTarget) => [...targetRoot(target), 'aliases'] as const;
+export const ipsetsKey = (target: FirewallTarget) => [...targetRoot(target), 'ipsets'] as const;
+export const ipsetEntriesKey = (name: string, target: FirewallTarget) =>
+  [...targetRoot(target), 'ipset-entries', name] as const;
+export const refsKey = (target: FirewallTarget) => [...targetRoot(target), 'refs'] as const;
+
+/** Re-reads everything of the firewall `target` addresses: a guest's own queries, or (the datacenter,
+ * and a security group's scope) all of the datacenter firewall. */
+function invalidateTarget(queryClient: QueryClient, target: FirewallTarget): Promise<unknown> {
+  return target.kind === 'guest'
+    ? queryClient.invalidateQueries({ queryKey: targetRoot(target) })
+    : invalidateAll(queryClient);
+}
+
+/** The optional trailing `target` argument of the alias / IP set functions: passed only for a guest,
+ * so a datacenter call keeps exactly the arguments it always had. */
+const targetArgs = (target: FirewallTarget): [] | [FirewallTarget] => (target.kind === 'guest' ? [target] : []);
 
 function invalidateAll(queryClient: QueryClient, alsoGroupPicker = false): Promise<unknown> {
   return Promise.all([
@@ -73,25 +103,33 @@ export function useClusterGroups() {
   return useQuery({ queryKey: clusterGroupsKey, queryFn: getClusterGroups });
 }
 
-export function useClusterAliases() {
-  return useQuery({ queryKey: clusterAliasesKey, queryFn: getClusterAliases });
+/** The aliases of the datacenter firewall, or of one guest's when `target` is a guest. */
+export function useClusterAliases(target: FirewallTarget = CLUSTER_FIREWALL_TARGET) {
+  return useQuery({ queryKey: aliasesKey(target), queryFn: () => getClusterAliases(...targetArgs(target)) });
 }
 
-export function useClusterIpsets() {
-  return useQuery({ queryKey: clusterIpsetsKey, queryFn: getClusterIpsets });
+export function useClusterIpsets(target: FirewallTarget = CLUSTER_FIREWALL_TARGET) {
+  return useQuery({ queryKey: ipsetsKey(target), queryFn: () => getClusterIpsets(...targetArgs(target)) });
 }
 
-export function useIpsetEntries(name: string | undefined) {
+export function useIpsetEntries(name: string | undefined, target: FirewallTarget = CLUSTER_FIREWALL_TARGET) {
   return useQuery({
-    queryKey: clusterIpsetEntriesKey(name ?? ''),
-    queryFn: () => getIpsetEntries(name ?? ''),
+    queryKey: ipsetEntriesKey(name ?? '', target),
+    queryFn: () => getIpsetEntries(name ?? '', ...targetArgs(target)),
     enabled: name !== undefined,
   });
 }
 
-/** Aliases and IP sets for the rule dialog's source / destination pickers; a failure just means no suggestions. */
-export function useClusterRefs(enabled = true) {
-  return useQuery({ queryKey: clusterRefsKey, queryFn: getClusterRefs, enabled, staleTime: 60 * 1000, retry: false });
+/** Aliases and IP sets for the rule dialog's source / destination pickers (a guest's include the
+ * inherited datacenter ones); a failure just means no suggestions. */
+export function useClusterRefs(enabled = true, target: FirewallTarget = CLUSTER_FIREWALL_TARGET) {
+  return useQuery({
+    queryKey: refsKey(target),
+    queryFn: () => getClusterRefs(...targetArgs(target)),
+    enabled,
+    staleTime: 60 * 1000,
+    retry: false,
+  });
 }
 
 // --- rules ------------------------------------------------------------------------------------
@@ -192,93 +230,97 @@ export function useDeleteSecurityGroup() {
 
 // --- aliases ----------------------------------------------------------------------------------
 
-export function useCreateAlias() {
+export function useCreateAlias(target: FirewallTarget = CLUSTER_FIREWALL_TARGET) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (vars: AliasCreate) => createAlias(vars),
+    mutationFn: (vars: AliasCreate) => createAlias(vars, ...targetArgs(target)),
     onSuccess: async () => {
       toast.success('Alias added');
-      await invalidateAll(queryClient);
+      await invalidateTarget(queryClient, target);
     },
   });
 }
 
-export function useUpdateAlias() {
+export function useUpdateAlias(target: FirewallTarget = CLUSTER_FIREWALL_TARGET) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (vars: AliasUpdate) => updateAlias(vars),
+    mutationFn: (vars: AliasUpdate) => updateAlias(vars, ...targetArgs(target)),
     onSuccess: async () => {
       toast.success('Alias saved');
-      await invalidateAll(queryClient);
+      await invalidateTarget(queryClient, target);
     },
   });
 }
 
-export function useDeleteAlias() {
+export function useDeleteAlias(target: FirewallTarget = CLUSTER_FIREWALL_TARGET) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { name: string; digest?: string | undefined }) => deleteAlias(vars.name, vars.digest),
+    mutationFn: (vars: { name: string; digest?: string | undefined }) =>
+      target.kind === 'guest' ? deleteAlias(vars.name, vars.digest, target) : deleteAlias(vars.name, vars.digest),
     onSuccess: async () => {
       toast.success('Alias removed');
-      await invalidateAll(queryClient);
+      await invalidateTarget(queryClient, target);
     },
   });
 }
 
 // --- IP sets ----------------------------------------------------------------------------------
 
-export function useSaveIpset() {
+export function useSaveIpset(target: FirewallTarget = CLUSTER_FIREWALL_TARGET) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (vars: IpsetSave) => saveIpset(vars),
+    mutationFn: (vars: IpsetSave) => saveIpset(vars, ...targetArgs(target)),
     onSuccess: async (_result, vars) => {
       toast.success(vars.rename !== undefined ? 'IP set saved' : 'IP set created');
-      await invalidateAll(queryClient);
+      await invalidateTarget(queryClient, target);
     },
   });
 }
 
-export function useDeleteIpset() {
+export function useDeleteIpset(target: FirewallTarget = CLUSTER_FIREWALL_TARGET) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { name: string; force: boolean }) => deleteIpset(vars.name, vars.force),
+    mutationFn: (vars: { name: string; force: boolean }) =>
+      target.kind === 'guest' ? deleteIpset(vars.name, vars.force, target) : deleteIpset(vars.name, vars.force),
     onSuccess: async () => {
       toast.success('IP set removed');
-      await invalidateAll(queryClient);
+      await invalidateTarget(queryClient, target);
     },
   });
 }
 
-export function useAddIpsetEntry() {
+export function useAddIpsetEntry(target: FirewallTarget = CLUSTER_FIREWALL_TARGET) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (vars: IpsetEntryCreate) => addIpsetEntry(vars),
+    mutationFn: (vars: IpsetEntryCreate) => addIpsetEntry(vars, ...targetArgs(target)),
     onSuccess: async () => {
       toast.success('IP set entry added');
-      await invalidateAll(queryClient);
+      await invalidateTarget(queryClient, target);
     },
   });
 }
 
-export function useUpdateIpsetEntry() {
+export function useUpdateIpsetEntry(target: FirewallTarget = CLUSTER_FIREWALL_TARGET) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (vars: IpsetEntryUpdate) => updateIpsetEntry(vars),
+    mutationFn: (vars: IpsetEntryUpdate) => updateIpsetEntry(vars, ...targetArgs(target)),
     onSuccess: async () => {
       toast.success('IP set entry saved');
-      await invalidateAll(queryClient);
+      await invalidateTarget(queryClient, target);
     },
   });
 }
 
-export function useDeleteIpsetEntry() {
+export function useDeleteIpsetEntry(target: FirewallTarget = CLUSTER_FIREWALL_TARGET) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (vars: { name: string; cidr: string; digest?: string | undefined }) =>
-      deleteIpsetEntry(vars.name, vars.cidr, vars.digest),
+      target.kind === 'guest'
+        ? deleteIpsetEntry(vars.name, vars.cidr, vars.digest, target)
+        : deleteIpsetEntry(vars.name, vars.cidr, vars.digest),
     onSuccess: async () => {
       toast.success('IP set entry removed');
-      await invalidateAll(queryClient);
+      await invalidateTarget(queryClient, target);
     },
   });
 }

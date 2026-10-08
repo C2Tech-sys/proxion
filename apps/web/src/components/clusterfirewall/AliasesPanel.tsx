@@ -20,21 +20,23 @@ import { ALIAS_NAME_RE, commentError, isAddressOrCidr } from '@/components/clust
 import { errorMessage } from '@/api/errors';
 import { hardwareErrorMessage } from '@/api/hardwareHooks';
 import { useClusterAliases, useCreateAlias, useDeleteAlias, useUpdateAlias } from '@/api/clusterFirewallHooks';
-import type { ClusterAlias } from '@/api/clusterFirewall';
+import { CLUSTER_FIREWALL_TARGET, type ClusterAlias, type FirewallTarget } from '@/api/clusterFirewall';
 
 interface AliasDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The alias being edited. Omit to add one. */
   alias?: ClusterAlias | undefined;
+  /** The firewall the alias lives in: the datacenter's or one guest's. */
+  target: FirewallTarget;
 }
 
 /** Adds or edits (and renames) one alias. An edit sends the path name, the new name only when it
  * changed, and the digest of the last read. Mount it fresh per open. */
-function AliasDialog({ open, onOpenChange, alias }: AliasDialogProps) {
+function AliasDialog({ open, onOpenChange, alias, target }: AliasDialogProps) {
   const id = useId();
-  const create = useCreateAlias();
-  const update = useUpdateAlias();
+  const create = useCreateAlias(target);
+  const update = useUpdateAlias(target);
   const mutation = alias === undefined ? create : update;
   const [name, setName] = useState(alias?.name ?? '');
   const [cidr, setCidr] = useState(alias?.cidr ?? '');
@@ -146,8 +148,16 @@ function AliasDialog({ open, onOpenChange, alias }: AliasDialogProps) {
   );
 }
 
-function DeleteAliasDialog({ alias, onOpenChange }: { alias: ClusterAlias; onOpenChange: (open: boolean) => void }) {
-  const mutation = useDeleteAlias();
+function DeleteAliasDialog({
+  alias,
+  target,
+  onOpenChange,
+}: {
+  alias: ClusterAlias;
+  target: FirewallTarget;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const mutation = useDeleteAlias(target);
   return (
     <ConfirmDialog
       open
@@ -170,17 +180,20 @@ type DialogTarget =
 export interface AliasesPanelProps {
   /** When set, every control is disabled and this is its tooltip. */
   disabledReason: string | undefined;
+  /** Whose aliases: the datacenter firewall's (the default) or one guest's. */
+  target?: FirewallTarget;
 }
 
-/** PVE's Datacenter -> Firewall -> Alias: named addresses and networks. */
-export function AliasesPanel({ disabledReason }: AliasesPanelProps) {
-  const aliases = useClusterAliases();
+/** PVE's Firewall -> Alias (datacenter or guest): named addresses and networks. */
+export function AliasesPanel({ disabledReason, target = CLUSTER_FIREWALL_TARGET }: AliasesPanelProps) {
+  const aliases = useClusterAliases(target);
+  const tid = target.kind === 'guest' ? 'guest-fw' : 'dc-fw';
   const [dialog, setDialog] = useState<DialogTarget | null>(null);
   const locked = disabledReason !== undefined;
   const list = aliases.data ?? [];
 
   return (
-    <div data-testid="dc-fw-aliases">
+    <div data-testid={`${tid}-aliases`}>
       <Panel
         title="Aliases"
         action={
@@ -217,7 +230,7 @@ export function AliasesPanel({ disabledReason }: AliasesPanelProps) {
             </TableHeader>
             <TableBody>
               {list.map((a) => (
-                <TableRow key={a.name} data-testid={`dc-fw-alias-${a.name}`}>
+                <TableRow key={a.name} data-testid={`${tid}-alias-${a.name}`}>
                   <TableCell className="font-medium">{a.name}</TableCell>
                   <TableCell>{a.cidr}</TableCell>
                   <TableCell>
@@ -247,12 +260,12 @@ export function AliasesPanel({ disabledReason }: AliasesPanelProps) {
         )}
       </Panel>
 
-      {dialog?.kind === 'add' && <AliasDialog open onOpenChange={(open) => !open && setDialog(null)} />}
+      {dialog?.kind === 'add' && <AliasDialog open onOpenChange={(open) => !open && setDialog(null)} target={target} />}
       {dialog?.kind === 'edit' && (
-        <AliasDialog open onOpenChange={(open) => !open && setDialog(null)} alias={dialog.alias} />
+        <AliasDialog open onOpenChange={(open) => !open && setDialog(null)} alias={dialog.alias} target={target} />
       )}
       {dialog?.kind === 'delete' && (
-        <DeleteAliasDialog alias={dialog.alias} onOpenChange={(open) => !open && setDialog(null)} />
+        <DeleteAliasDialog alias={dialog.alias} target={target} onOpenChange={(open) => !open && setDialog(null)} />
       )}
     </div>
   );
