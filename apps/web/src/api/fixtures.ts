@@ -1111,3 +1111,244 @@ export function muteFixtureNotifications(span: FixtureMuteSpan | null): FixtureN
 export function resetFixtureNotifySettings(): void {
   fixtureNotifyStored = initialFixtureNotifyStored();
 }
+
+// --- T68 users & permissions ------------------------------------------------------------------
+// Datacenter -> Users & Permissions demo data (users, groups, roles, ACL, realms, API tokens) and
+// the in-memory mutators `api/access.ts` runs in fixture mode. Types are declared here so this
+// append-only block needs no new import. No password and no token secret is ever stored: the
+// mutators below take the already-stripped records.
+
+export interface AccessToken {
+  tokenid: string;
+  comment?: string;
+  /** Unix seconds; `0` = never expires. */
+  expire: number;
+  privsep: boolean;
+}
+
+export interface AccessUser {
+  userid: string;
+  enable: boolean;
+  /** Unix seconds; `0` = never expires. */
+  expire: number;
+  firstname?: string;
+  lastname?: string;
+  email?: string;
+  comment?: string;
+  groups: string[];
+  tokens: AccessToken[];
+}
+
+export interface AccessGroup {
+  groupid: string;
+  comment?: string;
+}
+
+export interface AccessRole {
+  roleid: string;
+  privs: string[];
+  /** Built-in role PVE does not let anyone edit. */
+  special: boolean;
+}
+
+export interface AccessAclEntry {
+  path: string;
+  type: 'user' | 'group' | 'token';
+  /** The user id, group id or full token id (`user@realm!tokenid`). */
+  ugid: string;
+  roleid: string;
+  propagate: boolean;
+}
+
+export interface AccessRealm {
+  realm: string;
+  type: string;
+  comment?: string;
+}
+
+/** The signed-in identity the demo pretends to be (the demo's real auth identity is a service token). */
+export const FIXTURE_ACCESS_SELF = 'chris@pve';
+
+const FIXTURE_ACCESS_ROLES: AccessRole[] = [
+  { roleid: 'Administrator', special: true, privs: ['Datastore.Allocate', 'Datastore.AllocateSpace', 'Group.Allocate', 'Permissions.Modify', 'Pool.Allocate', 'Realm.AllocateUser', 'Sys.Audit', 'Sys.Console', 'Sys.Modify', 'Sys.PowerMgmt', 'User.Modify', 'VM.Allocate', 'VM.Audit', 'VM.Config.CPU', 'VM.Config.Disk', 'VM.Config.Memory', 'VM.Config.Network', 'VM.Console', 'VM.PowerMgmt'] },
+  { roleid: 'NoAccess', special: true, privs: [] },
+  { roleid: 'PVEAdmin', special: false, privs: ['Datastore.Allocate', 'Datastore.AllocateSpace', 'Group.Allocate', 'Permissions.Modify', 'Pool.Allocate', 'Sys.Audit', 'Sys.Console', 'Sys.Modify', 'User.Modify', 'VM.Allocate', 'VM.Audit', 'VM.Config.CPU', 'VM.Config.Disk', 'VM.Config.Memory', 'VM.Config.Network', 'VM.Console', 'VM.PowerMgmt'] },
+  { roleid: 'PVEAuditor', special: false, privs: ['Datastore.Audit', 'Pool.Audit', 'Sys.Audit', 'VM.Audit'] },
+  { roleid: 'PVEDatastoreUser', special: false, privs: ['Datastore.Audit', 'Datastore.AllocateSpace'] },
+  { roleid: 'PVEVMAdmin', special: false, privs: ['VM.Allocate', 'VM.Audit', 'VM.Backup', 'VM.Clone', 'VM.Config.CPU', 'VM.Config.Disk', 'VM.Config.Memory', 'VM.Config.Network', 'VM.Console', 'VM.Migrate', 'VM.PowerMgmt', 'VM.Snapshot'] },
+];
+
+const FIXTURE_ACCESS_REALMS: AccessRealm[] = [
+  { realm: 'pam', type: 'pam', comment: 'Linux PAM standard authentication' },
+  { realm: 'pve', type: 'pve', comment: 'Proxmox VE authentication server' },
+];
+
+const FIXTURE_ACCESS_POOLS: string[] = ['lab', 'production'];
+
+interface FixtureAccessState {
+  users: AccessUser[];
+  groups: AccessGroup[];
+  acl: AccessAclEntry[];
+}
+
+function initialFixtureAccess(): FixtureAccessState {
+  return {
+    users: [
+      { userid: 'root@pam', enable: true, expire: 0, comment: 'Built-in administrator', groups: [], tokens: [] },
+      {
+        userid: 'chris@pve',
+        enable: true,
+        expire: 0,
+        firstname: 'Chris',
+        lastname: 'Shirley',
+        email: 'chris@c2techsys.com',
+        comment: 'Lab owner',
+        groups: ['admins'],
+        tokens: [{ tokenid: 'monitoring', comment: 'Grafana read-only', expire: 0, privsep: true }],
+      },
+      {
+        userid: 'contractor@pve',
+        enable: false,
+        expire: 1767225600,
+        firstname: 'Casey',
+        lastname: 'Contractor',
+        email: 'casey@example.com',
+        comment: 'Engagement ended',
+        groups: ['auditors'],
+        tokens: [],
+      },
+    ],
+    groups: [
+      { groupid: 'admins', comment: 'Administrators' },
+      { groupid: 'auditors', comment: 'Read-only auditors' },
+    ],
+    acl: [
+      { path: '/', type: 'group', ugid: 'admins', roleid: 'Administrator', propagate: true },
+      { path: '/', type: 'group', ugid: 'auditors', roleid: 'PVEAuditor', propagate: true },
+      { path: '/vms/100', type: 'user', ugid: 'chris@pve', roleid: 'PVEVMAdmin', propagate: true },
+      { path: '/storage/local', type: 'token', ugid: 'chris@pve!monitoring', roleid: 'PVEAuditor', propagate: false },
+    ],
+  };
+}
+
+let fixtureAccess: FixtureAccessState = initialFixtureAccess();
+
+const cloneAccessUser = (u: AccessUser): AccessUser => ({ ...u, groups: [...u.groups], tokens: u.tokens.map((t) => ({ ...t })) });
+
+export function getFixtureAccessUsers(): AccessUser[] {
+  return fixtureAccess.users.map(cloneAccessUser);
+}
+export function getFixtureAccessGroups(): AccessGroup[] {
+  return fixtureAccess.groups.map((g) => ({ ...g }));
+}
+export function getFixtureAccessRoles(): AccessRole[] {
+  return FIXTURE_ACCESS_ROLES.map((r) => ({ ...r, privs: [...r.privs] }));
+}
+export function getFixtureAccessAcl(): AccessAclEntry[] {
+  return fixtureAccess.acl.map((e) => ({ ...e }));
+}
+export function getFixtureAccessRealms(): AccessRealm[] {
+  return FIXTURE_ACCESS_REALMS.map((r) => ({ ...r }));
+}
+export function getFixtureAccessPools(): string[] {
+  return [...FIXTURE_ACCESS_POOLS];
+}
+
+/** Adds a user; returns `false` when the userid already exists. */
+export function addFixtureAccessUser(user: AccessUser): boolean {
+  if (fixtureAccess.users.some((u) => u.userid === user.userid)) return false;
+  fixtureAccess.users = [...fixtureAccess.users, cloneAccessUser(user)];
+  return true;
+}
+
+/** Merges `patch` into a user; a key set to `undefined` is cleared. Returns `false` for an unknown user. */
+export function patchFixtureAccessUser(userid: string, patch: Partial<Record<keyof AccessUser, unknown>>): boolean {
+  const index = fixtureAccess.users.findIndex((u) => u.userid === userid);
+  if (index === -1) return false;
+  const next: Record<string, unknown> = { ...fixtureAccess.users[index]! };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) delete next[key];
+    else next[key] = value;
+  }
+  fixtureAccess.users = fixtureAccess.users.map((u, i) => (i === index ? (next as unknown as AccessUser) : u));
+  return true;
+}
+
+/** Removes a user along with every ACL entry that names it (or one of its tokens). */
+export function removeFixtureAccessUser(userid: string): boolean {
+  if (!fixtureAccess.users.some((u) => u.userid === userid)) return false;
+  fixtureAccess.users = fixtureAccess.users.filter((u) => u.userid !== userid);
+  fixtureAccess.acl = fixtureAccess.acl.filter((e) => e.ugid !== userid && !e.ugid.startsWith(`${userid}!`));
+  return true;
+}
+
+export function addFixtureAccessGroup(group: AccessGroup): boolean {
+  if (fixtureAccess.groups.some((g) => g.groupid === group.groupid)) return false;
+  fixtureAccess.groups = [...fixtureAccess.groups, { ...group }];
+  return true;
+}
+
+export function patchFixtureAccessGroup(groupid: string, comment: string): boolean {
+  const index = fixtureAccess.groups.findIndex((g) => g.groupid === groupid);
+  if (index === -1) return false;
+  fixtureAccess.groups = fixtureAccess.groups.map((g, i) => {
+    if (i !== index) return g;
+    const next: AccessGroup = { groupid };
+    if (comment !== '') next.comment = comment;
+    return next;
+  });
+  return true;
+}
+
+/** Removes a group, its ACL entries, and its membership of every user. */
+export function removeFixtureAccessGroup(groupid: string): boolean {
+  if (!fixtureAccess.groups.some((g) => g.groupid === groupid)) return false;
+  fixtureAccess.groups = fixtureAccess.groups.filter((g) => g.groupid !== groupid);
+  fixtureAccess.acl = fixtureAccess.acl.filter((e) => !(e.type === 'group' && e.ugid === groupid));
+  fixtureAccess.users = fixtureAccess.users.map((u) => ({ ...u, groups: u.groups.filter((g) => g !== groupid) }));
+  return true;
+}
+
+/** Grants (`remove` false) or revokes (`remove` true) each role on `path` for each subject. */
+export function applyFixtureAccessAcl(
+  entry: { path: string; roles: string[]; type: AccessAclEntry['type']; ugids: string[]; propagate: boolean },
+  remove: boolean,
+): void {
+  for (const roleid of entry.roles) {
+    for (const ugid of entry.ugids) {
+      const same = (e: AccessAclEntry) => e.path === entry.path && e.type === entry.type && e.ugid === ugid && e.roleid === roleid;
+      fixtureAccess.acl = fixtureAccess.acl.filter((e) => !same(e));
+      if (!remove) fixtureAccess.acl = [...fixtureAccess.acl, { path: entry.path, type: entry.type, ugid, roleid, propagate: entry.propagate }];
+    }
+  }
+}
+
+/** Adds a token to a user (the secret is generated by the caller and never stored here). */
+export function addFixtureAccessToken(userid: string, token: AccessToken): 'ok' | 'no-user' | 'exists' {
+  const user = fixtureAccess.users.find((u) => u.userid === userid);
+  if (!user) return 'no-user';
+  if (user.tokens.some((t) => t.tokenid === token.tokenid)) return 'exists';
+  user.tokens = [...user.tokens, { ...token }];
+  return 'ok';
+}
+
+export function patchFixtureAccessToken(userid: string, tokenid: string, patch: Partial<AccessToken>): boolean {
+  const token = fixtureAccess.users.find((u) => u.userid === userid)?.tokens.find((t) => t.tokenid === tokenid);
+  if (!token) return false;
+  Object.assign(token, patch);
+  return true;
+}
+
+export function removeFixtureAccessToken(userid: string, tokenid: string): boolean {
+  const user = fixtureAccess.users.find((u) => u.userid === userid);
+  if (!user?.tokens.some((t) => t.tokenid === tokenid)) return false;
+  user.tokens = user.tokens.filter((t) => t.tokenid !== tokenid);
+  fixtureAccess.acl = fixtureAccess.acl.filter((e) => !(e.type === 'token' && e.ugid === `${userid}!${tokenid}`));
+  return true;
+}
+
+/** Test-only (T68): puts the fixture users, groups and ACL back to their initial state. */
+export function resetFixtureAccess(): void {
+  fixtureAccess = initialFixtureAccess();
+}
+// --- end T68 ---

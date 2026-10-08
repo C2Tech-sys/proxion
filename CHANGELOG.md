@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Datacenter -> Users & Permissions (T68): manage users, groups, ACL entries and API tokens, view roles, and change passwords from
+  the Datacenter page. Writes go through new `/api/actions/datacenter/access/*` routes (session sign-in only, one privilege checked per
+  call, PVE's own refusals relayed); a password is never logged or echoed and a new API token's secret is shown once, never stored.
+
 ## [0.11.1] - 2026-10-08
 
 ### Security
