@@ -2245,3 +2245,200 @@ export function resetFixtureNodeNetwork(): void {
   fixtureNodeNet.clear();
 }
 // --- end T69 ---
+
+// --- T71 node system ---
+
+/** One `GET /nodes/{node}/certificates/info` row, in PVE's wire shape. */
+export interface FixtureSystemCert {
+  filename: string;
+  fingerprint: string;
+  subject: string;
+  issuer: string;
+  san: string[];
+  notbefore: number;
+  notafter: number;
+  'public-key-type': string;
+  'public-key-bits': number;
+  pem: string;
+}
+
+interface FixtureSystemState {
+  dns: { search: string; dns1?: string; dns2?: string; dns3?: string };
+  time: { timezone: string; time: number; localtime: number };
+  config: { description?: string; 'startall-onboot-delay'?: number; wakeonlan?: string; 'ballooning-target'?: number };
+  configRevision: number;
+  hosts: string;
+  hostsRevision: number;
+  certs: FixtureSystemCert[];
+}
+
+const fixtureNodeSystem = new Map<string, FixtureSystemState>();
+
+const FIXTURE_DAY_SECONDS = 86_400;
+
+function initialFixtureSystem(node: string): FixtureSystemState {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    dns: { search: 'lab.local', dns1: '10.0.0.1', dns2: '1.1.1.1', dns3: '9.9.9.9' },
+    // A fixed instant: 2025-10-09 08:53:20 UTC, which is 03:53:20 in America/Chicago (CDT).
+    time: { timezone: 'America/Chicago', time: 1_760_000_000, localtime: 1_759_982_000 },
+    config: { description: 'Rack 2, top shelf', 'startall-onboot-delay': 30, wakeonlan: 'aa:bb:cc:dd:ee:ff' },
+    configRevision: 1,
+    hosts: `127.0.0.1 localhost.localdomain localhost\n10.0.0.11 ${node}.lab.local ${node}\n`,
+    hostsRevision: 1,
+    certs: [
+      {
+        filename: 'pve-ssl.pem',
+        fingerprint: 'A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90:A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90',
+        subject: `/OU=PVE Cluster Node/O=Proxmox Virtual Environment/CN=${node}.lab.local`,
+        issuer: '/OU=PVE Cluster Manager CA/O=Proxmox Virtual Environment/CN=Proxmox Virtual Environment',
+        san: [`${node}.lab.local`, '10.0.0.11'],
+        notbefore: now - 30 * FIXTURE_DAY_SECONDS,
+        notafter: now + 700 * FIXTURE_DAY_SECONDS,
+        'public-key-type': 'rsaEncryption',
+        'public-key-bits': 2048,
+        pem: '-----BEGIN CERTIFICATE-----\nZml4dHVyZS1zZWxmLXNpZ25lZA==\n-----END CERTIFICATE-----\n',
+      },
+      {
+        filename: 'pveproxy-ssl.pem',
+        fingerprint: '0F:1E:2D:3C:4B:5A:69:78:87:96:A5:B4:C3:D2:E1:F0:0F:1E:2D:3C:4B:5A:69:78:87:96:A5:B4:C3:D2:E1:F0',
+        subject: `/CN=${node}.lab.local`,
+        issuer: "/C=US/O=Let's Encrypt/CN=R11",
+        san: [`${node}.lab.local`],
+        notbefore: now - 70 * FIXTURE_DAY_SECONDS,
+        notafter: now + 20 * FIXTURE_DAY_SECONDS,
+        'public-key-type': 'id-ecPublicKey',
+        'public-key-bits': 256,
+        pem: '-----BEGIN CERTIFICATE-----\nZml4dHVyZS1jdXN0b20=\n-----END CERTIFICATE-----\n',
+      },
+    ],
+  };
+}
+
+function fixtureSystemFor(node: string): FixtureSystemState {
+  let state = fixtureNodeSystem.get(node);
+  if (!state) {
+    state = initialFixtureSystem(node);
+    fixtureNodeSystem.set(node, state);
+  }
+  return state;
+}
+
+/** Demo/test-only (T71): `GET /nodes/{node}/dns` (the `data` object). */
+export function getFixtureNodeDns(node: string): Record<string, string> {
+  return { ...fixtureSystemFor(node).dns };
+}
+
+/** Demo/test-only (T71): `GET /nodes/{node}/time`. */
+export function getFixtureNodeTime(node: string): { timezone: string; time: number; localtime: number } {
+  return { ...fixtureSystemFor(node).time };
+}
+
+/** Demo/test-only (T71): `GET /nodes/{node}/config`, with the digest of its current revision. */
+export function getFixtureNodeConfig(node: string): Record<string, string | number> {
+  const state = fixtureSystemFor(node);
+  return { ...state.config, digest: `cfg-digest-${state.configRevision}` } as Record<string, string | number>;
+}
+
+/** Demo/test-only (T71): `GET /nodes/{node}/hosts`. */
+export function getFixtureNodeHosts(node: string): { data: string; digest: string } {
+  const state = fixtureSystemFor(node);
+  return { data: state.hosts, digest: `hosts-digest-${state.hostsRevision}` };
+}
+
+/** Demo/test-only (T71): `GET /nodes/{node}/certificates/info`. */
+export function getFixtureNodeCertificates(node: string): FixtureSystemCert[] {
+  return fixtureSystemFor(node).certs.map((cert) => ({ ...cert, san: [...cert.san] }));
+}
+
+/** Demo/test-only (T71): rewrites resolv.conf like PVE -- a `null` or missing server is cleared. */
+export function updateFixtureNodeDns(node: string, body: Record<string, unknown>): void {
+  const state = fixtureSystemFor(node);
+  const next: FixtureSystemState['dns'] = { search: String(body.search) };
+  for (const key of ['dns1', 'dns2', 'dns3'] as const) {
+    const value = body[key];
+    if (typeof value === 'string' && value !== '') next[key] = value;
+  }
+  state.dns = next;
+}
+
+/** Demo/test-only (T71). */
+export function updateFixtureNodeTime(node: string, body: Record<string, unknown>): void {
+  const state = fixtureSystemFor(node);
+  state.time = { ...state.time, timezone: String(body.timezone) };
+}
+
+/** Demo/test-only (T71): applies an options edit; a `null` field is cleared, a stale digest is
+ * refused like PVE does. */
+export function updateFixtureNodeOptions(node: string, body: Record<string, unknown>): void {
+  const state = fixtureSystemFor(node);
+  if (typeof body.digest === 'string' && body.digest !== `cfg-digest-${state.configRevision}`) {
+    throw new Error('detected modified configuration - file changed by other user, please reload');
+  }
+  const fields: Array<[string, 'description' | 'startall-onboot-delay' | 'wakeonlan' | 'ballooning-target']> = [
+    ['description', 'description'],
+    ['startallOnbootDelay', 'startall-onboot-delay'],
+    ['wakeonlan', 'wakeonlan'],
+    ['ballooningTarget', 'ballooning-target'],
+  ];
+  const config = state.config as Record<string, string | number | undefined>;
+  for (const [from, to] of fields) {
+    const value = body[from];
+    if (value === undefined) continue;
+    if (value === null || value === '') delete config[to];
+    else if (typeof value === 'string' || typeof value === 'number') config[to] = value;
+  }
+  state.configRevision += 1;
+}
+
+/** Demo/test-only (T71): replaces the whole hosts file. */
+export function saveFixtureNodeHosts(node: string, body: Record<string, unknown>): void {
+  const state = fixtureSystemFor(node);
+  if (typeof body.digest === 'string' && body.digest !== `hosts-digest-${state.hostsRevision}`) {
+    throw new Error('detected modified configuration - file changed by other user, please reload');
+  }
+  state.hosts = String(body.data);
+  state.hostsRevision += 1;
+}
+
+/**
+ * Demo/test-only (T71): installs a custom certificate as `pveproxy-ssl.pem`. The private key is
+ * validated for its header and then dropped -- it is never stored anywhere in the fixture state.
+ */
+export function uploadFixtureNodeCertificate(node: string, body: Record<string, unknown>): void {
+  const state = fixtureSystemFor(node);
+  const certificates = String(body.certificates ?? '');
+  if (!certificates.includes('-----BEGIN CERTIFICATE-----')) throw new Error('unable to parse certificate');
+  if (typeof body.key === 'string' && !/-----BEGIN (RSA |EC )?PRIVATE KEY-----/.test(body.key)) {
+    throw new Error('unable to parse private key');
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const row: FixtureSystemCert = {
+    filename: 'pveproxy-ssl.pem',
+    fingerprint: '5E:7A:11:C0:DE:5E:7A:11:C0:DE:5E:7A:11:C0:DE:5E:7A:11:C0:DE:5E:7A:11:C0:DE:5E:7A:11:C0:DE:00:01',
+    subject: `/CN=${node}.lab.local`,
+    issuer: '/CN=Lab Internal CA',
+    san: [`${node}.lab.local`],
+    notbefore: now,
+    notafter: now + 365 * FIXTURE_DAY_SECONDS,
+    'public-key-type': 'id-ecPublicKey',
+    'public-key-bits': 256,
+    pem: certificates,
+  };
+  state.certs = [...state.certs.filter((cert) => cert.filename !== 'pveproxy-ssl.pem'), row];
+}
+
+/** Demo/test-only (T71): removes the custom certificate (PVE falls back to its own). */
+export function removeFixtureNodeCertificate(node: string): void {
+  const state = fixtureSystemFor(node);
+  if (!state.certs.some((cert) => cert.filename === 'pveproxy-ssl.pem')) {
+    throw new Error('no custom certificate is installed');
+  }
+  state.certs = state.certs.filter((cert) => cert.filename !== 'pveproxy-ssl.pem');
+}
+
+/** Test-only (T71): puts every node's fixture System settings back to their initial state. */
+export function resetFixtureNodeSystem(): void {
+  fixtureNodeSystem.clear();
+}
+// --- end T71 ---

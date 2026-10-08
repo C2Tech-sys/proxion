@@ -14,6 +14,7 @@ import { registerBootOrderRoutes } from './bootOrderRoutes.js';
 import { registerDiskRoutes } from './diskRoutes.js';
 import { registerNetworkRoutes } from './networkRoutes.js';
 import { registerNodeNetworkRoutes } from './nodeNetworkRoutes.js';
+import { registerNodeSystemRoutes } from './nodeSystemRoutes.js';
 import { registerCreateCtRoutes } from './createCtRoutes.js';
 import { registerCreateVmRoutes } from './createVmRoutes.js';
 import { registerOptionsRoutes } from './optionsRoutes.js';
@@ -478,4 +479,7 @@ export default async function actionsRoutes(app: FastifyInstance): Promise<void>
   // Node network editor: interface create/edit/delete + apply/revert (`nodeNetworkRoutes.ts`) share the
   // same bucket, same rationale.
   registerNodeNetworkRoutes(app, guestActionsRateLimit);
+  // Node System tab: DNS / time zone / options / hosts / custom certificate (`nodeSystemRoutes.ts`) share
+  // the same bucket, same rationale.
+  registerNodeSystemRoutes(app, guestActionsRateLimit);
 }

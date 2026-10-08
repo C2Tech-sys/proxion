@@ -104,7 +104,7 @@ describe('Node page Network tab scaffold (fixture mode)', () => {
     renderAt('/node/pve1');
 
     const names = await tabNames();
-    expect(names).toEqual(['Summary', 'Monitor', 'Shell', 'Storage', 'Network', 'Tasks']);
+    expect(names).toEqual(['Summary', 'Monitor', 'Shell', 'Storage', 'Network', 'System', 'Tasks']);
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'Network' }), { button: 0 });
     const panel = await screen.findByTestId('node-network-tab', undefined, { timeout: FIND_TIMEOUT_MS });

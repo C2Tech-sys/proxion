@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Node > System: a new System tab with inner tabs for DNS (search domain and up to three servers),
+  Time (time zone, with the node's local and UTC time), Options (description, start-all-on-boot
+  delay, wake-on-LAN MAC, ballooning target), Hosts (an `/etc/hosts` editor) and Certificates (every
+  certificate file with its validity, amber under 30 days and red once expired). A custom
+  certificate can be uploaded (certificate chain, private key, optional force and pveproxy restart)
+  behind a typed `UPLOAD` confirmation that warns the Proxmox web UI becomes unreachable if the
+  certificate or key is wrong and that a `PVE_TLS_FINGERPRINT` pin needs updating, or removed behind
+  a typed `REMOVE` confirmation. The private key is never logged or kept. Needs a signed-in session
+  and `Sys.Modify` on the node; edits forward PVE's digest where it accepts one. New routes under
+  `/api/actions/node/:node/system/*`.
+
 ## [0.12.0] - 2026-10-08
 
 ### Added

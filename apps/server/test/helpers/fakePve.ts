@@ -316,6 +316,18 @@ export interface FakePve {
     failure: { status: number; message: string; errors?: Record<string, string> } | undefined,
   ) => void;
   // --- end T69 ---
+  // --- T71 node system ---
+  /** Every node System write PVE has received (`PUT` dns/time/config, `POST` hosts and
+   * certificates/custom, `DELETE` certificates/custom): method + path + the parsed form body (or the
+   * query string for DELETE). Used by `nodeSystemRoutes.test.ts` (T71). */
+  systemCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }>;
+  /** Makes every node System write of `op` fail with the given status/message until called again
+   * with `undefined`. */
+  setSystemError: (
+    op: 'dns' | 'time' | 'options' | 'hosts' | 'cert-upload' | 'cert-delete',
+    failure: { status: number; message: string; errors?: Record<string, string> } | undefined,
+  ) => void;
+  // --- end T71 ---
   close: () => Promise<void>;
 }
 
@@ -1378,6 +1390,92 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
     reply.send({ data: null });
   });
   // --- end T69 ---
+  // --- T71 node system ---
+  // `GET`/`PUT` `/nodes/{node}/dns|time|config`, `GET`/`POST` `/nodes/{node}/hosts`, `GET`
+  // `/nodes/{node}/certificates/info`, `POST`/`DELETE` `/nodes/{node}/certificates/custom`, used by
+  // `src/actions/nodeSystemRoutes.ts`. Writes are recorded, not applied.
+  const systemCalls: Array<{ method: 'POST' | 'PUT' | 'DELETE'; path: string; body: Record<string, string> }> = [];
+  const systemErrors = new Map<string, { status: number; message: string; errors?: Record<string, string> }>();
+  function systemFail(op: string, reply: { code: (status: number) => { send: (body: unknown) => void } }): boolean {
+    const failure = systemErrors.get(op);
+    if (!failure) return false;
+    reply
+      .code(failure.status)
+      .send({ data: null, message: failure.message, ...(failure.errors ? { errors: failure.errors } : {}) });
+    return true;
+  }
+  app.get('/api2/json/nodes/:node/dns', async () => ({
+    data: { search: 'lab.local', dns1: '10.0.0.1', dns2: '1.1.1.1' },
+  }));
+  app.put('/api2/json/nodes/:node/dns', async (req, reply) => {
+    systemCalls.push({ method: 'PUT', path: req.url, body: (req.body ?? {}) as Record<string, string> });
+    if (systemFail('dns', reply)) return;
+    reply.send({ data: null });
+  });
+  app.get('/api2/json/nodes/:node/time', async () => ({
+    data: { timezone: 'America/Chicago', time: 1760000000, localtime: 1759978400 },
+  }));
+  app.put('/api2/json/nodes/:node/time', async (req, reply) => {
+    systemCalls.push({ method: 'PUT', path: req.url, body: (req.body ?? {}) as Record<string, string> });
+    if (systemFail('time', reply)) return;
+    reply.send({ data: null });
+  });
+  app.get('/api2/json/nodes/:node/config', async () => ({
+    data: { description: 'Rack 2', 'startall-onboot-delay': 30, wakeonlan: 'aa:bb:cc:dd:ee:ff', digest: 'cfgdigest' },
+  }));
+  app.put('/api2/json/nodes/:node/config', async (req, reply) => {
+    systemCalls.push({ method: 'PUT', path: req.url, body: (req.body ?? {}) as Record<string, string> });
+    if (systemFail('options', reply)) return;
+    reply.send({ data: null });
+  });
+  app.get('/api2/json/nodes/:node/hosts', async () => ({
+    data: { data: '127.0.0.1 localhost.localdomain localhost\n10.0.0.11 pve1.lab.local pve1\n', digest: 'hostsdigest' },
+  }));
+  app.post('/api2/json/nodes/:node/hosts', async (req, reply) => {
+    systemCalls.push({ method: 'POST', path: req.url, body: (req.body ?? {}) as Record<string, string> });
+    if (systemFail('hosts', reply)) return;
+    reply.send({ data: null });
+  });
+  app.get('/api2/json/nodes/:node/certificates/info', async () => ({
+    data: [
+      {
+        filename: 'pve-ssl.pem',
+        fingerprint: 'AA:BB:CC',
+        subject: '/CN=pve1.lab.local',
+        issuer: '/CN=Proxmox Virtual Environment',
+        san: ['pve1.lab.local', '10.0.0.11'],
+        notbefore: 1700000000,
+        notafter: 1800000000,
+        'public-key-type': 'rsaEncryption',
+        'public-key-bits': 4096,
+        pem: '-----BEGIN CERTIFICATE-----\nFAKEPEM\n-----END CERTIFICATE-----\n',
+      },
+    ],
+  }));
+  app.post('/api2/json/nodes/:node/certificates/custom', async (req, reply) => {
+    systemCalls.push({ method: 'POST', path: req.url, body: (req.body ?? {}) as Record<string, string> });
+    if (systemFail('cert-upload', reply)) return;
+    reply.send({
+      data: {
+        filename: 'pveproxy-ssl.pem',
+        fingerprint: 'DD:EE:FF',
+        subject: '/CN=pve1.lab.local',
+        issuer: '/CN=Lab CA',
+        san: ['pve1.lab.local'],
+        notbefore: 1760000000,
+        notafter: 1790000000,
+        'public-key-type': 'id-ecPublicKey',
+        'public-key-bits': 256,
+        pem: '-----BEGIN CERTIFICATE-----\nFAKECUSTOMPEM\n-----END CERTIFICATE-----\n',
+      },
+    });
+  });
+  app.delete('/api2/json/nodes/:node/certificates/custom', async (req, reply) => {
+    systemCalls.push({ method: 'DELETE', path: req.url, body: { ...((req.query ?? {}) as Record<string, string>) } });
+    if (systemFail('cert-delete', reply)) return;
+    reply.send({ data: null });
+  });
+  // --- end T71 ---
 
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
@@ -1706,6 +1804,18 @@ export async function startFakePve(options: FakePveOptions = {}): Promise<FakePv
       else networkErrors.delete(op);
     },
     // --- end T69 ---
+    // --- T71 node system ---
+    get systemCalls() {
+      return systemCalls;
+    },
+    setSystemError: (
+      op: 'dns' | 'time' | 'options' | 'hosts' | 'cert-upload' | 'cert-delete',
+      failure: { status: number; message: string; errors?: Record<string, string> } | undefined,
+    ) => {
+      if (failure) systemErrors.set(op, failure);
+      else systemErrors.delete(op);
+    },
+    // --- end T71 ---
     close: () => app.close(),
   };
 }
