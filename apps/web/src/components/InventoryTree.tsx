@@ -26,6 +26,7 @@ import {
 import { StatusDot } from '@/components/StatusDot';
 import { TagChip } from '@/components/TagChip';
 import { EmptyState } from '@/components/EmptyState';
+import { sortStorages } from '@/lib/storageSort';
 import { GuestContextMenu } from '@/components/actions/GuestContextMenu';
 import { GuestThumbnailHover } from '@/components/GuestThumbnailHover';
 import { useCanOpenCreate } from '@/components/create/useCanOpenCreate';
@@ -315,7 +316,12 @@ function StorageGroup({
   collapsed: boolean;
   onToggle: () => void;
 }) {
-  const storages = resources.filter((r) => r.type === 'storage' && r.node === nodeName);
+  // Name order, always -- PVE's own tree is alphabetical and the rows must not move between polls.
+  const storages = sortStorages(
+    resources.filter((r) => r.type === 'storage' && r.node === nodeName),
+    'name',
+    'asc',
+  );
   if (storages.length === 0) return null;
 
   return (

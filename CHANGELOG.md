@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Storage lists on the dashboard, the node Storage tab and the inventory tree no longer reorder
+  between refreshes: they are sorted by name (ties broken on the storage id) instead of in the
+  order Proxmox happens to return them. The dashboard Storage panel and the node Storage tab are
+  also sortable by name, node, type, used, free space or usage %, and the choice is saved per user
+  in the preferences (a new optional `storageSort` field; absent means name, ascending). The
+  storage page lists the same storage on other nodes in node-name order.
+
 ## [0.13.0] - 2026-10-08
 
 ### Added

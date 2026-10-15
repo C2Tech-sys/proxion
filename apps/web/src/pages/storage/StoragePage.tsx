@@ -13,6 +13,7 @@ import { StorageActions } from '@/components/storage/StorageActions';
 import { useClusterResources } from '@/api/hooks';
 import { errorMessage } from '@/api/errors';
 import { formatBytes, formatPercent } from '@/lib/format';
+import { sortStorages } from '@/lib/storageSort';
 import { DEFAULT_STORAGE_BROWSER_STATE, toStorageSearch, type StorageBrowserState } from '@/lib/storageList';
 
 const routeApi = getRouteApi('/_shell/storage/$node/$storage');
@@ -52,9 +53,11 @@ export function StoragePage() {
     if (!resource || resource.shared !== 1) return [];
     return [
       ...new Set(
-        (resources ?? [])
-          .filter((r) => r.type === 'storage' && r.storage === storage && r.node !== node)
-          .map((r) => r.node),
+        sortStorages(
+          (resources ?? []).filter((r) => r.type === 'storage' && r.storage === storage && r.node !== node),
+          'node',
+          'asc',
+        ).map((r) => r.node),
       ),
     ];
   }, [resources, node, storage, resource]);

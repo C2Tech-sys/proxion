@@ -9,6 +9,10 @@ export const themeValues = ['light', 'dark', 'system'] as const;
 export const defaultRangeValues = ['hour', 'day', 'week', 'month', 'year'] as const;
 export const thumbnailRefreshSecondsValues = [30, 60, 120, 300] as const;
 export const densityValues = ['comfortable', 'compact'] as const;
+/** The storage lists' sortable columns (T74) -- mirrors `STORAGE_SORT_KEYS` in
+ *  `apps/web/src/lib/storageSort.ts` (the web app and this server share no code). */
+export const storageSortKeyValues = ['name', 'node', 'type', 'used', 'avail', 'usage'] as const;
+export const storageSortDirValues = ['asc', 'desc'] as const;
 
 export const RAIL_WIDTH_MIN = 200;
 export const RAIL_WIDTH_MAX = 600;
@@ -57,6 +61,17 @@ const guestListSchema = z.object({
 });
 
 /**
+ * The saved sort order shared by every storage list in the web app (dashboard Storage panel and
+ * the node Storage tab, T74). Both members are required -- a half-specified sort is rejected
+ * rather than guessed at. `storageSort` absent from the document means "no saved choice": the
+ * client then sorts by name, ascending.
+ */
+const storageSortSchema = z.object({
+  key: z.enum(storageSortKeyValues),
+  dir: z.enum(storageSortDirValues),
+});
+
+/**
  * Field validators with NO `.default()` -- the base every field schema in this module is built
  * from. `userPrefsPatchSchema` below is `z.object(fields).partial()`; if it were instead
  * `userPrefsSchema.partial()` (defaults already attached), zod still applies each field's
@@ -77,6 +92,7 @@ const fields = {
   density: z.enum(densityValues),
   summaryLayout: summaryLayoutSchema,
   guestList: guestListSchema,
+  storageSort: storageSortSchema,
 };
 
 /**
@@ -102,6 +118,7 @@ export const userPrefsSchema = z.object({
   density: fields.density.default('comfortable'),
   summaryLayout: fields.summaryLayout.optional(),
   guestList: fields.guestList.optional(),
+  storageSort: fields.storageSort.optional(),
 });
 
 export type UserPrefs = z.infer<typeof userPrefsSchema>;
