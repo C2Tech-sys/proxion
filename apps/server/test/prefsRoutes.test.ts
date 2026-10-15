@@ -272,6 +272,59 @@ describe('/api/prefs', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it('PATCH accepts a valid storageSort, preserves other fields and GET returns it (T74)', async () => {
+    await setup();
+    const cookie = await loginCookie();
+    await app.inject({ method: 'PATCH', url: '/api/prefs', headers: { cookie }, payload: { theme: 'dark' } });
+
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: '/api/prefs',
+      headers: { cookie },
+      payload: { storageSort: { key: 'usage', dir: 'asc' } },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect(patch.json()).toMatchObject({ theme: 'dark', storageSort: { key: 'usage', dir: 'asc' } });
+
+    const get = await app.inject({ method: 'GET', url: '/api/prefs', headers: { cookie } });
+    expect(get.json()).toMatchObject({ theme: 'dark', storageSort: { key: 'usage', dir: 'asc' } });
+  });
+
+  it('PATCH with a second storageSort replaces the first', async () => {
+    await setup();
+    const cookie = await loginCookie();
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/prefs',
+      headers: { cookie },
+      payload: { storageSort: { key: 'usage', dir: 'asc' } },
+    });
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: '/api/prefs',
+      headers: { cookie },
+      payload: { storageSort: { key: 'usage', dir: 'desc' } },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect(patch.json().storageSort).toEqual({ key: 'usage', dir: 'desc' });
+  });
+
+  it('PATCH with a bad storageSort key, a bad dir or a half-specified sort is 400 and writes nothing', async () => {
+    await setup();
+    const cookie = await loginCookie();
+    for (const storageSort of [{ key: 'size', dir: 'asc' }, { key: 'name', dir: 'up' }, { key: 'name' }]) {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/prefs',
+        headers: { cookie },
+        payload: { storageSort },
+      });
+      expect(res.statusCode).toBe(400);
+    }
+    const get = await app.inject({ method: 'GET', url: '/api/prefs', headers: { cookie } });
+    expect(get.json().storageSort).toBeUndefined();
+  });
+
   it('token mode: GET returns read-only defaults, PUT/PATCH are 403', async () => {
     await setup({
       PVE_TOKEN_ID: 'root@pam!proxion',

@@ -42,6 +42,20 @@ describe('api/prefs (fixture mode)', () => {
     expect(cleared.summaryLayout).toEqual({});
   });
 
+  it('patchPrefs sets storageSort (T74), replaces it wholesale and leaves other fields alone', async () => {
+    expect((await getPrefs()).storageSort).toBeUndefined();
+    expect(PREFS_DEFAULTS.storageSort).toBeUndefined();
+
+    await patchPrefs({ theme: 'dark' });
+    const set = await patchPrefs({ storageSort: { key: 'usage', dir: 'asc' } });
+    expect(set.storageSort).toStrictEqual({ key: 'usage', dir: 'asc' });
+    expect(set.theme).toBe('dark');
+
+    const flipped = await patchPrefs({ storageSort: { key: 'usage', dir: 'desc' } });
+    expect(flipped.storageSort).toStrictEqual({ key: 'usage', dir: 'desc' });
+    expect((await getPrefs()).storageSort).toStrictEqual({ key: 'usage', dir: 'desc' });
+  });
+
   it('simulates network latency (the call does not resolve on the same tick)', async () => {
     let resolved = false;
     const promise = getPrefs().then((value) => {

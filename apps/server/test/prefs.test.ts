@@ -288,6 +288,48 @@ describe('PrefsStore', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('merge (PATCH) sets storageSort, round-trips through get, and preserves other fields (T74)', async () => {
+    const store = await makeStore();
+    await store.merge('uma@pam', { theme: 'dark', guestList: { columns: ['cpu'] } });
+    const result = await store.merge('uma@pam', { storageSort: { key: 'usage', dir: 'desc' } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.prefs.storageSort).toEqual({ key: 'usage', dir: 'desc' });
+    expect(result.prefs.theme).toBe('dark');
+    expect(result.prefs.guestList).toEqual({ columns: ['cpu'] });
+    expect((await store.get('uma@pam')).storageSort).toEqual({ key: 'usage', dir: 'desc' });
+  });
+
+  it('a document with no storageSort reads back without one (absent = name asc on the client)', async () => {
+    const store = await makeStore();
+    expect((await store.get('vera@pam')).storageSort).toBeUndefined();
+    expect(PREFS_DEFAULTS.storageSort).toBeUndefined();
+  });
+
+  it('merge (PATCH) replaces a saved storageSort wholesale', async () => {
+    const store = await makeStore();
+    await store.merge('walt@pam', { storageSort: { key: 'node', dir: 'asc' } });
+    const result = await store.merge('walt@pam', { storageSort: { key: 'avail', dir: 'desc' } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.prefs.storageSort).toEqual({ key: 'avail', dir: 'desc' });
+  });
+
+  it('merge (PATCH) rejects a bad storageSort key, a bad dir and a half-specified sort', async () => {
+    const store = await makeStore();
+    for (const storageSort of [
+      { key: 'size', dir: 'asc' },
+      { key: 'name', dir: 'up' },
+      { key: 'name' },
+      { dir: 'asc' },
+      'name',
+    ]) {
+      const result = await store.merge('xena@pam', { storageSort } as unknown as Record<string, unknown>);
+      expect(result.ok).toBe(false);
+    }
+    expect((await store.get('xena@pam')).storageSort).toBeUndefined();
+  });
+
   it('two different users never collide on the same file', async () => {
     const store = await makeStore();
     await store.replace('same@pam', { theme: 'dark' });

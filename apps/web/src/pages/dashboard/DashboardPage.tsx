@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Box, Container, HardDrive, RefreshCw, Server } from 'lucide-react';
+import { ArrowDown, ArrowUp, Box, Container, HardDrive, RefreshCw, Server } from 'lucide-react';
 
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { Panel } from '@/components/Panel';
@@ -15,11 +15,13 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/EmptyState';
 import { TaskStatusIcon } from '@/components/TasksTable';
 import { useClusterResources, useTasks } from '@/api/hooks';
-import { usePrefs } from '@/api/prefsHooks';
+import { usePrefs, useStorageSort } from '@/api/prefsHooks';
 import { api } from '@/api/client';
 import { computeClusterTotals, recentTasks, topConsumersByCpu, topConsumersByMemory } from '@/lib/dashboard';
 import { formatBytes, formatDateTime, formatDuration, formatPercent, formatUptime } from '@/lib/format';
 import { APP_NAME } from '@/lib/app';
+import { sortStorages, STORAGE_SORT_KEYS, type StorageSortKey } from '@/lib/storageSort';
+import { NativeSelect } from '@/components/hardware/NativeSelect';
 import type { ClusterResource, PveTask } from '@/api/types';
 
 function taskDuration(task: PveTask): number {
@@ -139,42 +141,101 @@ function ConsumerTable({ title, rows }: { title: string; rows: ReturnType<typeof
   );
 }
 
+/** Dropdown labels for the storage sort keys (the key `avail` is "Free" on screen). */
+const STORAGE_SORT_LABELS: Record<StorageSortKey, string> = {
+  name: 'Name',
+  node: 'Node',
+  type: 'Type',
+  used: 'Used',
+  avail: 'Free',
+  usage: 'Usage %',
+};
+
+/**
+ * The Storage panel: rows are sorted at render time (name ascending unless a `storageSort`
+ * preference says otherwise) because PVE's `/cluster/resources` order is not stable between
+ * polls. The header's sort control saves the choice to the user's preferences -- the same one
+ * the node Storage tab uses.
+ */
 function StoragePanel({ resources }: { resources: ClusterResource[] }) {
-  const storages = resources.filter((r) => r.type === 'storage');
-  if (storages.length === 0) return <EmptyState message="No storages." />;
+  const { sort, setSort } = useStorageSort();
+  const storages = sortStorages(
+    resources.filter((r) => r.type === 'storage'),
+    sort.key,
+    sort.dir,
+  );
+  const DirIcon = sort.dir === 'asc' ? ArrowUp : ArrowDown;
+  const dirLabel = sort.dir === 'asc' ? 'Sort ascending' : 'Sort descending';
+
   return (
-    <ul className="flex flex-col gap-2.5">
-      {storages.map((s) => {
-        const used = s.disk ?? 0;
-        const total = s.maxdisk ?? 0;
-        const contentTypes = (s.content ?? '').split(',').filter(Boolean);
-        return (
-          <li key={s.id} className="flex flex-col gap-1">
-            <div className="flex items-center justify-between gap-2">
-              {/* The storage id is an identifier, but sans not mono (T11) -- same face as the
-                  "(node)" suffix. */}
-              <Link
-                to="/storage/$node/$storage"
-                params={{ node: s.node, storage: s.storage ?? '' }}
-                className="truncate text-[13px] hover:underline"
-              >
-                <span className="text-accent">{s.storage}</span>{' '}
-                <span className="text-muted-foreground">({s.node})</span>
-              </Link>
-              <span className="shrink-0 text-xs text-muted-foreground">{s.plugintype}</span>
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {contentTypes.map((c) => (
-                <Badge key={c} variant="secondary" className="text-[10px]">
-                  {c}
-                </Badge>
+    <Panel
+      title="Storage"
+      action={
+        storages.length > 0 ? (
+          <div className="flex items-center gap-1">
+            <NativeSelect
+              aria-label="Sort storages by"
+              className="h-6 w-auto py-0 text-xs"
+              value={sort.key}
+              onChange={(e) => setSort({ key: e.target.value as StorageSortKey, dir: sort.dir })}
+            >
+              {STORAGE_SORT_KEYS.map((key) => (
+                <option key={key} value={key}>
+                  {STORAGE_SORT_LABELS[key]}
+                </option>
               ))}
-            </div>
-            <UsageBar fraction={total ? used / total : 0} label={`${formatBytes(used)} / ${formatBytes(total)}`} />
-          </li>
-        );
-      })}
-    </ul>
+            </NativeSelect>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="size-6 p-0"
+              aria-label={dirLabel}
+              title={dirLabel}
+              onClick={() => setSort({ key: sort.key, dir: sort.dir === 'asc' ? 'desc' : 'asc' })}
+            >
+              <DirIcon className="size-3.5" />
+            </Button>
+          </div>
+        ) : undefined
+      }
+    >
+      {storages.length === 0 ? (
+        <EmptyState message="No storages." />
+      ) : (
+        <ul className="flex flex-col gap-2.5">
+          {storages.map((s) => {
+            const used = s.disk ?? 0;
+            const total = s.maxdisk ?? 0;
+            const contentTypes = (s.content ?? '').split(',').filter(Boolean);
+            return (
+              <li key={s.id} className="flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-2">
+                  {/* The storage id is an identifier, but sans not mono (T11) -- same face as the
+                      "(node)" suffix. */}
+                  <Link
+                    to="/storage/$node/$storage"
+                    params={{ node: s.node, storage: s.storage ?? '' }}
+                    className="truncate text-[13px] hover:underline"
+                  >
+                    <span className="text-accent">{s.storage}</span>{' '}
+                    <span className="text-muted-foreground">({s.node})</span>
+                  </Link>
+                  <span className="shrink-0 text-xs text-muted-foreground">{s.plugintype}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {contentTypes.map((c) => (
+                    <Badge key={c} variant="secondary" className="text-[10px]">
+                      {c}
+                    </Badge>
+                  ))}
+                </div>
+                <UsageBar fraction={total ? used / total : 0} label={`${formatBytes(used)} / ${formatBytes(total)}`} />
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Panel>
   );
 }
 
@@ -343,9 +404,7 @@ export function DashboardPage() {
             </div>
           </Panel>
 
-          <Panel title="Storage">
-            <StoragePanel resources={resources} />
-          </Panel>
+          <StoragePanel resources={resources} />
 
           <Panel
             title="Recent tasks"

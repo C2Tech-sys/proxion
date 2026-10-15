@@ -2679,3 +2679,60 @@ export function resetFixtureNodeSystem(): void {
   fixtureNodeSystem.clear();
 }
 // --- end T71 ---
+
+// --- T74 ---
+/** Ids of the cluster-resource rows in their checked-in order, captured once at module load (before
+ *  any mutator above can add or remove a row), so `resetFixtureClusterResources` can restore it. */
+const initialResourceOrder = resources.map((r) => r.id);
+
+/** Deterministic PRNG (mulberry32) so a `shuffle(seed)` order is the same on every run. */
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Test/demo-only (T74): reorders the shared in-memory cluster-resources array in place, without
+ * changing any row -- what PVE does between polls. `'reverse'` flips it, `'shuffle(7)'` applies a
+ * seeded (deterministic) Fisher-Yates shuffle, and an array is a permutation of the current
+ * indices (`[2, 0, 1]` puts the current third row first). Anything else throws.
+ */
+export function reorderFixtureClusterResources(order: 'reverse' | `shuffle(${number})` | number[]): void {
+  const rows = [...resources];
+  let next: ClusterResource[];
+  if (order === 'reverse') {
+    next = rows.reverse();
+  } else if (typeof order === 'string') {
+    const match = /^shuffle\((\d+)\)$/.exec(order);
+    if (!match) throw new Error(`unknown fixture order: ${order}`);
+    const random = seededRandom(Number(match[1]));
+    for (let i = rows.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      const a = rows[i] as ClusterResource;
+      rows[i] = rows[j] as ClusterResource;
+      rows[j] = a;
+    }
+    next = rows;
+  } else {
+    if (order.length !== rows.length || new Set(order).size !== rows.length || order.some((i) => !rows[i])) {
+      throw new Error('order must be a permutation of the current row indices');
+    }
+    next = order.map((i) => rows[i] as ClusterResource);
+  }
+  resources.splice(0, resources.length, ...next);
+}
+
+/** Test-only (T74): puts the cluster-resources rows back in their checked-in order (rows added
+ *  since then keep their relative order after the original ones). */
+export function resetFixtureClusterResources(): void {
+  const position = new Map(initialResourceOrder.map((id, index) => [id, index]));
+  const rank = (r: ClusterResource) => position.get(r.id) ?? Number.MAX_SAFE_INTEGER;
+  resources.splice(0, resources.length, ...[...resources].sort((a, b) => rank(a) - rank(b)));
+}
+// --- end T74 ---

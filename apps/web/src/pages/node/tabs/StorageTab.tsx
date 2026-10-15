@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight } from 'lucide-react';
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { UsageBar } from '@/components/UsageBar';
@@ -9,9 +9,52 @@ import { TagChip } from '@/components/TagChip';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StorageContentBrowser } from '@/components/storage/StorageContentBrowser';
 import { useClusterResources } from '@/api/hooks';
+import { useStorageSort } from '@/api/prefsHooks';
 import { errorMessage } from '@/api/errors';
 import { formatBytes } from '@/lib/format';
+import { sortStorages, type SortDir, type StorageSortKey } from '@/lib/storageSort';
+import { cn } from '@/lib/utils';
 import type { NodeTabProps } from '@/pages/node/tabs';
+
+interface StorageSortHeadProps {
+  label: string;
+  /** The key a click on this header sorts by. */
+  sortKeyName: StorageSortKey;
+  /** Every saved key that makes this column the active one (the Used column shows a bar plus a
+   *  fraction, so it sorts by `usage` -- but a saved `used` from the dashboard lights it too). */
+  activeKeys?: readonly StorageSortKey[];
+  activeKey: StorageSortKey;
+  dir: SortDir;
+  onSort: (key: StorageSortKey, dir: SortDir) => void;
+  className?: string;
+}
+
+/** A sortable column header (the `SortHead` pattern from `TasksTable`, plus `aria-sort`). First
+ *  click on a column sorts ascending; a click on the active column flips the direction. */
+function StorageSortHead({
+  label,
+  sortKeyName,
+  activeKeys = [sortKeyName],
+  activeKey,
+  dir,
+  onSort,
+  className,
+}: StorageSortHeadProps) {
+  const active = activeKeys.includes(activeKey);
+  const ariaSort = active ? (dir === 'asc' ? 'ascending' : 'descending') : undefined;
+  return (
+    <TableHead aria-sort={ariaSort} className={className}>
+      <button
+        type="button"
+        onClick={() => onSort(active ? activeKey : sortKeyName, active ? (dir === 'asc' ? 'desc' : 'asc') : 'asc')}
+        className={cn('flex items-center gap-1 hover:text-foreground', className?.includes('text-right') && 'ml-auto')}
+      >
+        {label}
+        {active && (dir === 'asc' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}
+      </button>
+    </TableHead>
+  );
+}
 
 /** The node Storage tab: every storage on this node, expandable to its content list. The
  *  expanded row's content list is the same `StorageContentBrowser` the storage object page uses
@@ -20,8 +63,21 @@ import type { NodeTabProps } from '@/pages/node/tabs';
 export function StorageTab({ node }: NodeTabProps) {
   const { data: resources, isLoading, isError, error } = useClusterResources();
   const [expanded, setExpanded] = useState<string | null>(null);
+  const { sort, setSort } = useStorageSort();
 
-  const storages = (resources ?? []).filter((r) => r.type === 'storage' && r.node === node);
+  // Sorted at render time (name ascending unless a `storageSort` preference says otherwise): PVE's
+  // `/cluster/resources` order is not stable between polls, and live mode replaces the whole array
+  // on every push. `expanded` is keyed by storage name, so the open row follows its storage.
+  const storages = sortStorages(
+    (resources ?? []).filter((r) => r.type === 'storage' && r.node === node),
+    sort.key,
+    sort.dir,
+  );
+  const sortProps = {
+    activeKey: sort.key,
+    dir: sort.dir,
+    onSort: (key: StorageSortKey, dir: SortDir) => setSort({ key, dir }),
+  };
 
   if (isLoading) return <Skeleton className="h-64" />;
   if (isError) return <EmptyState message={`Could not load storages: ${errorMessage(error)}`} />;
@@ -33,13 +89,19 @@ export function StorageTab({ node }: NodeTabProps) {
         <TableHeader>
           <TableRow>
             <TableHead className="w-6"></TableHead>
-            <TableHead>Name</TableHead>
-            <TableHead>Type</TableHead>
+            <StorageSortHead label="Name" sortKeyName="name" {...sortProps} />
+            <StorageSortHead label="Type" sortKeyName="type" {...sortProps} />
             <TableHead>Content</TableHead>
             <TableHead>Shared</TableHead>
             <TableHead>Enabled</TableHead>
-            <TableHead className="w-40">Used</TableHead>
-            <TableHead className="text-right">Avail</TableHead>
+            <StorageSortHead
+              label="Used"
+              sortKeyName="usage"
+              activeKeys={['usage', 'used']}
+              className="w-40"
+              {...sortProps}
+            />
+            <StorageSortHead label="Avail" sortKeyName="avail" className="text-right" {...sortProps} />
           </TableRow>
         </TableHeader>
         <TableBody>

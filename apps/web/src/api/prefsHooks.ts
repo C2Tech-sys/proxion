@@ -1,9 +1,17 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { getPrefs, patchPrefs, PREFS_DEFAULTS, type PrefsPatch, type PrefsResponse } from '@/api/prefs';
+import {
+  getPrefs,
+  patchPrefs,
+  PREFS_DEFAULTS,
+  type PrefsPatch,
+  type PrefsResponse,
+  type StorageSortPrefs,
+} from '@/api/prefs';
 import { useAuthMe } from '@/api/hooks';
 import { errorMessage } from '@/api/errors';
+import { DEFAULT_STORAGE_SORT } from '@/lib/storageSort';
 import { useUiStore } from '@/store/ui';
 
 export const PREFS_QUERY_KEY = ['prefs'] as const;
@@ -80,6 +88,36 @@ export function useUpdatePrefs() {
       }
     },
   });
+}
+
+/**
+ * The one saved sort order shared by every sortable storage list (the dashboard Storage panel and
+ * the node Storage tab, T74), with `name` / `asc` when nothing is saved. `setSort` re-sorts
+ * immediately and persists `{ storageSort: { key, dir } }` through `useUpdatePrefs` (whose
+ * optimistic cache write is what makes a change in one list show up in the other). When the prefs
+ * response says `readOnly` (a shared service token is not a person) the choice only sorts locally
+ * -- no write is attempted -- and the local choice wins over whatever is saved.
+ */
+export function useStorageSort(): {
+  sort: StorageSortPrefs;
+  setSort: (next: StorageSortPrefs) => void;
+  readOnly: boolean;
+} {
+  const { data: prefs } = usePrefs();
+  const updatePrefs = useUpdatePrefs();
+  const [local, setLocal] = useState<StorageSortPrefs | null>(null);
+  const readOnly = prefs?.readOnly === true;
+  const saved = prefs?.storageSort;
+  const sort = (readOnly ? (local ?? saved) : (saved ?? local)) ?? DEFAULT_STORAGE_SORT;
+  const { mutate } = updatePrefs;
+  const setSort = useCallback(
+    (next: StorageSortPrefs) => {
+      setLocal(next);
+      if (!readOnly) mutate({ storageSort: next });
+    },
+    [readOnly, mutate],
+  );
+  return { sort, setSort, readOnly };
 }
 
 function systemPrefersLight(): boolean {

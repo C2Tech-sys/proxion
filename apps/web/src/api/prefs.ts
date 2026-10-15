@@ -1,4 +1,5 @@
 import { USE_FIXTURES } from '@/api/client';
+import type { SortDir, StorageSortKey } from '@/lib/storageSort';
 
 /**
  * Per-user preferences, persisted server-side (one JSON file per user -- see
@@ -31,6 +32,14 @@ export interface GuestListPrefs {
   columns?: string[];
 }
 
+/** The saved sort order for the storage lists (dashboard Storage panel + node Storage tab) --
+ *  one shared choice. Mirrors the server's `storageSort` (`apps/server/src/prefs/schema.ts`):
+ *  both members are required. */
+export interface StorageSortPrefs {
+  key: StorageSortKey;
+  dir: SortDir;
+}
+
 export interface UserPrefs {
   version: 1;
   theme: Theme;
@@ -44,6 +53,8 @@ export interface UserPrefs {
   summaryLayout?: SummaryLayoutPrefs;
   /** `undefined` = no saved column selection -- the Guests table shows every column. */
   guestList?: GuestListPrefs;
+  /** `undefined` = no saved choice -- the storage lists sort by name, ascending. */
+  storageSort?: StorageSortPrefs;
 }
 
 export type PrefsPatch = Partial<UserPrefs>;
