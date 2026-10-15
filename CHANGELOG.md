@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- VM Hardware tab: "Add CD/DVD drive" next to the Disks header and a "Remove" trash on every CD/DVD
+  row (T75). Adding picks a free bus/slot (the first free one of `ide2`, `ide0`, `ide1`, `ide3`,
+  `sata0..5`, `scsi0..30` is preselected) and either no media or an ISO from the node's storage; it
+  uses the existing hardware patch, and a running VM sees the drive after a restart (PVE shows it as
+  pending). Removing asks for confirmation and drops only the drive; the ISO file stays on its
+  storage. The cloud-init drive is never removable here. Both need a signed-in session and
+  `VM.Config.CDROM`. The detach route (`POST .../disks/:slot/detach`) now handles a `media=cdrom`
+  slot (`delete=<slot>`, privilege `VM.Config.CDROM`, answers `{ ok, removed, pending }`) and refuses
+  the cloud-init drive.
+
 ## [0.13.0] - 2026-10-08
 
 ### Added

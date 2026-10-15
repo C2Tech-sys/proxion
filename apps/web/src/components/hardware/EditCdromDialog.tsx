@@ -30,11 +30,11 @@ export interface EditCdromDialogProps {
 }
 
 /** "No media" choice -- sent as `iso: null` (PVE `none,media=cdrom`). */
-const NO_MEDIA = '';
+export const NO_MEDIA = '';
 
 /** The ISOs of one storage as an `<optgroup>`. A component of its own because each storage needs
  * its own `useStorageContent` query. Renders nothing for a storage with no mountable ISO. */
-function IsoStorageGroup({ node, storage, exclude }: { node: string; storage: string; exclude?: string | undefined }) {
+export function IsoStorageGroup({ node, storage, exclude }: { node: string; storage: string; exclude?: string | undefined }) {
   const content = useStorageContent(node, storage);
   const isos = (content.data ?? []).filter(
     (item) => item.content === 'iso' && isMountableIsoVolid(item.volid) && item.volid !== exclude,

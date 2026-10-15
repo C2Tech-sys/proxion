@@ -11,6 +11,8 @@ import { EditHardwareButton } from '@/components/hardware/EditHardwareButton';
 import { EditCpuDialog } from '@/components/hardware/EditCpuDialog';
 import { EditMemoryDialog } from '@/components/hardware/EditMemoryDialog';
 import { EditCdromDialog } from '@/components/hardware/EditCdromDialog';
+import { AddCdromDialog } from '@/components/hardware/AddCdromDialog';
+import { RemoveCdromDialog } from '@/components/hardware/RemoveCdromDialog';
 import { ResizeDiskDialog } from '@/components/hardware/ResizeDiskDialog';
 import { AddDiskDialog } from '@/components/hardware/AddDiskDialog';
 import { EditBiosDialog } from '@/components/hardware/EditBiosDialog';
@@ -80,6 +82,8 @@ type EditTarget =
   | { kind: 'addEfi' }
   | { kind: 'addTpm' }
   | { kind: 'cdrom'; slot: string; volid: string | undefined }
+  | { kind: 'addCdrom' }
+  | { kind: 'removeCdrom'; slot: string }
   | { kind: 'disk'; disk: string; size: string | undefined }
   | { kind: 'addDisk' }
   | { kind: 'detach'; slot: string; volume: string }
@@ -212,7 +216,7 @@ function DiskActionButton({
   disabledReason,
   onClick,
 }: {
-  kind: 'addDisk' | 'detach' | 'removeUnused';
+  kind: 'addDisk' | 'detach' | 'removeUnused' | 'removeCdrom';
   label: string;
   disabledReason: string | undefined;
   onClick: () => void;
@@ -236,7 +240,7 @@ function DiskActionButton({
     );
   }
   const Icon = kind === 'detach' ? Unplug : Trash2;
-  const className = kind === 'removeUnused' ? 'size-7 shrink-0 text-destructive hover:text-destructive' : 'size-7 shrink-0';
+  const className = kind === 'removeUnused' || kind === 'removeCdrom' ? 'size-7 shrink-0 text-destructive hover:text-destructive' : 'size-7 shrink-0';
   if (disabled) {
     return (
       <Button variant="ghost" size="icon" className={className} disabled aria-disabled="true" aria-label={label} title={disabledReason}>
@@ -339,15 +343,15 @@ function qemuRows(
   if (efidisk) rows.push({ label: 'EFI Disk', value: driveLine(efidisk), keys: [efidisk.key] });
   if (tpm) rows.push({ label: 'TPM State', value: driveLine(tpm), keys: [tpm.key] });
 
-  // An EFI disk / TPM state can only be added while the guest has none.
-  const firmwareAdds =
-    efidisk && tpm ? undefined : (
-      <>
-        {!efidisk && actionFor('Add EFI disk', 'VM.Config.Disk', { kind: 'addEfi' })}
-        {!tpm && actionFor('Add TPM state', 'VM.Config.Disk', { kind: 'addTpm' })}
-      </>
-    );
-  rows.push(disksHeaderRow(actionFor, 'Add disk', 'Hard disks and unused volumes', firmwareAdds));
+  // An EFI disk / TPM state can only be added while the guest has none; a CD/DVD drive (T75) any time.
+  const disksExtra = (
+    <>
+      {!efidisk && actionFor('Add EFI disk', 'VM.Config.Disk', { kind: 'addEfi' })}
+      {!tpm && actionFor('Add TPM state', 'VM.Config.Disk', { kind: 'addTpm' })}
+      {actionFor('Add CD/DVD drive', 'VM.Config.CDROM', { kind: 'addCdrom' })}
+    </>
+  );
+  rows.push(disksHeaderRow(actionFor, 'Add disk', 'Hard disks and unused volumes', disksExtra));
 
   for (const disk of disks) {
     rows.push({
@@ -403,11 +407,16 @@ function qemuRows(
       label: `CD/DVD Drive (${cdrom.key})`,
       value: cdromLine(cdrom),
       keys: [cdrom.key],
-      action: actionFor(`CD/DVD drive ${cdrom.key}`, 'VM.Config.CDROM', {
-        kind: 'cdrom',
-        slot: cdrom.key,
-        volid: cdromVolid(cdrom),
-      }),
+      action: (
+        <div className="flex shrink-0 items-center">
+          {actionFor(`CD/DVD drive ${cdrom.key}`, 'VM.Config.CDROM', {
+            kind: 'cdrom',
+            slot: cdrom.key,
+            volid: cdromVolid(cdrom),
+          })}
+          {actionFor(`Remove CD/DVD drive ${cdrom.key}`, 'VM.Config.CDROM', { kind: 'removeCdrom', slot: cdrom.key })}
+        </div>
+      ),
     });
   }
 
@@ -621,12 +630,18 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
       target.kind === 'addDisk' ||
       target.kind === 'addEfi' ||
       target.kind === 'addTpm' ||
+      target.kind === 'addCdrom' ||
       target.kind === 'detach' ||
-      target.kind === 'removeUnused'
+      target.kind === 'removeUnused' ||
+      target.kind === 'removeCdrom'
     ) {
       return (
         <DiskActionButton
-          kind={target.kind === 'detach' || target.kind === 'removeUnused' ? target.kind : 'addDisk'}
+          kind={
+            target.kind === 'detach' || target.kind === 'removeUnused' || target.kind === 'removeCdrom'
+              ? target.kind
+              : 'addDisk'
+          }
           label={label}
           disabledReason={disabledReason}
           onClick={() => setEditing(target)}
@@ -812,6 +827,19 @@ export function HardwareTab({ node, type, vmid }: VmTabProps) {
           slot={editing.slot}
           currentVolid={editing.volid}
         />
+      )}
+      {editing?.kind === 'addCdrom' && (
+        <AddCdromDialog
+          open
+          onOpenChange={closeDialog}
+          node={node}
+          type={type}
+          vmid={vmid}
+          configKeys={Object.keys(config)}
+        />
+      )}
+      {editing?.kind === 'removeCdrom' && (
+        <RemoveCdromDialog open onOpenChange={closeDialog} node={node} type={type} vmid={vmid} slot={editing.slot} />
       )}
       {editing?.kind === 'disk' && (
         <ResizeDiskDialog
