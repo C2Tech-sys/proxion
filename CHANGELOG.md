@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-15
+
 ### Added
 
 - VM Hardware tab: "Add CD/DVD drive" next to the Disks header and a "Remove" trash on every CD/DVD
@@ -640,7 +642,8 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/C2Tech-sys/proxion/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/C2Tech-sys/proxion/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/C2Tech-sys/proxion/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/C2Tech-sys/proxion/compare/v0.11.0...v0.11.1
