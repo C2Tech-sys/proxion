@@ -1,6 +1,6 @@
 import { USE_FIXTURES } from '@/api/client';
 import { GuestActionError } from '@/api/actions';
-import { getFixtureGuestConfig, patchFixtureGuestConfig } from '@/api/fixtures';
+import { getFixtureGuestConfig, patchFixtureGuestConfig, removeFixtureCdrom } from '@/api/fixtures';
 import type { ClusterResource, GuestType } from '@/api/types';
 
 /**
@@ -54,6 +54,39 @@ export interface DetachDiskResult {
   ok: true;
   /** The `unused[n]` key PVE parked the volume under, when it could be determined. */
   unusedSlot?: string;
+  pending: string[];
+}
+
+/** Every slot a CD/DVD drive can take (the server's `CDROM_SLOT_RE`), in the order the picker
+ * offers them: `ide2` first (where PVE's own wizard puts the installer ISO), then the other IDE
+ * slots, then SATA and SCSI. */
+export const CDROM_SLOT_ORDER: readonly string[] = [
+  'ide2',
+  'ide0',
+  'ide1',
+  'ide3',
+  ...Array.from({ length: 6 }, (_, n) => `sata${n}`),
+  ...Array.from({ length: 31 }, (_, n) => `scsi${n}`),
+];
+
+/** The slots a new drive may take: those no config key (disk, CD/DVD, unused volume, cloud-init
+ * drive, ...) already occupies. */
+export function freeCdromSlots(configKeys: readonly string[]): string[] {
+  const taken = new Set(configKeys);
+  return CDROM_SLOT_ORDER.filter((slot) => !taken.has(slot));
+}
+
+/** `ide2` -> "IDE 2 (ide2)". */
+export function cdromSlotLabel(slot: string): string {
+  const match = /^([a-z]+)(\d+)$/.exec(slot);
+  return match ? `${(match[1] ?? '').toUpperCase()} ${match[2]} (${slot})` : slot;
+}
+
+/** Result of removing a CD/DVD drive (T75): PVE just drops it, nothing becomes `unused[n]`. */
+export interface RemoveCdromResult {
+  ok: true;
+  /** The config key that was removed (`ide2`). */
+  removed: string;
   pending: string[];
 }
 
@@ -288,6 +321,34 @@ export async function detachDisk(
   });
   if (res.status === 200) {
     return (await res.json()) as DetachDiskResult;
+  }
+  return throwActionError(res);
+}
+
+/**
+ * Removes a CD/DVD drive (T75). Real mode: the same `POST .../disks/:slot/detach` route, which for
+ * a `media=cdrom` slot sends `delete=<slot>` under `VM.Config.CDROM` (the ISO file stays on its
+ * storage). Fixture mode: drops the drive from the in-memory fixture config.
+ */
+export async function removeCdrom(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  slot: string,
+): Promise<RemoveCdromResult> {
+  if (USE_FIXTURES) {
+    const outcome = removeFixtureCdrom(node, type, vmid, slot);
+    if (outcome === 'not-found') throw new GuestActionError(404, `${slot} is not present on this guest.`);
+    if (outcome === 'not-cdrom') throw new GuestActionError(400, `${slot} is not a CD/DVD drive.`);
+    if (outcome === 'cloud-init') throw new GuestActionError(400, `${slot} is the cloud-init drive.`);
+    return { ok: true, removed: slot, pending: [] };
+  }
+
+  const res = await fetch(`/api/actions/guest/${node}/${type}/${vmid}/disks/${encodeURIComponent(slot)}/detach`, {
+    method: 'POST',
+  });
+  if (res.status === 200) {
+    return (await res.json()) as RemoveCdromResult;
   }
   return throwActionError(res);
 }

@@ -395,15 +395,21 @@ export function registerDiskRoutes(
       }
       const client = identity.client;
 
-      let allowed: boolean;
+      // A disk is detached under VM.Config.Disk, a CD/DVD drive (T75) under VM.Config.CDROM; which
+      // one applies is only known once the slot's value is read, so both are looked up here (qemu
+      // only -- an lxc guest has no CD/DVD drives) and the specific one is enforced below, still
+      // before any write.
+      let diskAllowed: boolean;
+      let cdromAllowed = false;
       try {
-        allowed = await hasPrivilege(client, params.vmid, 'VM.Config.Disk');
+        diskAllowed = await hasPrivilege(client, params.vmid, 'VM.Config.Disk');
+        if (params.type === 'qemu') cdromAllowed = await hasPrivilege(client, params.vmid, 'VM.Config.CDROM');
       } catch (error) {
-        app.log.warn({ err: error }, 'Failed to check VM.Config.Disk permission for guest disk detach');
+        app.log.warn({ err: error }, 'Failed to check permissions for guest disk detach');
         reply.code(502).send({ error: 'pve-unreachable' });
         return;
       }
-      if (!allowed) {
+      if (!diskAllowed && !cdromAllowed) {
         reply.code(403).send({ error: 'forbidden', missing: 'VM.Config.Disk' });
         return;
       }
@@ -422,8 +428,17 @@ export function registerDiskRoutes(
         reply.code(404).send({ error: 'disk-not-found', message: `${slot} is not present on this guest.` });
         return;
       }
-      if (isCdromValue(current)) {
-        reply.code(400).send({ error: 'not-a-disk', message: `${slot} is a CD/DVD drive, not a disk.` });
+      const cdrom = isCdromValue(current);
+      if (cdrom && volumeOf(current)?.includes('cloudinit')) {
+        reply.code(400).send({
+          error: 'cloud-init-drive',
+          message: `${slot} is the cloud-init drive; it is managed from the Cloud-Init tab, not removed here.`,
+        });
+        return;
+      }
+      const missing = cdrom ? 'VM.Config.CDROM' : 'VM.Config.Disk';
+      if (!(cdrom ? cdromAllowed : diskAllowed)) {
+        reply.code(403).send({ error: 'forbidden', missing });
         return;
       }
 
@@ -431,8 +446,19 @@ export function registerDiskRoutes(
         await putConfig(client, params.type, params.node, params.vmid, { delete: slot });
       } catch (error) {
         if (sendPveError(reply, error)) return;
-        app.log.warn({ err: error }, 'Guest disk detach request failed');
+        app.log.warn({ err: error }, cdrom ? 'Guest CD/DVD drive removal failed' : 'Guest disk detach request failed');
         reply.code(502).send({ error: 'pve-unreachable' });
+        return;
+      }
+
+      if (cdrom) {
+        // PVE just drops a CD/DVD drive: no volume is parked as `unused[n]`, so there is nothing to look up.
+        const pendingCdrom = await pendingKeysOf(app, client, params.type, params.node, params.vmid, [slot]);
+        app.log.info(
+          { username: identity.username, node: params.node, type: params.type, vmid: params.vmid, slot },
+          'Guest CD/DVD drive removed',
+        );
+        reply.code(200).send({ ok: true, removed: slot, pending: pendingCdrom });
         return;
       }
 

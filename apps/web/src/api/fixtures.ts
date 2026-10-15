@@ -2736,3 +2736,24 @@ export function resetFixtureClusterResources(): void {
   resources.splice(0, resources.length, ...[...resources].sort((a, b) => rank(a) - rank(b)));
 }
 // --- end T74 ---
+// --- T75 cdrom removal ---
+/**
+ * Demo/test-only (T75): drops one CD/DVD drive from a guest's fixture config, the way PVE does for
+ * `PUT config { delete: '<slot>' }` on a `media=cdrom` drive -- nothing is parked as `unused[n]`
+ * (that is what detaching a disk does). The cloud-init drive is never removable this way.
+ */
+export function removeFixtureCdrom(
+  node: string,
+  type: GuestType,
+  vmid: number,
+  slot: string,
+): 'ok' | 'not-found' | 'not-cdrom' | 'cloud-init' {
+  const config = (getFixtureGuestConfig(vmid) ?? {}) as Record<string, unknown>;
+  const current = config[slot];
+  if (typeof current !== 'string' || current === '') return 'not-found';
+  if (!/(?:^|,)media=cdrom(?:,|$)/.test(current)) return 'not-cdrom';
+  if ((current.split(',')[0] ?? '').includes('cloudinit')) return 'cloud-init';
+  patchFixtureGuestConfig(node, type, vmid, { [slot]: undefined });
+  return 'ok';
+}
+// --- end T75 ---

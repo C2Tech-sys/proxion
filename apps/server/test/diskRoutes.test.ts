@@ -498,10 +498,6 @@ describe('guest disk routes (T52)', () => {
         const res = await detach('/pve1/qemu/100', slot, cookie);
         expect(res.statusCode, slot).toBe(400);
       }
-      // A CD-ROM is present but is not a disk.
-      const cdrom = await detach('/pve1/qemu/100', 'ide2', cookie);
-      expect(cdrom.statusCode).toBe(400);
-      expect(cdrom.json()).toMatchObject({ error: 'not-a-disk' });
       // lxc: only mount points, never rootfs or a qemu bus.
       for (const slot of ['rootfs', 'scsi0', 'unused0']) {
         const res = await detach('/pve2/lxc/200', slot, cookie);
@@ -520,6 +516,95 @@ describe('guest disk routes (T52)', () => {
         error: 'pve-rejected',
         message: 'Parameter verification failed. delete: disk is locked',
       });
+    });
+  });
+
+  describe('detach: CD/DVD drive (T75)', () => {
+    const CDROM_PRIVS = { 'VM.Config.CDROM': true };
+    const CDROM_CONFIG = {
+      scsi0: 'local-lvm:vm-100-disk-0,size=32G',
+      ide2: 'local:iso/debian-12.iso,media=cdrom',
+    };
+
+    it('maps a cdrom slot to exactly delete=<slot> and reports it as removed', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, CDROM_PRIVS);
+      fakePve.setGuestConfig('qemu', 100, CDROM_CONFIG);
+      const res = await detach('/pve1/qemu/100', 'ide2', cookie);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true, removed: 'ide2', pending: [] });
+      expect(fakePve.configCalls).toHaveLength(1);
+      expect(fakePve.configCalls[0]!.path).toContain('/nodes/pve1/qemu/100/config');
+      expect(fakePve.configCalls[0]!.body).toEqual({ delete: 'ide2' });
+    });
+
+    it('removes an empty drive (media=cdrom with no ISO) too and reports a held-back removal as pending', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, CDROM_PRIVS);
+      fakePve.setGuestConfig('qemu', 100, { ide0: 'none,media=cdrom' });
+      fakePve.setPending('qemu', 100, [{ key: 'ide0', value: 'none,media=cdrom', delete: 1 }]);
+      const res = await detach('/pve1/qemu/100', 'ide0', cookie);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true, removed: 'ide0', pending: ['ide0'] });
+      expect(fakePve.configCalls[0]!.body).toEqual({ delete: 'ide0' });
+    });
+
+    it('needs VM.Config.CDROM: Disk alone is refused before any PVE write', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, { 'VM.Config.Disk': true, 'VM.Config.CDROM': false });
+      fakePve.setGuestConfig('qemu', 100, CDROM_CONFIG);
+      const res = await detach('/pve1/qemu/100', 'ide2', cookie);
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toEqual({ error: 'forbidden', missing: 'VM.Config.CDROM' });
+      expect(fakePve.configCalls).toHaveLength(0);
+    });
+
+    it('a disk slot still needs VM.Config.Disk: CDROM alone is refused, and the disk path is unchanged', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, CDROM_PRIVS);
+      fakePve.setGuestConfig('qemu', 100, { ...CDROM_CONFIG, scsi1: 'local-lvm:vm-100-disk-1,size=16G' });
+      const denied = await detach('/pve1/qemu/100', 'scsi1', cookie);
+      expect(denied.statusCode).toBe(403);
+      expect(denied.json()).toEqual({ error: 'forbidden', missing: 'VM.Config.Disk' });
+      expect(fakePve.configCalls).toHaveLength(0);
+
+      fakePve.setVmPermissions(100, GUEST_PRIVS);
+      fakePve.setGuestConfig('qemu', 100, {
+        scsi1: 'local-lvm:vm-100-disk-1,size=16G',
+        unused0: 'local-lvm:vm-100-disk-1',
+      });
+      const ok = await detach('/pve1/qemu/100', 'scsi1', cookie);
+      expect(ok.statusCode).toBe(200);
+      expect(ok.json()).toEqual({ ok: true, unusedSlot: 'unused0', pending: [] });
+      expect(fakePve.configCalls[0]!.body).toEqual({ delete: 'scsi1' });
+    });
+
+    it('refuses the cloud-init drive', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, { ...CDROM_PRIVS, ...GUEST_PRIVS });
+      fakePve.setGuestConfig('qemu', 100, { ide2: 'local-lvm:vm-100-cloudinit,media=cdrom,size=4M' });
+      const res = await detach('/pve1/qemu/100', 'ide2', cookie);
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: 'cloud-init-drive' });
+      expect(fakePve.configCalls).toHaveLength(0);
+    });
+
+    it('relays a PVE 4xx rejection and maps a PVE 5xx to pve-unreachable', async () => {
+      const cookie = await setupSession();
+      fakePve.setVmPermissions(100, CDROM_PRIVS);
+      fakePve.setGuestConfig('qemu', 100, CDROM_CONFIG);
+      fakePve.setConfigError('qemu', 100, 400, 'Parameter verification failed.', { delete: 'drive is locked' });
+      const rejected = await detach('/pve1/qemu/100', 'ide2', cookie);
+      expect(rejected.statusCode).toBe(400);
+      expect(rejected.json()).toEqual({
+        error: 'pve-rejected',
+        message: 'Parameter verification failed. delete: drive is locked',
+      });
+
+      fakePve.setConfigError('qemu', 100, 500, 'boom');
+      const down = await detach('/pve1/qemu/100', 'ide2', cookie);
+      expect(down.statusCode).toBe(502);
+      expect(down.json()).toEqual({ error: 'pve-unreachable' });
     });
   });
 

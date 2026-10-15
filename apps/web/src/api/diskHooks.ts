@@ -2,7 +2,14 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { toast } from 'sonner';
 
 import { CLUSTER_RESOURCES_QUERY_KEY } from '@/api/liveState';
-import { addDisk, detachDisk, getStorageFormats, removeUnusedDisk, type AddDiskBody } from '@/api/disks';
+import {
+  addDisk,
+  detachDisk,
+  getStorageFormats,
+  removeCdrom,
+  removeUnusedDisk,
+  type AddDiskBody,
+} from '@/api/disks';
 import type { GuestType } from '@/api/types';
 
 export interface GuestRef {
@@ -58,6 +65,23 @@ export function useDetachDisk() {
         result.unusedSlot !== undefined
           ? `${vars.slot} detached; kept as ${result.unusedSlot}`
           : `${vars.slot} detached`,
+      );
+      invalidateGuest(queryClient, vars);
+    },
+  });
+}
+
+/** Removes a CD/DVD drive (T75). The ISO stays on its storage; PVE may hold the removal back
+ * until the guest restarts, which the toast says. */
+export function useRemoveCdrom() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: DiskSlotVars) => removeCdrom(vars.node, vars.type, vars.vmid, vars.slot),
+    onSuccess: (result, vars) => {
+      toast.success(
+        result.pending.length > 0
+          ? `CD/DVD drive ${vars.slot} removed; restart the guest to apply`
+          : `CD/DVD drive ${vars.slot} removed`,
       );
       invalidateGuest(queryClient, vars);
     },
