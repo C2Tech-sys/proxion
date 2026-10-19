@@ -37,9 +37,12 @@ function isStorageType(type: string): type is StorageType {
   return (STORAGE_TYPES as readonly string[]).includes(type);
 }
 
-/** The cluster-wide status rows of one storage id (one per node it exists on). */
+/** The cluster-wide status rows of one storage id (one per node it exists on), by node name:
+ *  PVE's `/cluster/resources` order is not stable between polls. */
 function usageRows(resources: ClusterResource[] | undefined, storage: string): ClusterResource[] {
-  return (resources ?? []).filter((r) => r.type === 'storage' && r.storage === storage);
+  return (resources ?? [])
+    .filter((r) => r.type === 'storage' && r.storage === storage)
+    .sort((a, b) => a.node.localeCompare(b.node) || a.id.localeCompare(b.id));
 }
 
 function UsageCell({ rows }: { rows: ClusterResource[] }) {

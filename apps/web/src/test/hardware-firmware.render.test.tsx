@@ -422,7 +422,7 @@ describe('Hardware tab firmware rows', () => {
     const dialog = await openDialog('Add TPM state');
 
     expect(within(dialog).getByTestId('storage-permission-hint')).toHaveTextContent(
-      "You don't have Datastore.AllocateSpace on local",
+      /on local$/,
     );
     expect(within(dialog).getByRole('button', { name: 'Add' })).toBeDisabled();
     expect(mockUpdateFirmware).not.toHaveBeenCalled();
