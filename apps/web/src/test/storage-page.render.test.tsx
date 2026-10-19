@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 
 import { routeTree } from '@/routeTree.gen';
 import { createQueryClient } from '@/api/queryClient';
+import { resetFixtureStorageContent, setFixtureStorageContent } from '@/api/fixtures';
 
 /** Generous on purpose -- this is a route-level render test against fixture data (see
  *  guests-page.render.test.tsx for the same reasoning). */
@@ -78,5 +79,30 @@ describe('StoragePage (T28)', () => {
 
     await screen.findByText(/was not found/i, {}, { timeout: FIND_TIMEOUT_MS });
     expect(screen.getByRole('link', { name: /back to node/i })).toBeInTheDocument();
+  });
+});
+
+describe('StoragePage content-type chips (T76)', () => {
+  afterEach(() => {
+    resetFixtureStorageContent();
+  });
+
+  /** The "Content types" card's chips, in document order. */
+  async function contentTypeChips(): Promise<string[]> {
+    const label = await screen.findByText('Content types', {}, { timeout: FIND_TIMEOUT_MS });
+    const chips = label.nextElementSibling;
+    if (!chips) throw new Error('no chips container after the Content types label');
+    return Array.from(chips.children).map((c) => c.textContent ?? '');
+  }
+
+  it('shows the content types in PVE order whatever order the content string arrives in', async () => {
+    setFixtureStorageContent('pve1', 'local', 'backup,snippets,import,iso,vztmpl');
+    renderStorage('/storage/pve1/local');
+    expect(await contentTypeChips()).toStrictEqual(['vztmpl', 'iso', 'backup', 'snippets', 'import']);
+    cleanup();
+
+    setFixtureStorageContent('pve1', 'local', 'import,vztmpl,iso,snippets,backup');
+    renderStorage('/storage/pve1/local');
+    expect(await contentTypeChips()).toStrictEqual(['vztmpl', 'iso', 'backup', 'snippets', 'import']);
   });
 });

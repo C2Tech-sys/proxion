@@ -13,6 +13,7 @@ import { StorageActions } from '@/components/storage/StorageActions';
 import { useClusterResources } from '@/api/hooks';
 import { errorMessage } from '@/api/errors';
 import { formatBytes, formatPercent } from '@/lib/format';
+import { parseContentTypes } from '@/lib/contentTypes';
 import { sortStorages } from '@/lib/storageSort';
 import { DEFAULT_STORAGE_BROWSER_STATE, toStorageSearch, type StorageBrowserState } from '@/lib/storageList';
 
@@ -103,7 +104,7 @@ export function StoragePage() {
   const total = resource.maxdisk ?? 0;
   const avail = Math.max(0, total - used);
   const fraction = total ? used / total : 0;
-  const contentTypes = (resource.content ?? '').split(',').filter(Boolean);
+  const contentTypes = parseContentTypes(resource.content);
   // Cluster resources only ever report `status: 'available' | 'unknown'` for a storage (real PVE
   // has no separate "enabled" flag at this level) -- "active" reads directly off that.
   const isActive = resource.status === 'available';

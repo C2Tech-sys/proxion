@@ -2757,3 +2757,28 @@ export function removeFixtureCdrom(
   return 'ok';
 }
 // --- end T75 ---
+// --- T76 ---
+/** Checked-in `content` string of every storage row, captured once at module load, so
+ *  `resetFixtureStorageContent` can restore it. */
+const initialStorageContent = new Map(
+  resources.filter((r) => r.type === 'storage').map((r) => [r.id, r.content] as const),
+);
+
+/** Test-only (T76): rewrites one storage's cluster-resources `content` string in place -- e.g. to
+ *  `'backup,snippets,import,iso,vztmpl'`, the way PVE hands the types back in a different order
+ *  between polls. Returns false when no such storage row exists. */
+export function setFixtureStorageContent(node: string, storage: string, content: string): boolean {
+  const row = resources.find((r) => r.type === 'storage' && r.node === node && r.storage === storage);
+  if (!row) return false;
+  row.content = content;
+  return true;
+}
+
+/** Test-only (T76): puts every storage row's `content` string back to its checked-in value. */
+export function resetFixtureStorageContent(): void {
+  for (const row of resources) {
+    if (row.type !== 'storage' || !initialStorageContent.has(row.id)) continue;
+    row.content = initialStorageContent.get(row.id);
+  }
+}
+// --- end T76 ---
