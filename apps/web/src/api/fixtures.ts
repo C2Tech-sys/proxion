@@ -2782,3 +2782,57 @@ export function resetFixtureStorageContent(): void {
   }
 }
 // --- end T76 ---
+// --- T77 ---
+/** Key order of every guest's fixture config as checked in, captured once at module load, so
+ *  `resetFixtureGuestConfigKeys` can restore it. */
+const initialConfigKeyOrder = new Map(Object.entries(configs).map(([id, config]) => [id, Object.keys(config)]));
+
+/**
+ * Test/demo-only (T77): rebuilds one guest's fixture config with its keys inserted in a different
+ * order -- same keys, same values -- the way PVE's Perl hash order differs between requests.
+ * `'reverse'` flips the current key order and `'shuffle(7)'` applies a seeded (deterministic)
+ * Fisher-Yates shuffle. Returns false when the guest has no config; anything else throws.
+ */
+export function reorderFixtureGuestConfigKeys(
+  _node: string,
+  _type: GuestType,
+  vmid: number,
+  order: 'reverse' | `shuffle(${number})`,
+): boolean {
+  const id = String(vmid);
+  const config = configs[id];
+  if (!config) return false;
+  const keys = Object.keys(config);
+  if (order === 'reverse') {
+    keys.reverse();
+  } else {
+    const match = /^shuffle\((\d+)\)$/.exec(order);
+    if (!match) throw new Error(`unknown fixture order: ${order}`);
+    const random = seededRandom(Number(match[1]));
+    for (let i = keys.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      const a = keys[i] as string;
+      keys[i] = keys[j] as string;
+      keys[j] = a;
+    }
+  }
+  const next: GuestConfig = {};
+  for (const key of keys) next[key] = config[key];
+  configs[id] = next;
+  return true;
+}
+
+/** Test-only (T77): puts every guest's fixture config keys back in their checked-in order (keys
+ *  added since then keep their relative order after the original ones). Values are untouched. */
+export function resetFixtureGuestConfigKeys(): void {
+  for (const [id, config] of Object.entries(configs)) {
+    const original = initialConfigKeyOrder.get(id);
+    if (!original) continue;
+    const position = new Map(original.map((key, index) => [key, index]));
+    const rank = (key: string) => position.get(key) ?? Number.MAX_SAFE_INTEGER;
+    const next: GuestConfig = {};
+    for (const key of Object.keys(config).sort((a, b) => rank(a) - rank(b))) next[key] = config[key];
+    configs[id] = next;
+  }
+}
+// --- end T77 ---

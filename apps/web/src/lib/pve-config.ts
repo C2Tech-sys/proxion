@@ -59,8 +59,31 @@ export function parseNetString(key: string, raw: string): ParsedNic {
   };
 }
 
+/**
+ * Natural order for config keys: alphabetical prefix, then numeric index (`ide0, ide2, sata0,
+ * scsi0, scsi1, scsi10, virtio0`; `net0, net1, net10`). Proxmox returns a guest's config with its
+ * keys in Perl hash order, which differs between requests, so every list parsed from a config goes
+ * through this before it is rendered.
+ */
+export function compareConfigKeys(a: string, b: string): number {
+  const split = (key: string): [string, number] => {
+    const m = /^(.*?)(\d+)$/.exec(key);
+    return m ? [m[1] ?? '', Number(m[2])] : [key, -1];
+  };
+  const [prefixA, indexA] = split(a);
+  const [prefixB, indexB] = split(b);
+  if (prefixA !== prefixB) return prefixA < prefixB ? -1 : 1;
+  if (indexA !== indexB) return indexA - indexB;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** The config's entries in natural key order, independent of the order the JSON arrived in. */
+function sortedConfigEntries(config: GuestConfig): Array<[string, unknown]> {
+  return Object.entries(config).sort(([a], [b]) => compareConfigKeys(a, b));
+}
+
 export function getDisks(config: GuestConfig): ParsedDisk[] {
-  return Object.entries(config)
+  return sortedConfigEntries(config)
     .filter(([key]) => DISK_KEY.test(key))
     .map(([key, value]) => parseDiskString(key, String(value)));
 }
@@ -72,7 +95,7 @@ export function getRootfs(config: GuestConfig): ParsedDisk | null {
 }
 
 export function getNics(config: GuestConfig): ParsedNic[] {
-  return Object.entries(config)
+  return sortedConfigEntries(config)
     .filter(([key]) => NET_KEY.test(key))
     .map(([key, value]) => parseNetString(key, String(value)));
 }
@@ -201,7 +224,7 @@ export function parseMemory(raw: string | number | undefined): number | null {
 
 /** All `scsiN`/`virtioN`/`sataN`/`ideN`/`efidiskN`/`tpmstateN`/`unusedN`/`mpN` drives on a qemu or lxc config. */
 export function getDrives(config: GuestConfig): ParsedDrive[] {
-  return Object.entries(config)
+  return sortedConfigEntries(config)
     .filter(([key]) => DRIVE_KEY.test(key))
     .map(([key, value]) => parseDriveSpec(key, String(value)));
 }
@@ -215,7 +238,7 @@ export function getRootfsDrive(config: GuestConfig): ParsedDrive | null {
 
 /** All `netN` interfaces on a qemu or lxc config, with VLAN tag/rate limit included. */
 export function getNetSpecs(config: GuestConfig): ParsedNetSpec[] {
-  return Object.entries(config)
+  return sortedConfigEntries(config)
     .filter(([key]) => NET_SPEC_KEY.test(key))
     .map(([key, value]) => parseNetSpec(key, String(value)));
 }

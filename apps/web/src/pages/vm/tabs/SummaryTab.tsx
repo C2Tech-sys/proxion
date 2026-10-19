@@ -45,6 +45,7 @@ import {
   type ParsedDrive,
 } from '@/lib/pve-config';
 import { vmSeries } from '@/lib/rrd';
+import { sortStorages } from '@/lib/storageSort';
 import { cn } from '@/lib/utils';
 import { moveId, normaliseOrder, reorderByDrop } from '@/pages/vm/summaryLayout';
 import type { VmTabProps } from '@/pages/vm/tabs';
@@ -200,17 +201,20 @@ export function SummaryTab({ node, type, vmid }: VmTabProps) {
   // that needs a `useQueries` fan-out over every one of these storages' content, same as
   // BackupsTab.tsx does, which is several extra round trips duplicating that tab's own logic,
   // not a single cheap query -- so this panel sticks to the node task index alone.)
-  const backupStorages = (resources ?? []).filter(
-    (r) => r.type === 'storage' && r.node === node && r.content?.includes('backup'),
+  const backupStorages = sortStorages(
+    (resources ?? []).filter((r) => r.type === 'storage' && r.node === node && r.content?.includes('backup')),
+    'name',
+    'asc',
   );
 
   // "Related" links to each distinct storage/bridge once -- a VM with two disks on the same
   // storage (or two NICs on the same bridge, as pve1/100 has) previously listed that storage
   // or bridge link once per disk/NIC instead of once per object.
-  const relatedStorages = [...new Set(disks.map((d) => d.storage))];
-  const relatedBridges = [
-    ...new Set(nics.map((n) => n.bridge).filter((b): b is string => Boolean(b))),
-  ];
+  // Sorted by name: neither the resources order nor the config's key order is stable between polls.
+  const relatedStorages = [...new Set(disks.map((d) => d.storage))].sort((a, b) => a.localeCompare(b));
+  const relatedBridges = [...new Set(nics.map((n) => n.bridge).filter((b): b is string => Boolean(b)))].sort((a, b) =>
+    a.localeCompare(b),
+  );
 
   const notesAction =
     !isEditingNotes &&
