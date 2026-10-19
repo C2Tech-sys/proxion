@@ -56,6 +56,7 @@ export function NodeActionDialog({ node, command, onOpenChange }: NodeActionDial
     () =>
       (clusterResources.data ?? [])
         .filter((r) => (r.type === 'qemu' || r.type === 'lxc') && r.status === 'running' && r.node === node)
+        .sort((a, b) => (a.vmid ?? 0) - (b.vmid ?? 0))
         .map((r) => r.name ?? `#${r.vmid}`),
     [clusterResources.data, node],
   );

@@ -232,12 +232,14 @@ describe('Hardware tab disk lifecycle', () => {
     const dialog = await openDialog('Add disk');
 
     expect(within(dialog).getByLabelText('Bus')).toHaveValue('scsi');
-    expect(within(dialog).getByLabelText('Storage')).toHaveValue('local-lvm');
-    // Only image-capable storages of this node, with their free space (maxdisk - disk).
+    // The default is the alphabetically first eligible storage (T77): PVE's own order is not stable.
+    expect(within(dialog).getByLabelText('Storage')).toHaveValue('local');
+    // Only image-capable storages of this node, by name, with their free space (maxdisk - disk).
     expect(within(within(dialog).getByLabelText('Storage')).getAllByRole('option').map((o) => o.textContent)).toEqual([
-      'local-lvm (80.0 GiB free)',
       'local (150.0 GiB free)',
+      'local-lvm (80.0 GiB free)',
     ]);
+    fireEvent.change(within(dialog).getByLabelText('Storage'), { target: { value: 'local-lvm' } });
     expect(within(dialog).getByLabelText('Size (GiB)')).toHaveValue(32);
     expect(within(dialog).getByRole('checkbox', { name: 'Include in backup' })).toBeChecked();
     // local-lvm is raw-only: no format choice, just the fixed format.
@@ -299,6 +301,8 @@ describe('Hardware tab disk lifecycle', () => {
     mockGetStorageFormats.mockResolvedValue({ 'local-lvm': { formats: ['raw', 'qcow2'], default: 'raw' } });
     renderTab();
     const dialog = await openDialog('Add disk');
+    // 'local' now sorts (and defaults) first; pick the storage the mocked format list is for.
+    fireEvent.change(within(dialog).getByLabelText('Storage'), { target: { value: 'local-lvm' } });
     const format = await within(dialog).findByLabelText('Format');
     expect(within(format).getAllByRole('option').map((o) => o.textContent)).toEqual(['Default (raw)', 'raw', 'qcow2']);
 
@@ -480,9 +484,9 @@ describe('Hardware tab disk lifecycle', () => {
     fireEvent.change(within(dialog).getByLabelText('Size (GiB)'), { target: { value: '12' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
     const newRow = (await screen.findByText('Hard Disk (scsi2)')).closest('tr')!;
-    expect(within(newRow).getByTestId('volume-id')).toHaveTextContent('local-lvm:vm-100-disk-5');
+    expect(within(newRow).getByTestId('volume-id')).toHaveTextContent('local:vm-100-disk-5');
     expect(within(newRow).getByText(/12\.0 GiB/)).toBeInTheDocument();
-    expect(getFixtureGuestConfig(100)?.scsi2).toBe('local-lvm:vm-100-disk-5,size=12G');
+    expect(getFixtureGuestConfig(100)?.scsi2).toBe('local:vm-100-disk-5,size=12G');
 
     // detach
     const detach = await openDialog('Detach scsi1', 'alertdialog');

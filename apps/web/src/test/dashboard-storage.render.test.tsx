@@ -229,3 +229,33 @@ describe('Dashboard Storage panel: content-type badges (T76)', () => {
     expect(await contentBadges('local (pve1)')).toStrictEqual(['vztmpl', 'iso', 'backup', 'snippets', 'import']);
   });
 });
+
+describe('Dashboard Nodes table order (T77)', () => {
+  beforeEach(() => {
+    resetFixtureClusterResources();
+  });
+
+  afterEach(() => {
+    cleanup();
+    resetFixtureClusterResources();
+  });
+
+  /** The "Cluster nodes" table's node links, top to bottom. */
+  async function renderedNodes(): Promise<string[]> {
+    const heading = await screen.findByRole('heading', { name: 'Cluster nodes' }, { timeout: FIND_TIMEOUT_MS });
+    const panel = heading.closest('section') as HTMLElement;
+    return within(panel)
+      .getAllByRole('link')
+      .map((a) => a.textContent ?? '');
+  }
+
+  it('lists nodes by name (pve1, pve2) whichever order the resources arrive in', async () => {
+    renderDashboard();
+    expect(await renderedNodes()).toStrictEqual(['pve1', 'pve2']);
+    cleanup();
+
+    reorderFixtureClusterResources('reverse');
+    renderDashboard();
+    expect(await renderedNodes()).toStrictEqual(['pve1', 'pve2']);
+  });
+});

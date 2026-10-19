@@ -295,6 +295,63 @@ describe('Clone… gating and dialog', () => {
   });
 });
 
+describe('Clone…: node and storage order (T77)', () => {
+  beforeEach(() => {
+    if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false;
+    if (!Element.prototype.setPointerCapture) Element.prototype.setPointerCapture = () => {};
+    if (!Element.prototype.releasePointerCapture) Element.prototype.releasePointerCapture = () => {};
+    if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
+    mockUseAuthMe.mockReturnValue(authData('session'));
+    mockUsePermissions.mockReturnValue(permissionsData(true));
+    mockUseSnapshots.mockReturnValue({ data: [] });
+    mockGetCloneNextId.mockResolvedValue(101);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const nodeRow = (node: string): ClusterResource => ({ id: `node/${node}`, type: 'node', node, status: 'online' });
+  const storageRow = (storage: string): ClusterResource => ({
+    id: `storage/pve1/${storage}`,
+    type: 'storage',
+    node: 'pve1',
+    status: 'available',
+    storage,
+    content: 'images,rootdir',
+  });
+
+  // Same resources, two arrival orders: PVE's order is not stable between polls, so the dialog's
+  // selects must list nodes and storages by name either way.
+  const ARRIVALS: Array<[string, { nodes: string[]; storages: string[] }]> = [
+    ['pve3, pve1, pve2 / tank, local-zfs, nfs-vm', { nodes: ['pve3', 'pve1', 'pve2'], storages: ['tank', 'local-zfs', 'nfs-vm'] }],
+    ['pve2, pve3, pve1 / nfs-vm, tank, local-zfs', { nodes: ['pve2', 'pve3', 'pve1'], storages: ['nfs-vm', 'tank', 'local-zfs'] }],
+  ];
+
+  it.each(ARRIVALS)('lists target nodes and target storages in name order when they arrive as %s', async (_label, arrival) => {
+    mockUseClusterResources.mockReturnValue({
+      data: [...arrival.nodes.map(nodeRow), ...arrival.storages.map(storageRow), sourceRow(false)],
+    });
+
+    renderHeader();
+    const dialog = await openCloneDialog();
+    await within(dialog).findByLabelText('New VMID');
+
+    fireEvent.click(within(dialog).getByRole('combobox', { name: 'Target node' }));
+    expect((await screen.findAllByRole('option')).map((o) => o.textContent)).toStrictEqual(['pve1', 'pve2', 'pve3']);
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull());
+    fireEvent.click(within(dialog).getByRole('combobox', { name: 'Target storage' }));
+    expect((await screen.findAllByRole('option')).map((o) => o.textContent)).toStrictEqual([
+      'Same as source',
+      'local-zfs',
+      'nfs-vm',
+      'tank',
+    ]);
+  });
+});
+
 describe('Clone…: fixture mode', () => {
   afterEach(() => {
     vi.clearAllMocks();

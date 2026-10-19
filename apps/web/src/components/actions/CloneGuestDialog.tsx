@@ -87,7 +87,13 @@ export function CloneGuestDialog({ open, onOpenChange, node, type, vmid, name, s
 
   const [full, setFull] = useState(true);
 
-  const nodeRows = useMemo(() => (clusterResources.data ?? []).filter((r) => r.type === 'node'), [clusterResources.data]);
+  const nodeRows = useMemo(
+    () =>
+      (clusterResources.data ?? [])
+        .filter((r) => r.type === 'node')
+        .sort((a, b) => a.node.localeCompare(b.node) || a.id.localeCompare(b.id)),
+    [clusterResources.data],
+  );
   const [targetOverride, setTargetOverride] = useState<string | undefined>(undefined);
   const target = targetOverride ?? node;
 
@@ -101,7 +107,8 @@ export function CloneGuestDialog({ open, onOpenChange, node, type, vmid, name, s
             r.content?.includes(type === 'qemu' ? 'images' : 'rootdir'),
         )
         .map((r) => r.storage)
-        .filter((s): s is string => Boolean(s)),
+        .filter((s): s is string => Boolean(s))
+        .sort((a, b) => a.localeCompare(b)),
     [clusterResources.data, target, type],
   );
   const [storageOverride, setStorageOverride] = useState(SAME_AS_SOURCE);

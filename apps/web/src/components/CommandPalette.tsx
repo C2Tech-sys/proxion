@@ -30,11 +30,17 @@ export function CommandPalette() {
   const navigate = useNavigate();
 
   const items = useMemo(() => toSearchItems(resources ?? []), [resources]);
+  // Each group is sorted (nodes and storages by name, guests by VMID): the resources order is not
+  // stable between polls, and cmdk lists items in DOM order until the user types.
   const grouped = useMemo(
     () => ({
-      node: items.filter((i) => i.kind === 'node'),
-      guest: items.filter((i) => i.kind === 'guest'),
-      storage: items.filter((i) => i.kind === 'storage'),
+      node: items.filter((i) => i.kind === 'node').sort((a, b) => a.label.localeCompare(b.label)),
+      guest: items
+        .filter((i) => i.kind === 'guest')
+        .sort((a, b) => (a.vmid ?? 0) - (b.vmid ?? 0) || a.node.localeCompare(b.node)),
+      storage: items
+        .filter((i) => i.kind === 'storage')
+        .sort((a, b) => a.label.localeCompare(b.label) || a.node.localeCompare(b.node)),
     }),
     [items],
   );

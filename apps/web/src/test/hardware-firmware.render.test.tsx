@@ -260,7 +260,7 @@ describe('Hardware tab firmware rows', () => {
 
     const section = within(dialog).getByTestId('bios-efi-section');
     expect(within(section).getByRole('checkbox', { name: 'Add EFI disk' })).toBeChecked();
-    expect(within(section).getByLabelText('Storage')).toHaveValue('local-lvm');
+    expect(within(section).getByLabelText('Storage')).toHaveValue('local');
     expect(within(section).getByRole('checkbox', { name: 'Pre-enrolled keys' })).toBeChecked();
     expect(
       within(section).getByText(
@@ -273,7 +273,7 @@ describe('Hardware tab firmware rows', () => {
     expect(mockUpdateFirmware.mock.calls[0]!.slice(0, 2)).toEqual(['pve1', 101]);
     expect(mockUpdateFirmware.mock.calls[0]![2]).toStrictEqual({
       bios: 'ovmf',
-      efidisk: { storage: 'local-lvm', efitype: '4m', preEnrolledKeys: true },
+      efidisk: { storage: 'local', efitype: '4m', preEnrolledKeys: true },
     });
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
@@ -402,7 +402,7 @@ describe('Hardware tab firmware rows', () => {
     await waitFor(() => expect(mockUpdateFirmware).toHaveBeenCalledTimes(1));
     expect(mockUpdateFirmware.mock.calls[0]!.slice(0, 2)).toEqual(['pve1', 101]);
     expect(mockUpdateFirmware.mock.calls[0]![2]).toStrictEqual({
-      tpmstate: { storage: 'local-lvm', version: 'v2.0' },
+      tpmstate: { storage: 'local', version: 'v2.0' },
     });
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 
@@ -422,7 +422,7 @@ describe('Hardware tab firmware rows', () => {
     const dialog = await openDialog('Add TPM state');
 
     expect(within(dialog).getByTestId('storage-permission-hint')).toHaveTextContent(
-      "You don't have Datastore.AllocateSpace on local-lvm",
+      /on local$/,
     );
     expect(within(dialog).getByRole('button', { name: 'Add' })).toBeDisabled();
     expect(mockUpdateFirmware).not.toHaveBeenCalled();
@@ -445,7 +445,7 @@ describe('Hardware tab firmware rows', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(await screen.findByText('EFI Disk')).toBeInTheDocument();
-    expect(getFixtureGuestConfig(101)?.efidisk0).toMatch(/^local-lvm:vm-101-disk-8,efitype=4m,pre-enrolled-keys=1/);
+    expect(getFixtureGuestConfig(101)?.efidisk0).toMatch(/^local:vm-101-disk-8,efitype=4m,pre-enrolled-keys=1/);
     const banner = await screen.findByTestId('hardware-pending-banner');
     expect(banner).toHaveTextContent('efidisk0');
     // The action goes away once the guest has the disk.

@@ -124,9 +124,16 @@ function renderTab({
   vmid = 100,
   guestResource = GUEST_RESOURCE,
   storageResource = STORAGE_RESOURCE,
-}: { vmid?: number; guestResource?: ClusterResource | null; storageResource?: ClusterResource | null } = {}) {
+  extraResources = [],
+}: {
+  vmid?: number;
+  guestResource?: ClusterResource | null;
+  storageResource?: ClusterResource | null;
+  /** Further cluster-resource rows, appended after the storage and guest rows (T77). */
+  extraResources?: ClusterResource[];
+} = {}) {
   mockUseClusterResources.mockReturnValue({
-    data: [storageResource, guestResource].filter((r): r is ClusterResource => r !== null),
+    data: [storageResource, guestResource, ...extraResources].filter((r): r is ClusterResource => r !== null),
   });
 
   const rootRoute = createRootRoute({ component: () => <Outlet /> });
@@ -373,5 +380,55 @@ describe('BackupsTab: fixture mode', () => {
 
     const expectedPrefix = `${storage}:backup/vzdump-qemu-${vmid}-`;
     await screen.findByText((content) => content.startsWith(expectedPrefix));
+  });
+});
+
+describe('BackupsTab: backup storage order (T77)', () => {
+  beforeEach(() => {
+    stubFetch();
+    mockGetStorageContent.mockResolvedValue([]);
+    mockUseAuthMe.mockReturnValue(authData('session'));
+    mockUsePermissions.mockReturnValue(permissionsData(true));
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const storageRow = (storage: string): ClusterResource => ({
+    id: `storage/pve1/${storage}`,
+    type: 'storage',
+    node: 'pve1',
+    status: 'available',
+    storage,
+    content: 'backup',
+  });
+
+  // The backup storages arrive in two different orders; the "Backup now" storage list (and so its
+  // default) and the per-storage content queries follow the sorted order, not PVE's.
+  it.each([
+    ['nfs-backups, tank-backups, local-bk', ['nfs-backups', 'tank-backups', 'local-bk']],
+    ['local-bk, tank-backups, nfs-backups', ['local-bk', 'tank-backups', 'nfs-backups']],
+  ])('lists the storages in name order when they arrive as %s', async (_label, arrival) => {
+    if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false;
+    if (!Element.prototype.setPointerCapture) Element.prototype.setPointerCapture = () => {};
+    if (!Element.prototype.releasePointerCapture) Element.prototype.releasePointerCapture = () => {};
+    if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
+
+    const [first, ...rest] = arrival.map(storageRow) as [ClusterResource, ...ClusterResource[]];
+    renderTab({ storageResource: first, extraResources: rest });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Backup now/ }));
+    const dialog = await screen.findByRole('dialog');
+    const picker = within(dialog).getByRole('combobox', { name: 'Storage' });
+    // The default choice is the first by name, whatever PVE listed first.
+    expect(picker).toHaveTextContent('local-bk');
+    fireEvent.click(picker);
+    const options = (await screen.findAllByRole('option')).map((o) => o.textContent);
+    expect(options).toStrictEqual(['local-bk', 'nfs-backups', 'tank-backups']);
+    // One content query per storage, issued in the same sorted order.
+    await waitFor(() => expect(mockGetStorageContent).toHaveBeenCalledTimes(3));
+    expect(mockGetStorageContent.mock.calls.map((c) => c[1])).toStrictEqual(['local-bk', 'nfs-backups', 'tank-backups']);
   });
 });

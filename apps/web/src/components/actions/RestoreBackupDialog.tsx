@@ -82,7 +82,8 @@ export function RestoreBackupDialog({ open, onOpenChange, node, type, vmid, item
             (r.content?.includes('backup') || r.content?.includes('images')),
         )
         .map((r) => r.storage)
-        .filter((s): s is string => Boolean(s)),
+        .filter((s): s is string => Boolean(s))
+        .sort((a, b) => a.localeCompare(b)),
     [clusterResources.data, node],
   );
 

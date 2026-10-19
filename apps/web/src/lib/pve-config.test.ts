@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  compareConfigKeys,
   cpuHasExtraOptions,
+  getDisks,
+  getNics,
   gibToResizeSize,
   isMountableIsoVolid,
   parseCpuModel,
@@ -641,5 +644,71 @@ describe('device config parsing (T55)', () => {
     expect(isValidDeviceMapping('0gpu')).toBe(false);
     expect(isValidMdevType('i915-GVTg_V5_4')).toBe(true);
     expect(isValidMdevType('a b')).toBe(false);
+  });
+});
+
+describe('natural config key order (T77)', () => {
+  // PVE returns a guest's config in Perl hash order, which differs between requests -- these
+  // build the same config with its keys inserted forwards and in reverse and expect one answer.
+  const entries: Array<[string, string | number]> = [
+    ['virtio0', 'tank:vm-100-disk-6,size=1G'],
+    ['scsi10', 'tank:vm-100-disk-5,size=1G'],
+    ['scsi9', 'local-zfs:vm-100-disk-4,size=1G'],
+    ['scsi1', 'tank:vm-100-disk-1,size=1G'],
+    ['scsi0', 'tank:vm-100-disk-0,size=1G'],
+    ['sata0', 'tank:vm-100-disk-3,size=1G'],
+    ['ide2', 'local:iso/x.iso,media=cdrom'],
+    ['ide0', 'tank:vm-100-disk-2,size=1G'],
+    ['efidisk0', 'tank:vm-100-disk-7,efitype=4m'],
+    ['tpmstate0', 'tank:vm-100-disk-8,version=v2.0'],
+    ['unused0', 'tank:vm-100-disk-9'],
+    ['mp10', 'tank:subvol-100-disk-1,mp=/b'],
+    ['mp1', 'tank:subvol-100-disk-2,mp=/a'],
+    ['mp0', 'tank:subvol-100-disk-3,mp=/c'],
+    ['net10', 'virtio=AA:BB:CC:DD:EE:0A,bridge=vmbr2'],
+    ['net2', 'virtio=AA:BB:CC:DD:EE:02,bridge=vmbr1'],
+    ['net0', 'virtio=AA:BB:CC:DD:EE:00,bridge=vmbr0'],
+    ['cores', 4],
+    ['scsihw', 'virtio-scsi-single'],
+  ];
+  const forwards: GuestConfig = Object.fromEntries(entries);
+  const backwards: GuestConfig = Object.fromEntries([...entries].reverse());
+  const keysOf = (rows: Array<{ key: string }>) => rows.map((r) => r.key);
+
+  it('compareConfigKeys orders by alphabetical prefix, then numeric index (scsi10 after scsi9)', () => {
+    expect(
+      ['virtio0', 'scsi10', 'scsi9', 'net1', 'ide2', 'scsi1', 'net10', 'sata0', 'scsi0', 'ide0', 'net2']
+        .sort(compareConfigKeys),
+    ).toStrictEqual(['ide0', 'ide2', 'net1', 'net2', 'net10', 'sata0', 'scsi0', 'scsi1', 'scsi9', 'scsi10', 'virtio0']);
+  });
+
+  it('getDisks returns ide, sata, scsi, virtio in natural order whatever the key order', () => {
+    const expected = ['ide0', 'ide2', 'sata0', 'scsi0', 'scsi1', 'scsi9', 'scsi10', 'virtio0'];
+    expect(keysOf(getDisks(forwards))).toStrictEqual(expected);
+    expect(keysOf(getDisks(backwards))).toStrictEqual(expected);
+  });
+
+  it('getDrives returns every drive-like key in natural order (efidisk, ide, mp, sata, scsi, tpmstate, unused, virtio)', () => {
+    const expected = [
+      'efidisk0', 'ide0', 'ide2', 'mp0', 'mp1', 'mp10', 'sata0',
+      'scsi0', 'scsi1', 'scsi9', 'scsi10', 'tpmstate0', 'unused0', 'virtio0',
+    ];
+    expect(keysOf(getDrives(forwards))).toStrictEqual(expected);
+    expect(keysOf(getDrives(backwards))).toStrictEqual(expected);
+  });
+
+  it('getNics and getNetSpecs return net0, net2, net10 whatever the key order', () => {
+    const expected = ['net0', 'net2', 'net10'];
+    expect(keysOf(getNics(forwards))).toStrictEqual(expected);
+    expect(keysOf(getNics(backwards))).toStrictEqual(expected);
+    expect(keysOf(getNetSpecs(forwards))).toStrictEqual(expected);
+    expect(keysOf(getNetSpecs(backwards))).toStrictEqual(expected);
+  });
+
+  it('two insertion orders of the same config produce identical parsed output', () => {
+    expect(getDisks(backwards)).toStrictEqual(getDisks(forwards));
+    expect(getNics(backwards)).toStrictEqual(getNics(forwards));
+    expect(getDrives(backwards)).toStrictEqual(getDrives(forwards));
+    expect(getNetSpecs(backwards)).toStrictEqual(getNetSpecs(forwards));
   });
 });

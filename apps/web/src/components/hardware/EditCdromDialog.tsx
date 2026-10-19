@@ -76,7 +76,8 @@ export function EditCdromDialog({ open, onOpenChange, node, type, vmid, slot, cu
             r.storage !== undefined &&
             (r.content ?? '').split(',').includes('iso'),
         )
-        .map((r) => r.storage as string),
+        .map((r) => r.storage as string)
+        .sort((a, b) => a.localeCompare(b)),
     [resources.data, node],
   );
 

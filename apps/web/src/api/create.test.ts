@@ -75,6 +75,19 @@ describe('parseNodeStorageRows', () => {
     ]);
     expect(parseNodeStorageRows(null)).toEqual([]);
   });
+
+  it('sorts by storage name, identically for two input orders (T77)', () => {
+    const rows = [
+      { storage: 'tank', type: 'zfspool', avail: 30 },
+      { storage: 'nfs-vm', type: 'nfs', avail: 20 },
+      { storage: 'local-zfs', type: 'zfspool', avail: 10 },
+      { storage: 'local', type: 'dir', avail: 40 },
+    ];
+    const expected = ['local', 'local-zfs', 'nfs-vm', 'tank'];
+    expect(parseNodeStorageRows(rows).map((s) => s.id)).toStrictEqual(expected);
+    expect(parseNodeStorageRows([...rows].reverse()).map((s) => s.id)).toStrictEqual(expected);
+    expect(parseNodeStorageRows([...rows].reverse())).toStrictEqual(parseNodeStorageRows(rows));
+  });
 });
 
 describe('nodesFromResources', () => {

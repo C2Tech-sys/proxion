@@ -5,7 +5,13 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { StorageConfigTab } from '@/pages/datacenter/tabs/StorageConfigTab';
 import { createQueryClient } from '@/api/queryClient';
 import { GuestActionError } from '@/api/actions';
-import { FIXTURE_STORAGE_SCAN, getFixtureStorageConfigs, resetFixtureStorageConfigs } from '@/api/fixtures';
+import {
+  FIXTURE_STORAGE_SCAN,
+  getFixtureStorageConfigs,
+  reorderFixtureClusterResources,
+  resetFixtureClusterResources,
+  resetFixtureStorageConfigs,
+} from '@/api/fixtures';
 import type { AuthIdentity } from '@/api/client-types';
 import type { GuestPermissions } from '@/api/actionHooks';
 
@@ -139,6 +145,7 @@ describe('Datacenter Storage tab', () => {
   afterEach(() => {
     state.fixtures = false;
     resetFixtureStorageConfigs();
+    resetFixtureClusterResources();
     vi.clearAllMocks();
   });
 
@@ -173,6 +180,18 @@ describe('Datacenter Storage tab', () => {
     const zfs = screen.getByTestId('storage-row-local-zfs');
     expect(within(zfs).getAllByRole('cell')[6]).toHaveTextContent('pve1');
     expect(within(screen.getByTestId('storage-row-pbs-main')).getAllByRole('cell')[3]).toHaveTextContent('pbs.lan:main');
+  });
+
+  it('(a2) the per-node usage bars of a shared storage stay in node order when the resources arrive reversed (T77)', async () => {
+    reorderFixtureClusterResources('reverse');
+    renderTab();
+
+    await screen.findByTestId('storage-row-local');
+    // `local` exists on pve1 and pve2; the bars read pve1 then pve2 whichever order PVE lists them.
+    await waitFor(() => {
+      const usage = within(screen.getByTestId('storage-row-local')).getAllByRole('cell')[7];
+      expect(usage).toHaveTextContent(/pve1 .* \/ .*pve2 .* \/ /);
+    });
   });
 
   it('(b) token mode: Add, Edit and Remove are disabled with the read-only tooltip', async () => {

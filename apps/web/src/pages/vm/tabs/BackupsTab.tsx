@@ -22,6 +22,7 @@ import { usePermissions, type GuestPermissions } from '@/api/actionHooks';
 import { api, USE_FIXTURES } from '@/api/client';
 import { errorMessage } from '@/api/errors';
 import { formatBytes, formatDateTime } from '@/lib/format';
+import { sortStorages } from '@/lib/storageSort';
 import type { VmTabProps } from '@/pages/vm/tabs';
 import type { BackupContentItem, StorageContentItem } from '@/api/types';
 
@@ -63,8 +64,11 @@ export function BackupsTab({ node, type, vmid }: VmTabProps) {
   const auth = useAuthMe();
   const permissions = usePermissions(vmid);
 
-  const backupStorages = (resources ?? [])
-    .filter((r) => r.type === 'storage' && r.node === node && r.content?.includes('backup'))
+  const backupStorages = sortStorages(
+    (resources ?? []).filter((r) => r.type === 'storage' && r.node === node && r.content?.includes('backup')),
+    'name',
+    'asc',
+  )
     .map((r) => r.storage)
     .filter((s): s is string => Boolean(s));
 

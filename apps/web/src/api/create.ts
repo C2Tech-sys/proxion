@@ -56,7 +56,7 @@ export function parseStorageMedia(data: unknown, content: 'iso' | 'vztmpl'): Sto
 }
 
 /** Reads `GET /nodes/{node}/storage?content=...` rows (`storage`, `type`, `avail`) into the same
- * shape `storagesWithContent` produces from the cluster resources. */
+ * shape `storagesWithContent` produces from the cluster resources, sorted by storage name. */
 export function parseNodeStorageRows(data: unknown): DiskStorage[] {
   if (!Array.isArray(data)) return [];
   const out: DiskStorage[] = [];
@@ -68,7 +68,9 @@ export function parseNodeStorageRows(data: unknown): DiskStorage[] {
       freeBytes: typeof row.avail === 'number' ? Math.max(0, row.avail) : undefined,
     });
   }
-  return out;
+  // By name (tie on id), like `storagesWithContent`: PVE's row order is not stable between polls,
+  // and the pickers' "first eligible" default follows this list.
+  return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The cluster's nodes, name-sorted, from the cluster resources. */

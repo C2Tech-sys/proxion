@@ -47,7 +47,10 @@ function StatBody({ icon: Icon, primary, secondary }: { icon: typeof Server; pri
 }
 
 function NodesPanel({ resources }: { resources: ClusterResource[] }) {
-  const nodeRows = resources.filter((r) => r.type === 'node');
+  // Sorted by node name: PVE's `/cluster/resources` order is not stable between polls.
+  const nodeRows = resources
+    .filter((r) => r.type === 'node')
+    .sort((a, b) => a.node.localeCompare(b.node) || a.id.localeCompare(b.id));
   const nodeNames = nodeRows.map((r) => r.node);
   const statusResults = useQueries({
     queries: nodeNames.map((n) => ({

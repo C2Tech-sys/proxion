@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { diskCapableStorages, getStorageFormats, inferStorageFormats } from '@/api/disks';
+import { diskCapableStorages, getStorageFormats, inferStorageFormats, storagesWithContent } from '@/api/disks';
 import type { ClusterResource } from '@/api/types';
 
 // Real mode: the fixture branch of each function is covered by the Hardware tab's render tests.
@@ -76,5 +76,24 @@ describe('diskCapableStorages', () => {
   it('reports free bytes as maxdisk - disk when both are known', () => {
     expect(diskCapableStorages(rows, 'pve1', 'qemu')[0]?.freeBytes).toBe(90);
     expect(diskCapableStorages(rows, 'pve1', 'lxc')[0]?.freeBytes).toBeUndefined();
+  });
+
+  it('lists storages by name, identically for two input orders (T77)', () => {
+    const images = (id: string): ClusterResource => ({
+      id: `storage/pve1/${id}`,
+      type: 'storage',
+      node: 'pve1',
+      status: 'available',
+      storage: id,
+      content: 'images,iso',
+    });
+    const forwards = ['tank', 'nfs-vm', 'local-zfs'].map(images);
+    const expected = ['local-zfs', 'nfs-vm', 'tank'];
+    expect(diskCapableStorages(forwards, 'pve1', 'qemu').map((s) => s.id)).toStrictEqual(expected);
+    expect(diskCapableStorages([...forwards].reverse(), 'pve1', 'qemu').map((s) => s.id)).toStrictEqual(expected);
+    expect(diskCapableStorages([...forwards].reverse(), 'pve1', 'qemu')).toStrictEqual(
+      diskCapableStorages(forwards, 'pve1', 'qemu'),
+    );
+    expect(storagesWithContent([...forwards].reverse(), 'pve1', 'iso').map((s) => s.id)).toStrictEqual(expected);
   });
 });
