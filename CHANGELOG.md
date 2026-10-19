@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Storage content-type chips on the storage page, the node Storage tab and the dashboard no longer
+  reorder between refreshes; they follow PVE's own content order (images, rootdir, vztmpl, iso,
+  backup, snippets, import).
+
 ## [0.13.1] - 2026-10-15
 
 ### Added

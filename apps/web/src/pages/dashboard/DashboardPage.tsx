@@ -18,6 +18,7 @@ import { useClusterResources, useTasks } from '@/api/hooks';
 import { usePrefs, useStorageSort } from '@/api/prefsHooks';
 import { api } from '@/api/client';
 import { computeClusterTotals, recentTasks, topConsumersByCpu, topConsumersByMemory } from '@/lib/dashboard';
+import { parseContentTypes } from '@/lib/contentTypes';
 import { formatBytes, formatDateTime, formatDuration, formatPercent, formatUptime } from '@/lib/format';
 import { APP_NAME } from '@/lib/app';
 import { sortStorages, STORAGE_SORT_KEYS, type StorageSortKey } from '@/lib/storageSort';
@@ -206,7 +207,7 @@ function StoragePanel({ resources }: { resources: ClusterResource[] }) {
           {storages.map((s) => {
             const used = s.disk ?? 0;
             const total = s.maxdisk ?? 0;
-            const contentTypes = (s.content ?? '').split(',').filter(Boolean);
+            const contentTypes = parseContentTypes(s.content);
             return (
               <li key={s.id} className="flex flex-col gap-1">
                 <div className="flex items-center justify-between gap-2">

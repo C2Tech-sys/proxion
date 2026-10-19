@@ -11,6 +11,7 @@ import { StorageContentBrowser } from '@/components/storage/StorageContentBrowse
 import { useClusterResources } from '@/api/hooks';
 import { useStorageSort } from '@/api/prefsHooks';
 import { errorMessage } from '@/api/errors';
+import { parseContentTypes } from '@/lib/contentTypes';
 import { formatBytes } from '@/lib/format';
 import { sortStorages, type SortDir, type StorageSortKey } from '@/lib/storageSort';
 import { cn } from '@/lib/utils';
@@ -111,7 +112,7 @@ export function StorageTab({ node }: NodeTabProps) {
             const used = s.disk ?? 0;
             const total = s.maxdisk ?? 0;
             const avail = Math.max(0, total - used);
-            const contentTypes = (s.content ?? '').split(',').filter(Boolean);
+            const contentTypes = parseContentTypes(s.content);
             return (
               <Fragment key={s.id}>
                 <TableRow className="cursor-pointer" onClick={() => setExpanded(isOpen ? null : name)}>

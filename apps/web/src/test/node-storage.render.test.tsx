@@ -1,12 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 
 import { routeTree } from '@/routeTree.gen';
 import { createQueryClient } from '@/api/queryClient';
 import { CLUSTER_RESOURCES_QUERY_KEY } from '@/api/liveState';
-import { reorderFixtureClusterResources, resetFixtureClusterResources } from '@/api/fixtures';
+import {
+  reorderFixtureClusterResources,
+  resetFixtureClusterResources,
+  resetFixtureStorageContent,
+  setFixtureStorageContent,
+} from '@/api/fixtures';
 import { PREFS_DEFAULTS, type PrefsPatch, type PrefsResponse, type UserPrefs } from '@/api/prefs';
 import { PREFS_QUERY_KEY } from '@/api/prefsHooks';
 import type { ClusterResource } from '@/api/types';
@@ -217,5 +222,35 @@ describe('Node Storage tab: stationary + sortable (T74)', () => {
     await waitFor(async () => expect(await storageNames()).toStrictEqual(TYPE_ASC));
     expect(colHead('Type')).toHaveAttribute('aria-sort', 'ascending');
     expect(patchPrefsMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('Node Storage tab: content-type chips (T76)', () => {
+  beforeEach(() => {
+    resetFixtureClusterResources();
+    prefsState = { ...PREFS_DEFAULTS };
+    readOnlyPrefs = false;
+  });
+
+  afterEach(() => {
+    resetFixtureStorageContent();
+  });
+
+  /** The Content column's chips for one storage row, in document order. */
+  async function contentChips(storage: string): Promise<string[]> {
+    const row = (await bodyRows()).find((r) => r.querySelector('a')?.textContent === storage);
+    if (!row) throw new Error(`no ${storage} row`);
+    return Array.from(row.cells[3]?.querySelectorAll('.tag-chip') ?? []).map((c) => c.textContent ?? '');
+  }
+
+  it('shows the content types in PVE order whatever order the content string arrives in', async () => {
+    setFixtureStorageContent('pve1', 'local', 'backup,snippets,import,iso,vztmpl');
+    renderNodeStorage();
+    expect(await contentChips('local')).toStrictEqual(['vztmpl', 'iso', 'backup', 'snippets', 'import']);
+    cleanup();
+
+    setFixtureStorageContent('pve1', 'local', 'import,vztmpl,iso,snippets,backup');
+    renderNodeStorage();
+    expect(await contentChips('local')).toStrictEqual(['vztmpl', 'iso', 'backup', 'snippets', 'import']);
   });
 });
