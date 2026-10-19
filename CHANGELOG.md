@@ -13,7 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   node list and every list parsed from a guest's config (disks, drives, network devices) now render
   in a fixed order instead of the order Proxmox happens to return. The same fix covers the storage
   pickers in the Clone, Restore and Edit CD/DVD dialogs, the node power dialog's running-guest
-  list and the command palette's groups.
+  list and the command palette's groups. The storage pickers in Add disk, Add CD/DVD, Add EFI
+  disk / TPM state and the VM and container create wizards now list storages by name, and their
+  default is the alphabetically first eligible storage.
 
 ## [0.13.2] - 2026-10-19
 

@@ -427,17 +427,20 @@ export function storagesWithContent(
   node: string,
   content: StorageContentKind,
 ): DiskStorage[] {
-  const out: DiskStorage[] = [];
+  const rows: Array<ClusterResource & { storage: string }> = [];
   for (const r of resources ?? []) {
     if (r.type !== 'storage' || r.node !== node || r.storage === undefined) continue;
     if (!(r.content ?? '').split(',').includes(content)) continue;
-    out.push({
-      id: r.storage,
-      plugintype: r.plugintype,
-      freeBytes: r.maxdisk !== undefined && r.disk !== undefined ? Math.max(0, r.maxdisk - r.disk) : undefined,
-    });
+    rows.push({ ...r, storage: r.storage });
   }
-  return out;
+  // By storage name (then node, then id): `/cluster/resources` order is not stable between polls,
+  // and the pickers built on this (and their "first eligible" default) must not jump around.
+  rows.sort((a, b) => a.storage.localeCompare(b.storage) || a.node.localeCompare(b.node) || a.id.localeCompare(b.id));
+  return rows.map((r) => ({
+    id: r.storage,
+    plugintype: r.plugintype,
+    freeBytes: r.maxdisk !== undefined && r.disk !== undefined ? Math.max(0, r.maxdisk - r.disk) : undefined,
+  }));
 }
 
 /**
