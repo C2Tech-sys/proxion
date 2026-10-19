@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.3] - 2026-10-19
+
 ### Fixed
 
 - VM Summary → Related, the dashboard Nodes table, the Backups tab storage list, the Clone dialog's
@@ -661,7 +663,8 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.13.2...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.13.3...HEAD
+[0.13.3]: https://github.com/C2Tech-sys/proxion/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/C2Tech-sys/proxion/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/C2Tech-sys/proxion/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/C2Tech-sys/proxion/compare/v0.12.0...v0.13.0
