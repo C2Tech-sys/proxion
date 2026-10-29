@@ -42,6 +42,8 @@ services:
       - caddy_data:/data
       - caddy_config:/config
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Extra site blocks (see caddy/Caddyfile's `import`); keep the directory even when empty.
+      - ./sites:/etc/caddy/sites:ro
     env_file: ./caddy.env
     restart: unless-stopped
     depends_on:

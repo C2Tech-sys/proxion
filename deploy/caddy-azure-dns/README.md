@@ -218,3 +218,14 @@ container image rebuilds.
   by repeating the "New client secret" step and updating `caddy.env`.
 - `*.env` files hold real secrets and are gitignored; they're created by
   hand on the host (`sync.sh` never ships them) and are never committed.
+
+## Extra sites on the same Caddy
+
+`caddy/Caddyfile` ends with `import /etc/caddy/sites/*.caddy`, and `docker-compose.yml` mounts
+`./sites` there read-only. Drop one `*.caddy` file per additional site into `sites/` (untracked;
+see `sites/README.md`), put the upstream container on this stack's network, and reload Caddy:
+
+```bash
+docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
+docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+```

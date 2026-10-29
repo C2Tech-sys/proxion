@@ -40,3 +40,8 @@
 		format console
 	}
 }
+
+# Other sites served by this same Caddy: one *.caddy file per site in ./sites (mounted read-only at
+# /etc/caddy/sites by docker-compose.yml). They can use the same `tls { dns azure ... }` block and
+# the AZURE_* variables from caddy.env. A glob that matches nothing is only a warning.
+import /etc/caddy/sites/*.caddy
