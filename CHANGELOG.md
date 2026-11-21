@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.4] - 2026-11-20
+
 ### Added
 
 - Preferences → Notifications: an "Excluded storages" list (T78). A storage named there never
@@ -17,7 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new alert if it is still over the threshold. Matching is by storage name, exact and
   case-sensitive, across all nodes. The list lives in the notification settings
   (`excludedStorages`, at most 64 Proxmox storage ids, stored sorted), takes effect without a
-  restart, and a settings file from an earlier version loads with an empty list.
+  restart, and a settings file from an earlier version loads with an empty list. Downgrade note:
+  once this version has saved the notification settings, 0.13.3 and earlier reject the file
+  (unknown `excludedStorages` key) and fall back to the environment defaults; remove that key
+  from `notify-settings.json` before rolling back.
 
 ## [0.13.3] - 2026-10-19
 
@@ -675,7 +680,8 @@ table and roadmap.
 
 Renamed from Atrium to Proxion before first release.
 
-[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.13.3...HEAD
+[Unreleased]: https://github.com/C2Tech-sys/proxion/compare/v0.13.4...HEAD
+[0.13.4]: https://github.com/C2Tech-sys/proxion/compare/v0.13.3...v0.13.4
 [0.13.3]: https://github.com/C2Tech-sys/proxion/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/C2Tech-sys/proxion/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/C2Tech-sys/proxion/compare/v0.13.0...v0.13.1
