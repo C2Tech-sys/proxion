@@ -226,3 +226,87 @@ describe('computeAlerts: storage-full warnings (unchanged behaviour)', () => {
     expect(computeAlerts({ resources: [], tasks: [], now })).toEqual([]);
   });
 });
+
+describe('computeAlerts: excludedStorages (T78)', () => {
+  const now = 100_000 * 1000;
+  const full = (id: string, name: string, node = 'pve1'): ResourceLike =>
+    storage({ id, storage: name, node, disk: 95, maxdisk: 100 });
+  const storageTitles = (alerts: ReturnType<typeof computeAlerts>): string[] =>
+    alerts.filter((a) => a.kind === 'storage').map((a) => a.title);
+
+  it('produces no alert for an excluded storage', () => {
+    const alerts = computeAlerts({
+      resources: [full('storage/pve1/cloud-backup', 'cloud-backup')],
+      tasks: [],
+      now,
+      options: { excludedStorages: ['cloud-backup'] },
+    });
+    expect(alerts).toEqual([]);
+  });
+
+  it('still alerts for a non-excluded storage over the threshold', () => {
+    const alerts = computeAlerts({
+      resources: [full('storage/pve1/cloud-backup', 'cloud-backup'), full('storage/pve1/tank', 'tank')],
+      tasks: [],
+      now,
+      options: { excludedStorages: ['cloud-backup'] },
+    });
+    expect(storageTitles(alerts)).toEqual(['Storage "tank" on pve1 is 95% full']);
+  });
+
+  it('treats an omitted or empty list exactly like the baseline', () => {
+    const resources = [full('storage/pve1/cloud-backup', 'cloud-backup'), full('storage/pve1/tank', 'tank')];
+    const baseline = computeAlerts({ resources, tasks: [], now });
+    expect(baseline).toHaveLength(2);
+    expect(computeAlerts({ resources, tasks: [], now, options: {} })).toEqual(baseline);
+    expect(computeAlerts({ resources, tasks: [], now, options: { excludedStorages: [] } })).toEqual(baseline);
+  });
+
+  it('matches the storage name exactly and case-sensitively', () => {
+    const alerts = computeAlerts({
+      resources: [
+        full('storage/pve1/cloud-backup-2', 'cloud-backup-2'),
+        full('storage/pve1/my-cloud-backup', 'my-cloud-backup'),
+        full('storage/pve1/Cloud-Backup', 'Cloud-Backup'),
+        full('storage/pve1/cloud-backup', 'cloud-backup'),
+      ],
+      tasks: [],
+      now,
+      options: { excludedStorages: ['cloud-backup'] },
+    });
+    expect(storageTitles(alerts).sort()).toEqual([
+      'Storage "Cloud-Backup" on pve1 is 95% full',
+      'Storage "cloud-backup-2" on pve1 is 95% full',
+      'Storage "my-cloud-backup" on pve1 is 95% full',
+    ]);
+  });
+
+  it('excludes the same storage name on every node', () => {
+    const alerts = computeAlerts({
+      resources: [
+        full('storage/pve1/shared', 'shared', 'pve1'),
+        full('storage/pve2/shared', 'shared', 'pve2'),
+        full('storage/pve2/tank', 'tank', 'pve2'),
+      ],
+      tasks: [],
+      now,
+      options: { excludedStorages: ['shared'] },
+    });
+    expect(storageTitles(alerts)).toEqual(['Storage "tank" on pve2 is 95% full']);
+  });
+
+  it('does not touch backup or task alerts', () => {
+    const alerts = computeAlerts({
+      resources: [guest(100, 'web'), full('storage/pve1/tank', 'tank')],
+      tasks: [failed('pve1', '100', 100_000 - 600), nonVzdumpTask({ upid: 'UPID:x', status: 'ERROR: boom', starttime: 100_000 - 60 })],
+      now,
+      options: { excludedStorages: ['tank'] },
+    });
+    expect(alerts.map((a) => a.kind).sort()).toEqual(['backup', 'task']);
+  });
+
+  it('tags a storage alert with its storage name', () => {
+    const alerts = computeAlerts({ resources: [full('storage/pve1/tank', 'tank')], tasks: [], now });
+    expect(alerts[0]).toMatchObject({ kind: 'storage', storage: 'tank' });
+  });
+});

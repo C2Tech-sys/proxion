@@ -124,6 +124,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       enabled: settings.enabled,
       muteUntil: settings.muteUntil,
       mutedKinds: settings.mutedKinds,
+      excludedStorages: settings.excludedStorages,
     });
   };
 
@@ -131,6 +132,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   // Fail closed (see `Config.allowedHostsError`): said once, loudly, at boot; the key only, never the value.
   if (config.allowedHostsError) app.log.warn(`Notification destinations disabled: ${config.allowedHostsError}`);
   const initialSettings = effectiveNotifySettings(config, notifySettingsStore.current);
+  // The dashboard alerts (`/api/state`, the event stream) honour the same exclusion list (T78).
+  poller?.setExcludedStorages(initialSettings.excludedStorages);
   app.decorate('notifier', await startNotifier(initialSettings, buildNotifyChannels(initialSettings, { allowedHosts: allowedNotifyHosts(config), log: app.log })));
 
   // Reloads are serialised. Channels are built BEFORE the old notifier is retired, so a settings
@@ -145,6 +148,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       const previous = app.notifier;
       await previous?.stop();
       app.notifier = await startNotifier(settings, channels);
+      // AFTER the swap: the new notifier already ignores the excluded storages itself, so the
+      // alert that disappears from the poller's snapshot is never seen as "resolved" by a
+      // notifier that does not yet know about the exclusion.
+      poller?.setExcludedStorages(settings.excludedStorages);
     });
     reloadChain = run.catch(() => undefined);
     return run;

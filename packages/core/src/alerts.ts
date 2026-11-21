@@ -40,6 +40,9 @@ export interface Alert {
   at: number;
   node?: string;
   vmid?: string;
+  /** Present on `kind: 'storage'` alerts -- the storage's name (the `storage` field of the
+   *  `/cluster/resources` row), so consumers can match it against an exclusion list. */
+  storage?: string;
   /** Present on `kind: 'backup'` alerts -- the incident this alert renders. */
   incident?: BackupIncident;
 }
@@ -53,6 +56,9 @@ export interface ComputeAlertsOptions {
   healedVisibilityMs?: number;
   /** Fraction (0..1) of a storage's capacity above which it's flagged. Default `0.85`. */
   storageThreshold?: number;
+  /** Storage names (exact, case-sensitive, on every node) that never raise the storage-full alert
+   *  -- e.g. a backup endpoint whose reported size is synthetic. Omitted or empty: no exclusions. */
+  excludedStorages?: readonly string[];
 }
 
 export interface ComputeAlertsInput {
@@ -154,6 +160,8 @@ export function computeAlerts({ resources, tasks, now = Date.now(), options }: C
   const healedVisibilityMs = options?.healedVisibilityMs ?? healWindowMs;
   const storageThreshold = options?.storageThreshold ?? DEFAULT_STORAGE_THRESHOLD;
 
+  const excludedStorages = new Set(options?.excludedStorages ?? []);
+
   const alerts: Alert[] = [];
 
   const incidents = computeBackupIncidents(tasks, { now, lookbackMs, healWindowMs, hardAttempts });
@@ -181,6 +189,7 @@ export function computeAlerts({ resources, tasks, now = Date.now(), options }: C
 
   for (const r of resources) {
     if (r.type !== 'storage') continue;
+    if (r.storage !== undefined && excludedStorages.has(r.storage)) continue;
     const used = r.disk ?? 0;
     const total = r.maxdisk ?? 0;
     if (total <= 0) continue;
@@ -193,6 +202,7 @@ export function computeAlerts({ resources, tasks, now = Date.now(), options }: C
         title: `Storage "${r.storage}" on ${r.node} is ${Math.round(fraction * 100)}% full`,
         at: Math.floor(now / 1000),
         ...(r.node !== undefined ? { node: r.node } : {}),
+        ...(r.storage !== undefined ? { storage: r.storage } : {}),
       });
     }
   }

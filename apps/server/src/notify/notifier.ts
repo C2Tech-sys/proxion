@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { Alert, ResourceLike } from '@proxion/core';
 import { WebhookSendError } from './channels/webhook.js';
 import { buildDeepLink, enrichEvent } from './format.js';
-import { computeTransitions, type KnownAlert } from './transitions.js';
+import { alertStorageName, computeTransitions, knownStorageName, type KnownAlert } from './transitions.js';
 import type { NotifyChannel, NotifyEvent, NotifyMessage } from './types.js';
 
 const STATE_FILE_NAME = 'notify-state.json';
@@ -47,6 +47,11 @@ export interface NotifierOptions {
   /** Alert kinds that are never notified (T64) -- their events are dropped after the transition
    *  bookkeeping, so un-muting a kind does not replay what happened while it was muted. */
   mutedKinds?: readonly Alert['kind'][];
+  /** Storage names (T78) whose storage-usage alert is ignored entirely: they are removed from the
+   *  snapshot AND from the remembered state before the transition diff, so an excluded storage
+   *  never opens, never resolves/clears (adding a name to the list is silent) and, once removed
+   *  from the list again, is treated as a brand-new alert. */
+  excludedStorages?: readonly string[];
 }
 
 interface PersistedState {
@@ -120,6 +125,10 @@ export class Notifier {
       if (known) {
         notifier.known = known;
         notifier.firstRun = false;
+        // T78: forget excluded storages straight away, so a name that was added to the list
+        // (and the notifier reloaded) never produces a "no longer reported" notice, and removing
+        // it again later starts from a clean slate even before the next snapshot arrives.
+        if (notifier.forgetExcluded()) await notifier.persistState();
       }
     } catch {
       // No file, unreadable, or malformed -- stays a first run.
@@ -169,6 +178,29 @@ export class Notifier {
     return events.filter((event) => !muted.includes(event.kind));
   }
 
+  private isExcludedStorage(storage: string | undefined): boolean {
+    return storage !== undefined && (this.options.excludedStorages?.includes(storage) ?? false);
+  }
+
+  /** Drops every excluded-storage entry from `known`; true when anything was dropped. */
+  private forgetExcluded(): boolean {
+    let changed = false;
+    for (const [id, alert] of this.known) {
+      if (alert.kind === 'storage' && this.isExcludedStorage(knownStorageName(alert))) {
+        this.known.delete(id);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /** The snapshot without excluded storages' alerts. */
+  private dropExcludedStorages(alerts: Alert[]): Alert[] {
+    const excluded = this.options.excludedStorages;
+    if (!excluded || excluded.length === 0) return alerts;
+    return alerts.filter((alert) => !(alert.kind === 'storage' && this.isExcludedStorage(alertStorageName(alert))));
+  }
+
   /** Waits for every currently-chained/in-flight snapshot processing (and, on tests using a real
    *  clock, lets callers `await` before asserting) -- not needed in production, but keeps tests
    *  from racing the internal promise chain. */
@@ -180,8 +212,13 @@ export class Notifier {
   /** Never rejects -- see `onAlerts`'s doc comment for why that matters. Everything this calls
    *  that talks to a channel or the filesystem already catches its own errors; this outer
    *  try/catch is only a backstop against a bug in the pure transition logic itself. */
-  private async processSnapshot(alerts: Alert[]): Promise<void> {
+  private async processSnapshot(rawAlerts: Alert[]): Promise<void> {
     try {
+      // T78: an excluded storage does not exist as far as notifications are concerned -- see
+      // `NotifierOptions.excludedStorages`. Unlike a muted kind (events dropped AFTER the
+      // bookkeeping), the bookkeeping itself ignores it, so removing the exclusion later re-alerts.
+      const alerts = this.dropExcludedStorages(rawAlerts);
+      this.forgetExcluded();
       if (this.firstRun) {
         await this.sendFirstRunSummary(alerts);
         return;

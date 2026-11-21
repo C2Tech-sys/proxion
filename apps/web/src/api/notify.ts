@@ -91,6 +91,8 @@ export interface NotifySettingsView {
   /** Only present while the snooze is still in the future. */
   muteUntil?: string;
   mutedKinds: NotifyKind[];
+  /** Storage names whose "N% full" alert is suppressed everywhere (T78); sorted by name. */
+  excludedStorages: string[];
   minSeverity: 'warning' | 'error';
   includeResolved: boolean;
   debounceMs: number;
@@ -118,6 +120,8 @@ export interface NotifySettingsPutBody {
   enabled: boolean;
   muteUntil?: string | null;
   mutedKinds: NotifyKind[];
+  /** Omitted keeps the stored list (T78); `[]` clears it. */
+  excludedStorages?: string[];
   minSeverity: 'warning' | 'error';
   includeResolved: boolean;
   debounceMs: number;

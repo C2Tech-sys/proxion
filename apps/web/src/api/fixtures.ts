@@ -173,7 +173,14 @@ export const fixtureClient: ApiClient = {
   // (each node's 24h vzdump history), so a failure well outside the recent-tasks drawer can
   // still open/heal a backup incident here exactly as it would live.
   async getAlerts() {
-    return delay(computeAlerts({ resources, tasks: getRebasedTasks(), now: Date.now() }));
+    return delay(
+      computeAlerts({
+        resources,
+        tasks: getRebasedTasks(),
+        now: Date.now(),
+        options: { excludedStorages: getFixtureExcludedStorages() },
+      }),
+    );
   },
   async getNodeTasks(node: string, params?: NodeTaskParams) {
     const { vmid, typefilter, since, until, errors, source, start, limit } = params ?? {};
@@ -902,6 +909,7 @@ export interface FixtureNotifySettingsView {
   enabled: boolean;
   muteUntil?: string;
   mutedKinds: FixtureNotifyKind[];
+  excludedStorages: string[];
   minSeverity: 'warning' | 'error';
   includeResolved: boolean;
   debounceMs: number;
@@ -927,6 +935,7 @@ export interface FixtureNotifySettingsPut {
   enabled: boolean;
   muteUntil?: string | null;
   mutedKinds: FixtureNotifyKind[];
+  excludedStorages?: string[];
   minSeverity: 'warning' | 'error';
   includeResolved: boolean;
   debounceMs: number;
@@ -945,6 +954,7 @@ interface FixtureNotifyStored {
   enabled: boolean;
   muteUntil?: string;
   mutedKinds: FixtureNotifyKind[];
+  excludedStorages: string[];
   minSeverity: 'warning' | 'error';
   includeResolved: boolean;
   debounceMs: number;
@@ -959,6 +969,7 @@ function initialFixtureNotifyStored(): FixtureNotifyStored {
     source: 'env',
     enabled: true,
     mutedKinds: [],
+    excludedStorages: [],
     minSeverity: 'warning',
     includeResolved: true,
     debounceMs: 10_000,
@@ -977,6 +988,7 @@ function maskFixtureNotify(stored: FixtureNotifyStored, nowMs: number): FixtureN
     source: stored.source,
     enabled: stored.enabled,
     mutedKinds: FIXTURE_NOTIFY_KINDS.filter((kind) => stored.mutedKinds.includes(kind)),
+    excludedStorages: [...stored.excludedStorages],
     minSeverity: stored.minSeverity,
     includeResolved: stored.includeResolved,
     debounceMs: stored.debounceMs,
@@ -1019,6 +1031,22 @@ function fixtureUrlHas(value: string, protocols: readonly string[]): boolean {
   }
 }
 
+/** Same rule as the server (T78): at most 64 PVE storage ids, duplicates collapsed, stored sorted. */
+function fixtureExcludedStorages(names: string[]): string[] {
+  if (names.length > 64) throw new Error('excludedStorages: Too big: expected array to have <=64 items');
+  for (const name of names) {
+    if (name.length < 1 || name.length > 100 || !/^[A-Za-z][A-Za-z0-9._-]*$/.test(name)) {
+      throw new Error('excludedStorages: must be a storage id: letters, digits, ".", "_" and "-", starting with a letter');
+    }
+  }
+  return [...new Set(names)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** Demo/test-only (T78): the storages the demo's notification settings exclude from the "N% full" alert. */
+export function getFixtureExcludedStorages(): readonly string[] {
+  return fixtureNotifyStored.excludedStorages;
+}
+
 /** Demo/test-only (T64): the masked notification settings. */
 export function getFixtureNotifySettings(): FixtureNotifySettingsView {
   return maskFixtureNotify(fixtureNotifyStored, Date.now());
@@ -1044,6 +1072,7 @@ export function putFixtureNotifySettings(body: FixtureNotifySettingsPut): Fixtur
     source: 'file',
     enabled: body.enabled,
     mutedKinds: FIXTURE_NOTIFY_KINDS.filter((kind) => body.mutedKinds.includes(kind)),
+    excludedStorages: body.excludedStorages === undefined ? current.excludedStorages : fixtureExcludedStorages(body.excludedStorages),
     minSeverity: body.minSeverity,
     includeResolved: body.includeResolved,
     debounceMs: body.debounceMs,

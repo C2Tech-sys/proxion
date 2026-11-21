@@ -26,6 +26,31 @@ export type NotifyKind = (typeof NOTIFY_KINDS)[number];
 export const WEBHOOK_FORMATS = ['generic', 'discord', 'slack', 'ntfy', 'gotify'] as const;
 export type WebhookFormatName = (typeof WEBHOOK_FORMATS)[number];
 
+export const MAX_EXCLUDED_STORAGES = 64;
+export const MAX_STORAGE_NAME_LENGTH = 100;
+/** PVE's storage-id character set: starts with a letter, then letters, digits, `.`, `_`, `-`. */
+const STORAGE_ID_RE = /^[A-Za-z][A-Za-z0-9._-]*$/;
+
+/** One storage name as `/cluster/resources` reports it (`storage` field), matched exactly. */
+export const storageNameField = z
+  .string()
+  .min(1)
+  .max(MAX_STORAGE_NAME_LENGTH)
+  .regex(STORAGE_ID_RE, {
+    message: 'must be a storage id: letters, digits, ".", "_" and "-", starting with a letter',
+  });
+
+/** Duplicates collapsed, sorted (plain code-point order, so the stored file is deterministic). */
+function normaliseStorageNames(names: string[]): string[] {
+  return [...new Set(names)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** Storages whose "N% full" alert is suppressed (T78). Omitted in older files = none. */
+export const excludedStoragesField = z
+  .array(storageNameField)
+  .max(MAX_EXCLUDED_STORAGES)
+  .transform(normaliseStorageNames);
+
 export const MIN_DEBOUNCE_MS = 1_000;
 export const MAX_DEBOUNCE_MS = 600_000;
 
@@ -88,6 +113,7 @@ export const notifySettingsSchema = z
     enabled: z.boolean(),
     muteUntil: isoDateField.optional(),
     mutedKinds: z.array(z.enum(NOTIFY_KINDS)).max(NOTIFY_KINDS.length),
+    excludedStorages: excludedStoragesField.default([]),
     minSeverity: z.enum(['warning', 'error']),
     includeResolved: z.boolean(),
     debounceMs: z.number().int().min(MIN_DEBOUNCE_MS).max(MAX_DEBOUNCE_MS),
@@ -117,6 +143,7 @@ export function effectiveNotifySettings(
     source: 'env',
     enabled: true,
     mutedKinds: [],
+    excludedStorages: [],
     minSeverity: config.PROXION_NOTIFY_MIN_SEVERITY,
     includeResolved: config.PROXION_NOTIFY_INCLUDE_RESOLVED,
     debounceMs: config.PROXION_NOTIFY_DEBOUNCE_MS,

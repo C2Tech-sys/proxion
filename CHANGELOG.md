@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Preferences → Notifications: an "Excluded storages" list (T78). A storage named there never
+  raises the "Storage N% full" alert -- not on the dashboard alerts strip and not in a webhook or
+  email notification -- so a backup endpoint with a synthetic size no longer nags forever, while
+  every other storage still alerts at 85% and the usage bars keep showing real numbers. Adding a
+  storage that is already alerting sends no "resolved" notice; removing it again announces it as a
+  new alert if it is still over the threshold. Matching is by storage name, exact and
+  case-sensitive, across all nodes. The list lives in the notification settings
+  (`excludedStorages`, at most 64 Proxmox storage ids, stored sorted), takes effect without a
+  restart, and a settings file from an earlier version loads with an empty list.
+
 ## [0.13.3] - 2026-10-19
 
 ### Fixed

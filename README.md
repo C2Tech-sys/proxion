@@ -136,7 +136,7 @@ change your cluster -- `/api/pve/*` itself stays a read-only proxy.
 | Area                                               | Status          | Notes                                                                                                                                                                  |
 | -------------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Auth                                               | Works           | Pass-through PVE login (username/password/realm), signed httpOnly session cookie, transparent ticket renewal.                                                          |
-| Dashboard                                          | Works           | Cluster-wide totals, cluster nodes table, top CPU/memory consumers, per-storage usage, and an alerts strip (failed tasks, storage over 85% full) from the live poller. |
+| Dashboard                                          | Works           | Cluster-wide totals, cluster nodes table, top CPU/memory consumers, per-storage usage, and an alerts strip (failed tasks, storage over 85% full, except storages you exclude in Preferences) from the live poller. |
 | Inventory tree                                     | Works           | Datacenter -> node -> VM/CT, type-to-filter, status dots, tag chips, right-click context menu (open, console, shell, copy VMID/IP).                                    |
 | Guest list                                         | Works           | vSphere-style "VMs and Templates" view at `/guests`: every guest across the cluster in one sortable, filterable table (search, status/type/node filters, per-user column visibility), sharing the inventory tree's own right-click actions. Row checkboxes (plus a select-all-in-view header checkbox) multi-select guests for bulk Start/Shut down/Reboot/Stop, confirmed in one dialog that lists what's applicable, skips guests it isn't (wrong power state, or a template), and runs them with limited concurrency. |
 | Command palette (Cmd/Ctrl-K)                       | Works           | Search nodes/VMs/CTs by name, VMID, IP, tag.                                                                                                                           |
@@ -338,6 +338,21 @@ host only, whether a token is set, and the SMTP host/port/user. `PUT /api/notify
 on `/`. While notifications are switched off or snoozed nothing is sent, but alert state keeps
 being tracked, so nothing that happened meanwhile is announced when they come back; "Send test
 notification" always sends, even while muted.
+
+**Excluding a storage from the "N% full" alert.** Some storages report a size that means nothing --
+a backup endpoint that always shows 1 TiB free, say, so its percentage only ever creeps upward.
+Instead of muting every storage alert, list such storages under "Excluded storages" on the
+Preferences page (pick from the storages the cluster reports; names you saved earlier stay listed
+and removable even if the storage is gone). An excluded storage is matched by name, exactly and
+case-sensitively, on every node, and it disappears from the dashboard alerts strip and from
+notifications alike: no "N% full" message, and no "resolved" message just because you added it.
+Take it off the list and, if it is still over 85%, it is announced as a new alert. The usage bars
+on the dashboard and the storage pages keep showing its real numbers, and every other storage
+alerts at the same 85% as before. The list is saved with the other notification settings
+(`excludedStorages` in `notify-settings.json` and in `GET`/`PUT /api/notify/settings`: at most 64
+Proxmox storage ids, stored sorted; omit it from a `PUT` to leave it unchanged) and applies at once,
+without a restart. A settings file written by an earlier version has no such list and simply
+excludes nothing.
 
 ## Security model
 

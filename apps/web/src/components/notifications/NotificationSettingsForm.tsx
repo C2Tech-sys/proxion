@@ -6,7 +6,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { SwitchToggle } from '@/pages/preferences/controls';
 import { USE_FIXTURES } from '@/api/client';
-import { useAuthMe } from '@/api/hooks';
+import { useAuthMe, useClusterResources } from '@/api/hooks';
+import { offeredStorages, sortedStorageNames } from '@/components/notifications/excludedStorages';
 import { useMuteNotifications, useNotifySettings, useSaveNotifySettings } from '@/api/notifyHooks';
 import { useRootPermissions } from '@/api/rootPermissionHooks';
 import type { MuteSpan, NotifyKind, NotifySettingsPutBody, NotifySettingsView, WebhookFormat } from '@/api/notify';
@@ -40,6 +41,8 @@ interface Draft {
   enabled: boolean;
   /** `true` = notify about this kind (unchecked = muted). */
   notifyKinds: Record<NotifyKind, boolean>;
+  /** Storages whose "N% full" alert is suppressed -- kept sorted by name, no duplicates. */
+  excludedStorages: string[];
   minSeverity: 'warning' | 'error';
   includeResolved: boolean;
   debounceSeconds: string;
@@ -64,6 +67,7 @@ function draftFromView(view: NotifySettingsView): Draft {
       task: !view.mutedKinds.includes('task'),
       storage: !view.mutedKinds.includes('storage'),
     },
+    excludedStorages: sortedStorageNames(view.excludedStorages),
     minSeverity: view.minSeverity,
     includeResolved: view.includeResolved,
     debounceSeconds: String(view.debounceMs / 1000),
@@ -91,6 +95,7 @@ function buildBody(draft: Draft, view: NotifySettingsView): { body: NotifySettin
   const body: NotifySettingsPutBody = {
     enabled: draft.enabled,
     mutedKinds: KINDS.filter(({ kind }) => !draft.notifyKinds[kind]).map(({ kind }) => kind),
+    excludedStorages: draft.excludedStorages,
     minSeverity: draft.minSeverity,
     includeResolved: draft.includeResolved,
     debounceMs: Math.round(seconds * 1000),
@@ -238,6 +243,11 @@ function SettingsFormBody({
   const mute = useMuteNotifications();
   const [draft, setDraft] = useState<Draft>(() => draftFromView(view));
   const baseline = draftFromView(view);
+  const clusterResources = useClusterResources();
+  const [storageChoice, setStorageChoice] = useState('');
+  // Offered: the storages the cluster reports right now, minus the ones already excluded.
+  const storageChoices = offeredStorages(clusterResources.data, draft.excludedStorages);
+  const selectedStorage = storageChoices.includes(storageChoice) ? storageChoice : '';
 
   const built = buildBody(draft, view);
   const baselineBuilt = buildBody(baseline, view);
@@ -333,6 +343,70 @@ function SettingsFormBody({
           ))}
         </div>
         <p className="text-xs text-muted-foreground">Unchecked kinds are never announced.</p>
+      </Group>
+
+      <Group title="Excluded storages">
+        <p className="text-xs text-muted-foreground">
+          A storage listed here never raises the &ldquo;Storage N% full&rdquo; alert, on the dashboard or in a
+          notification &mdash; for example a backup target whose reported size is not real. Its usage bars still show
+          the real numbers.
+        </p>
+        {draft.excludedStorages.length > 0 ? (
+          <ul className="flex flex-wrap gap-2" aria-label="Excluded storages">
+            {draft.excludedStorages.map((name) => (
+              <li
+                key={name}
+                className="flex items-center gap-1 rounded-md border border-border py-0.5 pl-2 pr-0.5 text-sm"
+              >
+                <span className="font-mono text-xs">{name}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`Remove ${name} from the excluded storages`}
+                  disabled={locked || busy}
+                  title={lockTitle}
+                  onClick={() => patch({ excludedStorages: draft.excludedStorages.filter((entry) => entry !== name) })}
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-muted-foreground">No storages are excluded.</p>
+        )}
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="Storage to exclude" htmlFor={`${id}-storage-choice`}>
+            <NativeSelect
+              id={`${id}-storage-choice`}
+              value={selectedStorage}
+              disabled={locked || busy || storageChoices.length === 0}
+              title={lockTitle}
+              onChange={(e) => setStorageChoice(e.target.value)}
+            >
+              <option value="">{storageChoices.length === 0 ? 'No other storages' : 'Choose a storage…'}</option>
+              {storageChoices.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={locked || busy || selectedStorage === ''}
+            title={lockTitle}
+            onClick={() => {
+              patch({ excludedStorages: sortedStorageNames([...draft.excludedStorages, selectedStorage]) });
+              setStorageChoice('');
+            }}
+          >
+            Exclude
+          </Button>
+        </div>
       </Group>
 
       <Group title="Delivery">

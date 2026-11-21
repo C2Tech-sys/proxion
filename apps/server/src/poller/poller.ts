@@ -25,6 +25,9 @@ export interface PollerOptions {
    * `computeAlerts`'s look-back too, so a failure never falls out of the alert before its own
    * history fetch would have stopped returning it. */
   vzdumpLookbackMs?: number;
+  /** Storage names (T78) that never raise the "N% full" alert in `snapshot.alerts`. Can be
+   * changed at runtime with `setExcludedStorages`. */
+  excludedStorages?: readonly string[];
 }
 
 function deepEqual(a: unknown, b: unknown): boolean {
@@ -82,6 +85,7 @@ export class Poller {
   /** Latest known vzdump history per node -- kept across a failed refetch ("keep the last known
    * history" per the ticket), keyed by node name. */
   private readonly vzdumpHistoryByNode = new Map<string, TaskLike[]>();
+  private excludedStorages: readonly string[];
 
   constructor(
     private readonly client: PveClient,
@@ -92,6 +96,14 @@ export class Poller {
     this.tasksIntervalMs = options.tasksIntervalMs ?? 3000;
     this.vzdumpHistoryIntervalMs = options.vzdumpHistoryIntervalMs ?? 60_000;
     this.vzdumpLookbackMs = options.vzdumpLookbackMs ?? 24 * 60 * 60 * 1000;
+    this.excludedStorages = options.excludedStorages ?? [];
+  }
+
+  /** Replaces the excluded-storage list (a settings change, no restart) and recomputes the alerts
+   * right away, emitting an `alerts` event iff the result changed. */
+  setExcludedStorages(names: readonly string[]): void {
+    this.excludedStorages = [...names];
+    this.recomputeAlerts();
   }
 
   start(): void {
@@ -246,6 +258,7 @@ export class Poller {
       resources: this.snapshot.resources as unknown as ResourceLike[],
       tasks: [...merged.values()],
       now: Date.now(),
+      options: { excludedStorages: this.excludedStorages },
     });
 
     if (!deepEqual(alerts, this.snapshot.alerts)) {

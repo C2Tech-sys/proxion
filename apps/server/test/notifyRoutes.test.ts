@@ -374,6 +374,7 @@ describe('/api/notify', () => {
         source: 'env',
         enabled: true,
         mutedKinds: [],
+        excludedStorages: [],
         minSeverity: 'warning',
         includeResolved: true,
         debounceMs: 10_000,
@@ -398,6 +399,7 @@ describe('/api/notify', () => {
         source: 'env',
         enabled: true,
         mutedKinds: [],
+        excludedStorages: [],
         minSeverity: 'warning',
         includeResolved: true,
         debounceMs: 10_000,
@@ -561,6 +563,7 @@ describe('/api/notify', () => {
           source: 'file',
           enabled: true,
           mutedKinds: ['backup', 'storage'],
+          excludedStorages: [],
           minSeverity: 'error',
           includeResolved: false,
           debounceMs: 30_000,
@@ -581,6 +584,7 @@ describe('/api/notify', () => {
           version: 1,
           enabled: true,
           mutedKinds: ['backup', 'storage'],
+          excludedStorages: [],
           minSeverity: 'error',
           includeResolved: false,
           debounceMs: 30_000,
@@ -691,6 +695,222 @@ describe('/api/notify', () => {
         const bodies = target.requests.map((r) => r.body).join('\n');
         expect(bodies).toContain('VISIBLE-STORAGE-ALERT');
         expect(bodies).not.toContain('MUTED-BACKUP-ALERT');
+      });
+    });
+
+    describe('excluded storages (T78)', () => {
+      const storageAlert = (name: string, id = `storage/pve1/${name}`) => ({
+        id,
+        kind: 'storage' as const,
+        severity: 'warning' as const,
+        title: `Storage "${name}" on pve1 is 91% full`,
+        node: 'pve1',
+        storage: name,
+        at: Math.floor(Date.now() / 1000),
+      });
+      const storageRow = (name: string, disk: number) => ({
+        id: `storage/pve1/${name}`,
+        type: 'storage',
+        node: 'pve1',
+        storage: name,
+        disk,
+        maxdisk: 100,
+      });
+
+      it('GET reports the stored list, sorted; PUT persists it (deduplicated, sorted) to the settings file', async () => {
+        const cookie = await setupAdmin();
+        expect(((await getSettings(cookie)).json() as { excludedStorages: string[] }).excludedStorages).toStrictEqual([]);
+
+        const res = await put(cookie, { ...BASE_BODY, excludedStorages: ['tank', 'cloud-backup', 'tank'] });
+        expect(res.statusCode).toBe(200);
+        expect((res.json() as { excludedStorages: string[] }).excludedStorages).toStrictEqual(['cloud-backup', 'tank']);
+        expect(savedFile().excludedStorages).toStrictEqual(['cloud-backup', 'tank']);
+        expect(app.notifySettingsStore.current?.excludedStorages).toStrictEqual(['cloud-backup', 'tank']);
+        expect(((await getSettings(cookie)).json() as { excludedStorages: string[] }).excludedStorages).toStrictEqual([
+          'cloud-backup',
+          'tank',
+        ]);
+      });
+
+      it('omitting the field keeps the stored list; an empty array clears it', async () => {
+        const cookie = await setupAdmin();
+        await put(cookie, { ...BASE_BODY, excludedStorages: ['cloud-backup'] });
+        const kept = await put(cookie, { ...BASE_BODY, siteName: 'Renamed' });
+        expect(kept.statusCode).toBe(200);
+        expect((kept.json() as { excludedStorages: string[] }).excludedStorages).toStrictEqual(['cloud-backup']);
+        expect(savedFile().excludedStorages).toStrictEqual(['cloud-backup']);
+
+        const cleared = await put(cookie, { ...BASE_BODY, excludedStorages: [] });
+        expect((cleared.json() as { excludedStorages: string[] }).excludedStorages).toStrictEqual([]);
+        expect(savedFile().excludedStorages).toStrictEqual([]);
+      });
+
+      const INVALID: Array<[string, unknown]> = [
+        ['not an array', 'cloud-backup'],
+        ['null', null],
+        ['more than 64 entries', Array.from({ length: 65 }, (_, i) => `s${i}`)],
+        ['an empty name', ['']],
+        ['a name over 100 characters', ['a'.repeat(101)]],
+        ['a name with a space', ['cloud backup']],
+        ['a name with a slash', ['a/b']],
+        ['a name starting with a digit', ['1tank']],
+        ['a non-string entry', [7]],
+      ];
+      for (const [label, value] of INVALID) {
+        it(`400 for ${label}, and nothing is written`, async () => {
+          const cookie = await setupAdmin();
+          const res = await put(cookie, { ...BASE_BODY, excludedStorages: value });
+          expect(res.statusCode).toBe(400);
+          const body = res.json() as { error: string; message: string };
+          expect(body.error).toBe('invalid-settings');
+          expect(body.message).toContain('excludedStorages');
+          expect(app.notifySettingsStore.current).toBeUndefined();
+        });
+      }
+
+      it('accepts exactly 64 entries', async () => {
+        const cookie = await setupAdmin();
+        const res = await put(cookie, { ...BASE_BODY, excludedStorages: Array.from({ length: 64 }, (_, i) => `s${i}`) });
+        expect(res.statusCode).toBe(200);
+      });
+
+      it('permissions are unchanged: 401 with no identity, 403 in token mode, 403 without Sys.Modify', async () => {
+        await setup();
+        expect((await put(undefined, { ...BASE_BODY, excludedStorages: ['tank'] })).statusCode).toBe(401);
+        const cookie = await loginCookie(); // no Sys.Modify
+        const res = await put(cookie, { ...BASE_BODY, excludedStorages: ['tank'] });
+        expect(res.statusCode).toBe(403);
+        expect(res.json()).toStrictEqual({ error: 'forbidden', missing: ['Sys.Modify'] });
+        expect(app.notifySettingsStore.current).toBeUndefined();
+        await app.close();
+        await fakePve.close();
+
+        await setup(TOKEN_MODE_ENV);
+        const tokenRes = await put(undefined, { ...BASE_BODY, excludedStorages: ['tank'] });
+        expect(tokenRes.statusCode).toBe(403);
+        expect(tokenRes.json()).toStrictEqual({ error: 'writes-disabled-in-token-mode' });
+      });
+
+      it('POST /mute and the other settings keep the list', async () => {
+        const cookie = await setupAdmin();
+        await put(cookie, { ...BASE_BODY, excludedStorages: ['cloud-backup'] });
+        const res = await mute(cookie, { for: '1h' });
+        expect(res.statusCode).toBe(200);
+        expect((res.json() as { excludedStorages: string[] }).excludedStorages).toStrictEqual(['cloud-backup']);
+        expect(savedFile().excludedStorages).toStrictEqual(['cloud-backup']);
+      });
+
+      it('takes effect without a restart: nothing is sent for the excluded storage; removing it announces it again', async () => {
+        const target = await startRecordingTarget();
+        const cookie = await setupAdmin();
+        const body = { ...BASE_BODY, debounceMs: 1000, webhook: { url: target.baseUrl, format: 'generic' } };
+        const sentText = () => target.requests.map((request) => request.body).join('\n');
+
+        expect((await put(cookie, { ...body, excludedStorages: ['cloud-backup'] })).statusCode).toBe(200);
+        let notifier = app.notifier!;
+        notifier.onAlerts([]); // first-run summary
+        await notifier.flushForTest();
+        const summaries = target.requests.length;
+
+        notifier.onAlerts([storageAlert('cloud-backup'), storageAlert('tank')]);
+        await notifier.flushForTest();
+        await vi.waitFor(() => expect(target.requests.length).toBeGreaterThan(summaries), { timeout: 5000 });
+        expect(sentText()).toContain('tank');
+        expect(sentText()).not.toContain('cloud-backup');
+
+        // Remove the exclusion: the still-full storage is announced as a fresh alert.
+        const sentBefore = target.requests.length;
+        expect((await put(cookie, { ...body, excludedStorages: [] })).statusCode).toBe(200);
+        notifier = app.notifier!;
+        notifier.onAlerts([storageAlert('cloud-backup'), storageAlert('tank')]);
+        await notifier.flushForTest();
+        await vi.waitFor(() => expect(target.requests.length).toBeGreaterThan(sentBefore), { timeout: 5000 });
+        expect(target.requests.slice(sentBefore).map((request) => request.body).join('\n')).toContain('cloud-backup');
+      });
+
+      it('adding an alerting storage to the list sends no resolved notice', async () => {
+        const target = await startRecordingTarget();
+        const cookie = await setupAdmin();
+        const body = { ...BASE_BODY, debounceMs: 1000, webhook: { url: target.baseUrl, format: 'generic' } };
+        await put(cookie, body);
+        let notifier = app.notifier!;
+        notifier.onAlerts([storageAlert('cloud-backup')]); // first run: summary lists it
+        await notifier.flushForTest();
+        const afterSummary = target.requests.length;
+
+        await put(cookie, { ...body, excludedStorages: ['cloud-backup'] });
+        notifier = app.notifier!;
+        notifier.onAlerts([]); // the poller no longer reports it
+        await notifier.flushForTest();
+        await new Promise((resolve) => setTimeout(resolve, 1300)); // past the debounce window
+        await notifier.flushForTest();
+        expect(target.requests).toHaveLength(afterSummary);
+      });
+
+      it('the dashboard alerts in /api/state follow the list, while the usage rows keep the real numbers', async () => {
+        fakePve = await startFakePve();
+        fakePve.setClusterResources([storageRow('cloud-backup', 95), storageRow('tank', 90)]);
+        app = await buildApp({
+          config: loadConfig({
+            NODE_ENV: 'test',
+            PVE_URL: fakePve.url,
+            PVE_TOKEN_ID: 'root@pam!proxion',
+            PVE_TOKEN_SECRET: 'tokensecret',
+          }),
+        });
+        fakePve.setRootPermissions({ 'Sys.Modify': true });
+        const cookie = await loginCookie();
+        const state = async () =>
+          (await app.inject({ method: 'GET', url: '/api/state', headers: { cookie } })).json() as {
+            resources: Array<{ storage: string; disk: number }>;
+            alerts: Array<{ storage?: string }>;
+          };
+
+        await vi.waitFor(async () => expect((await state()).alerts).toHaveLength(2), { timeout: 5000 });
+
+        const res = await put(cookie, { ...BASE_BODY, excludedStorages: ['cloud-backup'] });
+        expect(res.statusCode).toBe(200);
+        const after = await state();
+        expect(after.alerts.map((alert) => alert.storage)).toStrictEqual(['tank']);
+        expect(after.resources.map((row) => [row.storage, row.disk])).toStrictEqual([
+          ['cloud-backup', 95],
+          ['tank', 90],
+        ]);
+
+        await put(cookie, { ...BASE_BODY, excludedStorages: [] });
+        expect((await state()).alerts).toHaveLength(2);
+      });
+
+      it('a restart boots with the saved list applied to /api/state', async () => {
+        const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proxion-notify-excluded-restart-'));
+        try {
+          fakePve = await startFakePve();
+          fakePve.setClusterResources([storageRow('cloud-backup', 95), storageRow('tank', 90)]);
+          const env = {
+            NODE_ENV: 'test',
+            PVE_URL: fakePve.url,
+            PVE_TOKEN_ID: 'root@pam!proxion',
+            PVE_TOKEN_SECRET: 'tokensecret',
+            PROXION_DATA_DIR: dataDir,
+          };
+          app = await buildApp({ config: loadConfig(env) });
+          fakePve.setRootPermissions({ 'Sys.Modify': true });
+          expect((await put(await loginCookie(), { ...BASE_BODY, excludedStorages: ['cloud-backup'] })).statusCode).toBe(200);
+          await app.close();
+
+          app = await buildApp({ config: loadConfig(env) });
+          const cookie = await loginCookie();
+          await vi.waitFor(
+            async () => {
+              const res = await app.inject({ method: 'GET', url: '/api/state', headers: { cookie } });
+              const alerts = (res.json() as { alerts: Array<{ storage?: string }> }).alerts;
+              expect(alerts.map((alert) => alert.storage)).toStrictEqual(['tank']);
+            },
+            { timeout: 5000 },
+          );
+        } finally {
+          fs.rmSync(dataDir, { recursive: true, force: true });
+        }
       });
     });
 

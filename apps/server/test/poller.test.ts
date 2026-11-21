@@ -211,6 +211,55 @@ describe('Poller', () => {
     poller.stop();
   });
 
+  describe('excluded storages (T78)', () => {
+    const resources = [
+      { id: 'storage/pve1/cloud-backup', type: 'storage', node: 'pve1', storage: 'cloud-backup', disk: 95, maxdisk: 100 },
+      { id: 'storage/pve1/tank', type: 'storage', node: 'pve1', storage: 'tank', disk: 90, maxdisk: 100 },
+    ];
+    const storageNames = (poller: Poller): Array<string | undefined> =>
+      poller.getSnapshot().alerts.map((alert) => alert.storage);
+
+    it('an excluded storage is absent from the snapshot alerts; the others stay', async () => {
+      const client = fakeClient({ get: async () => resources, raw: async () => [] });
+      const poller = new Poller(client, fakeLogger(), {
+        resourcesIntervalMs: 100,
+        tasksIntervalMs: 100,
+        excludedStorages: ['cloud-backup'],
+      });
+      poller.start();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(storageNames(poller)).toEqual(['tank']);
+      // The usage rows themselves are untouched.
+      expect(poller.getSnapshot().resources).toHaveLength(2);
+      poller.stop();
+    });
+
+    it('setExcludedStorages recomputes at once and emits an alerts event only when the result changed', async () => {
+      const client = fakeClient({ get: async () => resources, raw: async () => [] });
+      const poller = new Poller(client, fakeLogger(), { resourcesIntervalMs: 100, tasksIntervalMs: 100 });
+      const emitted: unknown[][] = [];
+      poller.on((e) => {
+        if (e.type === 'alerts') emitted.push(e.data);
+      });
+      poller.start();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(storageNames(poller).sort()).toEqual(['cloud-backup', 'tank']);
+      const before = emitted.length;
+
+      poller.setExcludedStorages(['cloud-backup']);
+      expect(storageNames(poller)).toEqual(['tank']);
+      expect(emitted).toHaveLength(before + 1);
+
+      poller.setExcludedStorages(['cloud-backup']); // unchanged -> no new event
+      expect(emitted).toHaveLength(before + 1);
+
+      poller.setExcludedStorages([]);
+      expect(storageNames(poller).sort()).toEqual(['cloud-backup', 'tank']);
+      expect(emitted).toHaveLength(before + 2);
+      poller.stop();
+    });
+  });
+
   it('stop() prevents further polling', async () => {
     let call = 0;
     const client = fakeClient({

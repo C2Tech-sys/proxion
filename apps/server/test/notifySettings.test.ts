@@ -23,6 +23,7 @@ const FULL: NotifySettings = {
   enabled: false,
   muteUntil: '2030-01-01T00:00:00.000Z',
   mutedKinds: ['backup', 'storage'],
+  excludedStorages: ['cloud-backup'],
   minSeverity: 'error',
   includeResolved: false,
   debounceMs: 30_000,
@@ -131,6 +132,7 @@ describe('effectiveNotifySettings', () => {
       source: 'env',
       enabled: true,
       mutedKinds: [],
+      excludedStorages: [],
       minSeverity: 'error',
       includeResolved: false,
       debounceMs: 5000,
@@ -148,6 +150,7 @@ describe('effectiveNotifySettings', () => {
       source: 'env',
       enabled: true,
       mutedKinds: [],
+      excludedStorages: [],
       minSeverity: 'warning',
       includeResolved: true,
       debounceMs: 10_000,
@@ -166,6 +169,7 @@ describe('effectiveNotifySettings', () => {
       version: 1,
       enabled: true,
       mutedKinds: [],
+      excludedStorages: [],
       minSeverity: 'warning',
       includeResolved: true,
       debounceMs: 10_000,
@@ -323,5 +327,76 @@ describe('PROXION_NOTIFY_ALLOWED_HOSTS', () => {
     expect(buildNotifyChannels(FULL, { allowedHosts: ['*.example.com'], log: { warn } })).toHaveLength(2);
     expect(buildNotifyChannels(FULL, { allowedHosts: ['other.net'], log: { warn } })).toHaveLength(0);
     expect(buildNotifyChannels(FULL, { allowedHosts: null })).toHaveLength(2);
+  });
+});
+
+describe('excludedStorages (T78)', () => {
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(path.join(os.tmpdir(), 'proxion-notify-excluded-'));
+  });
+
+  afterEach(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const parse = (excludedStorages: unknown) => notifySettingsSchema.safeParse({ ...FULL, excludedStorages });
+
+  it('a file written by 0.13.x (no such field) still loads, with an empty list', async () => {
+    const { excludedStorages: _omit, ...legacy } = FULL;
+    void _omit;
+    writeFileSync(path.join(dataDir, NOTIFY_SETTINGS_FILE_NAME), JSON.stringify(legacy), 'utf8');
+    const log = logger();
+    const store = await NotifySettingsStore.load(dataDir, log);
+    expect(log.warn).not.toHaveBeenCalled();
+    expect(store.current).toStrictEqual({ ...FULL, excludedStorages: [] });
+  });
+
+  it('round-trips through save and load, stored sorted', async () => {
+    const store = await NotifySettingsStore.load(dataDir, logger());
+    await store.save({ ...FULL, excludedStorages: ['tank', 'cloud-backup'] });
+    expect(store.current?.excludedStorages).toStrictEqual(['cloud-backup', 'tank']);
+    const reloaded = await NotifySettingsStore.load(dataDir, logger());
+    expect(reloaded.current?.excludedStorages).toStrictEqual(['cloud-backup', 'tank']);
+    const onDisk = JSON.parse(readFileSync(path.join(dataDir, NOTIFY_SETTINGS_FILE_NAME), 'utf8')) as NotifySettings;
+    expect(onDisk.excludedStorages).toStrictEqual(['cloud-backup', 'tank']);
+  });
+
+  it('collapses duplicates and sorts', () => {
+    const parsed = parse(['b', 'a', 'b', 'a', 'B']);
+    expect(parsed.success && parsed.data.excludedStorages).toStrictEqual(['B', 'a', 'b']);
+  });
+
+  it('accepts exactly 64 entries and rejects 65', () => {
+    const names = (n: number) => Array.from({ length: n }, (_, i) => `s${i}`);
+    expect(parse(names(64)).success).toBe(true);
+    expect(parse(names(65)).success).toBe(false);
+  });
+
+  it('rejects an empty string, an over-long name and characters outside the storage-id set', () => {
+    expect(parse(['']).success).toBe(false);
+    expect(parse(['a'.repeat(100)]).success).toBe(true);
+    expect(parse(['a'.repeat(101)]).success).toBe(false);
+    for (const bad of ['1abc', '-abc', '.abc', '_abc', 'a b', 'a/b', 'a"b', 'a:b', 'a\u000ab', '\u00fcn\u00ef', 'a,b']) {
+      expect(parse([bad]).success, bad).toBe(false);
+    }
+    for (const good of ['tank', 'cloud-backup-storage-172-16-10-2', 'A.b_c-d', 'x']) {
+      expect(parse([good]).success, good).toBe(true);
+    }
+    expect(parse('tank').success).toBe(false);
+    expect(parse([5]).success).toBe(false);
+  });
+
+  it('refuses to save an invalid list and leaves the previous file in place', async () => {
+    const store = await NotifySettingsStore.load(dataDir, logger());
+    await store.save(FULL);
+    await expect(store.save({ ...FULL, excludedStorages: ['bad name'] })).rejects.toThrow();
+    expect(store.current).toStrictEqual(FULL);
+  });
+
+  it('env defaults start with no exclusions', () => {
+    const config = loadConfig({ NODE_ENV: 'test', PVE_URL: 'https://pve.example.com:8006' });
+    expect(effectiveNotifySettings(config, undefined).excludedStorages).toStrictEqual([]);
   });
 });

@@ -16,6 +16,8 @@ export interface KnownAlert {
   detail?: string | undefined;
   node?: string | undefined;
   vmid?: string | undefined;
+  /** The storage name of a `kind: 'storage'` alert (T78); absent in state written by older versions. */
+  storage?: string | undefined;
   /** Unix epoch seconds this id was first seen, known or not. */
   firstSeenAt: number;
   /** Unix epoch seconds this id was last announced (an `'opened'`/`'escalated'` transition) --
@@ -42,6 +44,26 @@ export interface ComputeTransitionsResult {
   nextKnown: Map<string, KnownAlert>;
 }
 
+/** `Storage "<name>" on <node> is N% full` -- storage ids cannot contain a double quote. */
+const STORAGE_TITLE_RE = /^Storage "([^"]+)" on /;
+
+function storageNameFromTitle(title: string): string | undefined {
+  return STORAGE_TITLE_RE.exec(title)?.[1];
+}
+
+/** The storage a `kind: 'storage'` alert is about: its `storage` field, else (an alert from an
+ *  older producer) parsed from its title. `undefined` for any other kind. */
+export function alertStorageName(alert: Pick<Alert, 'kind' | 'storage' | 'title'>): string | undefined {
+  if (alert.kind !== 'storage') return undefined;
+  return alert.storage ?? storageNameFromTitle(alert.title);
+}
+
+/** Same for a remembered alert; entries persisted before T78 have no `storage` and fall back to the title. */
+export function knownStorageName(known: Pick<KnownAlert, 'kind' | 'storage' | 'title'>): string | undefined {
+  if (known.kind !== 'storage') return undefined;
+  return known.storage ?? storageNameFromTitle(known.title);
+}
+
 function knownFrom(alert: Alert, extra: Partial<KnownAlert> = {}): KnownAlert {
   return {
     severity: alert.severity,
@@ -50,6 +72,7 @@ function knownFrom(alert: Alert, extra: Partial<KnownAlert> = {}): KnownAlert {
     detail: alert.detail,
     node: alert.node,
     vmid: alert.vmid,
+    storage: alertStorageName(alert),
     firstSeenAt: extra.firstSeenAt ?? 0,
     notifiedAt: extra.notifiedAt,
   };

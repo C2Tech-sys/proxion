@@ -14,6 +14,7 @@ import {
   buildNotifyChannels,
   emailAddressField,
   effectiveNotifySettings,
+  excludedStoragesField,
   httpUrlField,
   isMuted,
   isoDateField,
@@ -54,6 +55,8 @@ export interface NotifySettingsView {
   /** Only present while the mute is still in the future. */
   muteUntil?: string;
   mutedKinds: Array<(typeof NOTIFY_KINDS)[number]>;
+  /** Storage names whose "N% full" alert is suppressed (T78); sorted. */
+  excludedStorages: string[];
   minSeverity: 'warning' | 'error';
   includeResolved: boolean;
   debounceMs: number;
@@ -127,6 +130,7 @@ export function maskNotifySettings(
     source: effective.source,
     enabled: effective.enabled,
     mutedKinds: NOTIFY_KINDS.filter((kind) => effective.mutedKinds.includes(kind)),
+    excludedStorages: [...effective.excludedStorages],
     minSeverity: effective.minSeverity,
     includeResolved: effective.includeResolved,
     debounceMs: effective.debounceMs,
@@ -168,6 +172,8 @@ const putBodySchema = z
     /** Omitted = leave the current snooze alone; `null` = clear it. */
     muteUntil: isoDateField.nullable().optional(),
     mutedKinds: z.array(z.enum(NOTIFY_KINDS)).max(NOTIFY_KINDS.length),
+    /** Omitted = leave the stored list alone (older clients never send it). */
+    excludedStorages: excludedStoragesField.optional(),
     minSeverity: z.enum(['warning', 'error']),
     includeResolved: z.boolean(),
     debounceMs: z.number().int().min(MIN_DEBOUNCE_MS).max(MAX_DEBOUNCE_MS),
@@ -240,6 +246,7 @@ function resolvePut(
     version: 1,
     enabled: body.enabled,
     mutedKinds: NOTIFY_KINDS.filter((kind) => body.mutedKinds.includes(kind)),
+    excludedStorages: body.excludedStorages ?? current.excludedStorages,
     minSeverity: body.minSeverity,
     includeResolved: body.includeResolved,
     debounceMs: body.debounceMs,

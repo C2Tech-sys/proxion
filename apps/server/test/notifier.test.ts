@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -592,6 +592,201 @@ describe('Notifier muting (T64)', () => {
     await notifier.flushForTest();
     await vi.advanceTimersByTimeAsync(BASE_OPTIONS.debounceMs * 2);
     expect(channel.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('Notifier excluded storages (T78)', () => {
+  let dataDir: string;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    dataDir = mkdtempSync(path.join(os.tmpdir(), 'proxion-notify-excluded-test-'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const cloud = alert({
+    id: 'storage/c2dc2/cloud-backup',
+    kind: 'storage',
+    severity: 'warning',
+    title: 'Storage "cloud-backup" on c2dc2 is 91% full',
+    node: 'c2dc2',
+    storage: 'cloud-backup',
+  });
+  const tank = alert({
+    id: 'storage/c2dc2/tank',
+    kind: 'storage',
+    severity: 'warning',
+    title: 'Storage "tank" on c2dc2 is 90% full',
+    node: 'c2dc2',
+    storage: 'tank',
+  });
+
+  async function create(extra: Partial<NotifierOptions> = {}) {
+    const channel = fakeChannel('webhook');
+    const notifier = await Notifier.create({
+      ...BASE_OPTIONS,
+      dataDir,
+      channels: [channel],
+      log: fakeLogger(),
+      ...extra,
+    });
+    return { channel, notifier };
+  }
+
+  /** First-run baseline with an empty snapshot, then clears the summary send. */
+  async function seeded(extra: Partial<NotifierOptions> = {}) {
+    const made = await create(extra);
+    made.notifier.onAlerts([]);
+    await made.notifier.flushForTest();
+    made.channel.send.mockClear();
+    return made;
+  }
+
+  async function deliver(notifier: Notifier, alerts: Alert[]) {
+    notifier.onAlerts(alerts);
+    await notifier.flushForTest();
+    await advanceAndFlush(notifier, BASE_OPTIONS.debounceMs);
+  }
+
+  const sentTitles = (channel: { send: ReturnType<typeof vi.fn> }): string[] =>
+    channel.send.mock.calls.flatMap((call) =>
+      (call[0] as NotifyMessage).events.map((event) => `${event.type}:${event.title}`),
+    );
+
+  it('an excluded storage over the threshold sends nothing; others still do', async () => {
+    const { channel, notifier } = await seeded({ excludedStorages: ['cloud-backup'] });
+    await deliver(notifier, [cloud]);
+    expect(channel.send).not.toHaveBeenCalled();
+
+    await deliver(notifier, [cloud, tank]);
+    expect(sentTitles(channel)).toEqual(['opened:Storage "tank" on c2dc2 is 90% full']);
+  });
+
+  it('the first-run summary leaves an excluded storage out', async () => {
+    const { channel, notifier } = await create({ excludedStorages: ['cloud-backup'] });
+    notifier.onAlerts([cloud, tank]);
+    await notifier.flushForTest();
+    expect(sentTitles(channel)).toEqual(['summary-item:Storage "tank" on c2dc2 is 90% full']);
+  });
+
+  it('a first-run summary holding only excluded storages says there is nothing to report', async () => {
+    const { channel, notifier } = await create({ excludedStorages: ['cloud-backup'] });
+    notifier.onAlerts([cloud]);
+    await notifier.flushForTest();
+    expect(channel.send).toHaveBeenCalledTimes(1);
+    expect((channel.send.mock.calls[0]![0] as NotifyMessage).events).toHaveLength(0);
+  });
+
+  it('excluding an already-alerting storage sends no resolved/cleared notice, whether the poller still reports it or not', async () => {
+    const before = await seeded();
+    await deliver(before.notifier, [cloud, tank]);
+    expect(sentTitles(before.channel)).toHaveLength(2); // both opened
+    await before.notifier.stop();
+
+    // Settings saved with the exclusion; the notifier is rebuilt over the same data dir.
+    const { channel, notifier } = await create({ excludedStorages: ['cloud-backup'] });
+    await deliver(notifier, [cloud, tank]); // the poller has not yet applied the list
+    await deliver(notifier, [tank]); // ... and now it has: the alert vanishes
+    expect(channel.send).not.toHaveBeenCalled();
+
+    // The tank alert is still tracked normally: when it clears, that IS announced.
+    await deliver(notifier, []);
+    expect(sentTitles(channel)).toEqual(['cleared:Storage "tank" on c2dc2 is 90% full']);
+  });
+
+  it('an excluded storage that vanishes before any snapshot arrives is still silent, and is forgotten on disk', async () => {
+    const before = await seeded();
+    await deliver(before.notifier, [cloud]);
+    await before.notifier.stop();
+
+    const { channel, notifier } = await create({ excludedStorages: ['cloud-backup'] });
+    await deliver(notifier, []);
+    expect(channel.send).not.toHaveBeenCalled();
+    const persisted = JSON.parse(readFileSync(path.join(dataDir, 'notify-state.json'), 'utf8')) as {
+      alerts: Record<string, unknown>;
+    };
+    expect(persisted.alerts).toEqual({});
+  });
+
+  it('removing the exclusion later announces a still-full storage as a fresh alert, once', async () => {
+    const first = await seeded();
+    await deliver(first.notifier, [cloud]);
+    await first.notifier.stop();
+
+    const excluded = await create({ excludedStorages: ['cloud-backup'] });
+    await deliver(excluded.notifier, [cloud]);
+    expect(excluded.channel.send).not.toHaveBeenCalled();
+    await excluded.notifier.stop();
+
+    const restored = await create({ excludedStorages: [] });
+    await deliver(restored.notifier, [cloud]);
+    expect(sentTitles(restored.channel)).toEqual(['opened:Storage "cloud-backup" on c2dc2 is 91% full']);
+
+    restored.channel.send.mockClear();
+    await deliver(restored.notifier, [cloud]);
+    expect(restored.channel.send).not.toHaveBeenCalled();
+  });
+
+  it('forgets state written by an older version (no storage field) by reading the name from the title', async () => {
+    writeFileSync(
+      path.join(dataDir, 'notify-state.json'),
+      JSON.stringify({
+        version: 1,
+        alerts: {
+          'storage/c2dc2/cloud-backup': {
+            severity: 'warning',
+            kind: 'storage',
+            title: 'Storage "cloud-backup" on c2dc2 is 85% full',
+            node: 'c2dc2',
+            firstSeenAt: 1,
+            notifiedAt: 1,
+          },
+          'task:keep': {
+            severity: 'error',
+            kind: 'task',
+            title: 'Storage "cloud-backup" on x',
+            firstSeenAt: 1,
+            notifiedAt: 1,
+          },
+        },
+      }),
+    );
+    const { channel, notifier } = await create({ excludedStorages: ['cloud-backup'] });
+    await deliver(notifier, []);
+    // Only the task alert (never a storage one, whatever its title says) is announced as cleared.
+    expect(sentTitles(channel)).toEqual(['cleared:Storage "cloud-backup" on x']);
+  });
+
+  it('matches by name only and exactly: other storages and other spellings still alert', async () => {
+    const { channel, notifier } = await seeded({ excludedStorages: ['cloud-backup'] });
+    const lookalikes = [
+      { ...cloud, id: 'storage/c2dc2/Cloud-Backup', storage: 'Cloud-Backup', title: 'Storage "Cloud-Backup" on c2dc2 is 91% full' },
+      { ...cloud, id: 'storage/c2dc2/cloud-backup-2', storage: 'cloud-backup-2', title: 'Storage "cloud-backup-2" on c2dc2 is 91% full' },
+    ];
+    await deliver(notifier, lookalikes);
+    expect(sentTitles(channel).sort()).toEqual([
+      'opened:Storage "Cloud-Backup" on c2dc2 is 91% full',
+      'opened:Storage "cloud-backup-2" on c2dc2 is 91% full',
+    ]);
+  });
+
+  it('the same storage name on two nodes is excluded on both', async () => {
+    const { channel, notifier } = await seeded({ excludedStorages: ['cloud-backup'] });
+    await deliver(notifier, [cloud, { ...cloud, id: 'storage/c2dc3/cloud-backup', node: 'c2dc3' }]);
+    expect(channel.send).not.toHaveBeenCalled();
+  });
+
+  it('does not touch backup or task alerts', async () => {
+    const { channel, notifier } = await seeded({ excludedStorages: ['cloud-backup'] });
+    await deliver(notifier, [
+      alert({ id: 'backup:1', kind: 'backup', severity: 'error', title: 'Backup of cloud-backup failed' }),
+      alert({ id: 'task:1', kind: 'task', severity: 'error', title: 'Storage "cloud-backup" on c2dc2 task failed' }),
+    ]);
+    expect(sentTitles(channel)).toHaveLength(2);
   });
 });
 

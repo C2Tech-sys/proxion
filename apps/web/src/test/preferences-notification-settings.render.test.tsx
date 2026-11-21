@@ -30,6 +30,7 @@ const mockMute = vi.fn();
 const mockGetStatus = vi.fn();
 const mockSendTest = vi.fn();
 const mockGetPrefs = vi.fn();
+const mockUseClusterResources = vi.fn();
 
 vi.mock('@/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client');
@@ -43,7 +44,11 @@ vi.mock('@/api/client', async () => {
 
 vi.mock('@/api/hooks', async () => {
   const actual = await vi.importActual<typeof import('@/api/hooks')>('@/api/hooks');
-  return { ...actual, useAuthMe: () => mockUseAuthMe() };
+  return {
+    ...actual,
+    useAuthMe: () => mockUseAuthMe(),
+    useClusterResources: () => mockUseClusterResources(),
+  };
 });
 
 vi.mock('@/api/rootPermissionHooks', () => ({ useRootPermissions: () => mockUseRootPermissions() }));
@@ -86,6 +91,7 @@ function view(overrides: Partial<NotifySettingsView> = {}): NotifySettingsView {
     source: 'env',
     enabled: true,
     mutedKinds: [],
+    excludedStorages: [],
     minSeverity: 'warning',
     includeResolved: true,
     debounceMs: 10_000,
@@ -129,6 +135,7 @@ beforeEach(() => {
   resetFixtureNotifySettings();
   mockUseAuthMe.mockReturnValue(SESSION_AUTH);
   mockUseRootPermissions.mockReturnValue(permissions({ 'Sys.Modify': true }));
+  mockUseClusterResources.mockReturnValue({ data: [] });
   mockGetStatus.mockResolvedValue({
     configured: { webhook: true, email: false },
     minSeverity: 'warning',
@@ -237,6 +244,7 @@ describe('Preferences: notification settings form', () => {
     expect(mockPutSettings.mock.calls[0]![0]).toStrictEqual({
       enabled: true,
       mutedKinds: ['backup'],
+      excludedStorages: [],
       minSeverity: 'warning',
       includeResolved: true,
       debounceMs: 10_000,
@@ -345,6 +353,142 @@ describe('Preferences: notification settings form', () => {
     expect(alert).toHaveTextContent('webhook.url: must be an absolute http(s) URL');
     expect(screen.getByLabelText('Address')).toHaveValue('nope');
     expect(save()).toBeEnabled();
+  });
+
+  describe('excluded storages (T78)', () => {
+    const CLUSTER = [
+      { type: 'storage', storage: 'zfs-data', node: 'pve2' },
+      { type: 'storage', storage: 'local', node: 'pve2' },
+      { type: 'qemu', vmid: 100, node: 'pve1' },
+      { type: 'storage', storage: 'local', node: 'pve1' },
+      { type: 'storage', storage: 'cloud-backup', node: 'pve1' },
+      { type: 'storage', storage: 'cloud-backup', node: 'pve2' },
+    ];
+
+    function listed(): string[] {
+      const list = screen.queryByRole('list', { name: 'Excluded storages' });
+      return list ? Array.from(list.querySelectorAll('li span')).map((el) => el.textContent ?? '') : [];
+    }
+
+    function optionNames(): string[] {
+      const select = screen.getByLabelText('Storage to exclude') as HTMLSelectElement;
+      return Array.from(select.options)
+        .map((option) => option.value)
+        .filter((value) => value !== '');
+    }
+
+    it('shows the saved names, sorted, and keeps one removable even when no such storage exists any more', async () => {
+      mockUseClusterResources.mockReturnValue({ data: CLUSTER });
+      await renderEditableForm(view({ excludedStorages: ['tank-old', 'cloud-backup'] }));
+
+      expect(listed()).toEqual(['cloud-backup', 'tank-old']);
+      expect(screen.getByRole('button', { name: 'Remove tank-old from the excluded storages' })).toBeEnabled();
+      // Already excluded: not offered again.
+      expect(optionNames()).toEqual(['local', 'zfs-data']);
+    });
+
+    it('says so when nothing is excluded', async () => {
+      await renderEditableForm();
+      expect(screen.getByText('No storages are excluded.')).toBeInTheDocument();
+      expect(screen.queryByRole('list', { name: 'Excluded storages' })).not.toBeInTheDocument();
+    });
+
+    it('offers the cluster storages deduplicated by name and sorted, whatever order they arrive in', async () => {
+      mockUseClusterResources.mockReturnValue({ data: [...CLUSTER].reverse() });
+      await renderEditableForm();
+      expect(optionNames()).toEqual(['cloud-backup', 'local', 'zfs-data']);
+    });
+
+    it('with no storages to offer, the picker is disabled', async () => {
+      await renderEditableForm();
+      expect(screen.getByLabelText('Storage to exclude')).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Exclude' })).toBeDisabled();
+    });
+
+    it('adds a chosen storage and saves the list in the PUT body (sorted, secrets as keep)', async () => {
+      mockUseClusterResources.mockReturnValue({ data: CLUSTER });
+      await renderEditableForm(view({ excludedStorages: ['local'] }));
+      mockPutSettings.mockResolvedValue(view({ source: 'file', excludedStorages: ['cloud-backup', 'local'] }));
+
+      expect(screen.getByRole('button', { name: 'Exclude' })).toBeDisabled(); // nothing chosen yet
+      fireEvent.change(screen.getByLabelText('Storage to exclude'), { target: { value: 'cloud-backup' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Exclude' }));
+
+      expect(listed()).toEqual(['cloud-backup', 'local']);
+      expect(optionNames()).toEqual(['zfs-data']);
+      expect((screen.getByLabelText('Storage to exclude') as HTMLSelectElement).value).toBe('');
+      fireEvent.click(save());
+
+      await waitFor(() => expect(mockPutSettings).toHaveBeenCalledTimes(1));
+      expect(mockPutSettings.mock.calls[0]![0]).toStrictEqual({
+        enabled: true,
+        mutedKinds: [],
+        excludedStorages: ['cloud-backup', 'local'],
+        minSeverity: 'warning',
+        includeResolved: true,
+        debounceMs: 10_000,
+        siteName: 'Proxion',
+        publicUrl: 'https://proxion.example.com',
+        webhook: { url: { keep: true }, format: 'ntfy', token: { keep: true } },
+      });
+    });
+
+    it('removes a name and saves the shorter list; the removed storage is offered again', async () => {
+      mockUseClusterResources.mockReturnValue({ data: CLUSTER });
+      await renderEditableForm(view({ excludedStorages: ['cloud-backup', 'tank-old'] }));
+      mockPutSettings.mockResolvedValue(view({ source: 'file', excludedStorages: ['tank-old'] }));
+      expect(save()).toBeDisabled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Remove cloud-backup from the excluded storages' }));
+      expect(listed()).toEqual(['tank-old']);
+      expect(optionNames()).toEqual(['cloud-backup', 'local', 'zfs-data']);
+      expect(save()).toBeEnabled();
+      fireEvent.click(save());
+
+      await waitFor(() => expect(mockPutSettings).toHaveBeenCalledTimes(1));
+      expect((mockPutSettings.mock.calls[0]![0] as NotifySettingsPutBody).excludedStorages).toEqual(['tank-old']);
+    });
+
+    it('removing the last name saves an empty list (not an omitted one)', async () => {
+      await renderEditableForm(view({ excludedStorages: ['tank-old'] }));
+      mockPutSettings.mockResolvedValue(view({ source: 'file' }));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Remove tank-old from the excluded storages' }));
+      expect(screen.getByText('No storages are excluded.')).toBeInTheDocument();
+      fireEvent.click(save());
+
+      await waitFor(() => expect(mockPutSettings).toHaveBeenCalledTimes(1));
+      expect((mockPutSettings.mock.calls[0]![0] as NotifySettingsPutBody).excludedStorages).toEqual([]);
+    });
+
+    it('is read-only without Sys.Modify and in token mode', async () => {
+      mockUseClusterResources.mockReturnValue({ data: CLUSTER });
+      mockUseAuthMe.mockReturnValue(TOKEN_AUTH);
+      await renderEditableForm(view({ excludedStorages: ['cloud-backup'] }));
+
+      expect(screen.getByLabelText('Storage to exclude')).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Exclude' })).toBeDisabled();
+      const remove = screen.getByRole('button', { name: 'Remove cloud-backup from the excluded storages' });
+      expect(remove).toBeDisabled();
+      expect(remove).toHaveAttribute('title', 'Read-only: signed in with a service token');
+    });
+
+    it('fixture round trip: exclude through the demo client, the re-read settings list it', async () => {
+      state.fixtures = true;
+      state.passthrough = true;
+      mockUseClusterResources.mockReturnValue({ data: CLUSTER });
+      renderForm();
+      await screen.findByTestId('notify-status-line', {}, { timeout: FIND_TIMEOUT_MS });
+
+      fireEvent.change(screen.getByLabelText('Storage to exclude'), { target: { value: 'zfs-data' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Exclude' }));
+      fireEvent.click(save());
+
+      await waitFor(() => expect(screen.getByTestId('notify-status-line')).toHaveTextContent('Source: file'));
+      expect(listed()).toEqual(['zfs-data']);
+      expect(getFixtureNotifySettings().excludedStorages).toEqual(['zfs-data']);
+      expect(save()).toBeDisabled();
+    });
   });
 
   it('the requests carry the documented bodies (PUT body as given, mute as { for })', async () => {
