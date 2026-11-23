@@ -9,23 +9,39 @@
 
 # Proxion
 
+**A modern, open-source web console for Proxmox VE.**
+
+Proxmox's built-in web UI can do everything, but it makes you click through
+a tree and a stack of tabs to answer the questions you ask all day: what is
+running, what failed overnight, what is on that VM's screen right now.
+Proxion runs alongside the stock UI and puts those answers first.
+
+- **Live dashboard** -- cluster totals, top CPU and memory consumers,
+  storage usage, and alerts for failed tasks, failed backups and storage
+  that is filling up.
+- **Console thumbnails** -- a live preview of every running guest's screen,
+  on the dashboard and on hover in the inventory tree.
+- **vSphere-style pages** for every VM, container, node and storage:
+  summary, resource graphs, hardware, snapshots, backups and firewall.
+- **Console and terminal in the browser** -- VNC console, container
+  terminal and node shell, each with a pop-out window.
+- **Find anything fast** -- a Cmd/Ctrl-K palette (name, VMID, IP, tag) and
+  one sortable guest list with bulk power actions.
+- **Day-to-day admin without leaving the page** -- create, clone, migrate,
+  back up and restore guests, edit hardware and firewall rules, manage
+  users, storage and pools.
+
+You sign in with your own Proxmox account. Proxion stores no passwords,
+every action is checked against your real PVE privileges, and nothing has
+to be installed on your Proxmox nodes.
+
 **Try it in your browser:** https://c2tech-sys.github.io/proxion/ (sample data, no install)
 
-Proxion is a modern, open-source web console for Proxmox VE that overlays
-the stock UI: daily-driver views for the things you look at all day,
-vSphere-style object pages for VMs/CTs/nodes, an embedded console and
-terminal, and deep links back to the stock UI for everything else.
-
-It's a pnpm monorepo: a Vite/React frontend, a Fastify API/proxy server,
-and a generated Proxmox VE API client. The read-only PVE proxy
-(`/api/pve/*`) is permanently write-blocked; the writes Proxion does
-perform -- guest power actions, rename/notes, snapshots, backup and
-restore, clone, convert to template, migrate, hardware edits, node reboot/shutdown, storage uploads and deletes,
-restore, clone, VM creation, migrate, hardware edits, node reboot/shutdown, storage uploads and deletes,
-console thumbnails and per-user preferences -- each go through their own
-allow-listed route,
-checked against your real PVE privileges -- see
-[Feature status](#feature-status) below.
+Under the hood it is a Vite/React frontend, a Fastify API server and a
+generated Proxmox VE API client. Reads go through a proxy that is
+permanently read-only; each write has its own allow-listed route. See
+[Feature status](#feature-status) for the full list and
+[Security model](#security-model) for the details.
 
 ## Screenshots
 
